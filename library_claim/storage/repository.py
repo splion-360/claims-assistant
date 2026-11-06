@@ -3,13 +3,14 @@ from pathlib import Path
 from typing import TypeVar
 
 from library_claim.domain.models import (
-    Book, BookObservation, Frame, ProcessingJob, Record, ReviewIssue, Sweep,
+    Book, BookObservation, Frame, FrameAssociation, ProcessingJob, Record, ReviewIssue, Sweep,
 )
 from .database import connect
 
 T = TypeVar('T', bound=Record)
 TABLES = {Sweep: 'sweeps', Frame: 'frames', Book: 'books',
-          BookObservation: 'observations', ReviewIssue: 'review_issues', ProcessingJob: 'jobs'}
+          BookObservation: 'observations', ReviewIssue: 'review_issues', ProcessingJob: 'jobs',
+          FrameAssociation: 'frame_associations'}
 
 
 class Repository:
@@ -60,7 +61,7 @@ class Repository:
         record = type(record).model_validate(record.model_dump())
         table = TABLES[type(record)]
         values = {'id': record.id}
-        for field in ('sweep_id', 'book_id', 'frame_id'):
+        for field in ('sweep_id', 'book_id', 'frame_id', 'reference_frame_id'):
             if hasattr(record, field):
                 values[field] = getattr(record, field)
         if isinstance(record, ProcessingJob):
@@ -109,11 +110,11 @@ class Repository:
             pydantic.ValidationError: Replacement fields violate the model contract.
         """
         record = type(record).model_validate(record.model_dump())
-        if isinstance(record, (BookObservation, Frame)):
+        if isinstance(record, (BookObservation, Frame, FrameAssociation)):
             raise ValueError('Evidence records are immutable; append a new observation')
         with self.connection:
             old = self.get(type(record), record.id)
-            for field in ('sweep_id', 'book_id', 'frame_id'):
+            for field in ('sweep_id', 'book_id', 'frame_id', 'reference_frame_id'):
                 if getattr(old, field, None) != getattr(record, field, None):
                     raise ValueError(f'{field} cannot be reassigned')
             if isinstance(record, ProcessingJob):

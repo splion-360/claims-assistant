@@ -33,4 +33,11 @@ test('denied camera does not announce camera on',async()=>{
  const e=env();e.run('navigator.mediaDevices={getUserMedia:async()=>{throw new Error("Permission denied")}}');
  await e.run('startCamera()');assert.equal(e.sockets[0].sent,undefined);assert.equal(e.run('cameraStream'),null);e.run('disconnectLive()');
 });
+test('tracking cadence is five fps and socket backpressure skips frames',async()=>{
+ const e=env();await e.run('connectLive()');
+ assert.equal(e.run('FRAME_INTERVAL_MS'),200);
+ e.run('cameraStream={};liveSocket.bufferedAmount=600000;cameraPreview.videoWidth=640;sendFrame()');
+ assert.equal(e.sockets[0].sent,undefined);
+ e.run('cameraStream=null;disconnectLive()');
+});
 (async()=>{for(const [name,fn]of tests){await fn();console.log('PASS '+name)}console.log(`${tests.length} client regression tests passed`)})().catch(e=>{console.error(e);process.exitCode=1});

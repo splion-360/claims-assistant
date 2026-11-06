@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+Finite = Annotated[float, Field(allow_inf_nan=False)]
 Score = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 Identifier = Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,128}$')]
 
@@ -101,6 +102,7 @@ class BookObservation(Record):
     book_id: Identifier
     frame_id: Identifier
     bbox: Box
+    polygon: Annotated[list[tuple[Score, Score]], Field(min_length=4, max_length=4)] | None = None
     association_confidence: Score | None = None
     quality: Quality = Field(default_factory=Quality)
     title: str | None = None
@@ -137,3 +139,33 @@ class ProcessingJob(Record):
     context_revision: Annotated[int, Field(ge=0)] = 0
     result: dict[str, Any] | None = None
     error: str | None = None
+
+
+class FrameAssociation(Record):
+    """Persist a verified normalized current-image to reference-image mapping."""
+
+    sweep_id: Identifier
+    frame_id: Identifier
+    reference_frame_id: Identifier
+    matrix: tuple[tuple[Finite, Finite, Finite], tuple[Finite, Finite, Finite], tuple[Finite, Finite, Finite]]
+    method: Literal['optical_flow', 'sift_ransac']
+    matched_points: Annotated[int, Field(ge=12)]
+    reprojection_error_px: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
+    @model_validator(mode='after')
+    def invertible(self):
+        """Require a nonsingular projective mapping.
+
+        Returns:
+            The validated association.
+
+        Raises:
+            ValueError: The matrix is singular.
+        """
+        a, b, c = self.matrix
+        determinant = (a[0] * (b[1] * c[2] - b[2] * c[1])
+                       - a[1] * (b[0] * c[2] - b[2] * c[0])
+                       + a[2] * (b[0] * c[1] - b[1] * c[0]))
+        if abs(determinant) < 1e-10:
+            raise ValueError('Mapping must be invertible')
+        return self

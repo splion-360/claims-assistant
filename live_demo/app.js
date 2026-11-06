@@ -23,7 +23,8 @@ const packetMarkdownEl = document.querySelector("#packetMarkdown");
 const DEFAULT_API_ORIGIN = "http://127.0.0.1:4177";
 const API_ORIGIN = window.location.protocol === "file:" ? DEFAULT_API_ORIGIN : window.location.origin;
 const WS_ORIGIN = API_ORIGIN.replace(/^http/, "ws");
-const FRAME_INTERVAL_MS = 1000;
+// Tracking receives intermediate views; quality and remote inference keep separate cadences.
+const FRAME_INTERVAL_MS = 200;
 const FRAME_WIDTH = 1024;
 
 if (window.location.protocol === "file:") {
@@ -548,7 +549,7 @@ function stopCamera() {
 
 function sendFrame() {
   if (!cameraStream || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
-  if (!cameraPreview.videoWidth) return;
+  if (!cameraPreview.videoWidth || liveSocket.bufferedAmount > 512000) return;
   const scale = FRAME_WIDTH / cameraPreview.videoWidth;
   frameCanvas.width = FRAME_WIDTH;
   frameCanvas.height = Math.round(cameraPreview.videoHeight * scale);

@@ -38,7 +38,7 @@ and never upscaling. Inputs and assessed regions need at least 32 pixels per edg
 Compare sharpness and BRISQUE only under consistent preprocessing and similar
 region content. Full-frame quality cannot establish whether a small spine is
 readable. Selecting the same coordinates in consecutive frames does not establish
-that the same object remains there; tracking is a separate increment.
+that the same object remains there; tracking is implemented in `tracking/` and keeps its own coordinate associations.
 
 Constant images make BRISQUE statistics degenerate, so their score is absent with
 an explicit reason. Model computation failures and nonfinite results likewise
@@ -82,3 +82,5 @@ BRISQUE, sharpness, dark/bright pixel percentages, frame change, and elapsed tim
 Full JSON with frame/session references is available with `--log-level debug`.
 Logs exclude images and credentials.
 The existing session setup still requires the configured Crusoe API key.
+
+Tracking now receives up to five camera frames per second; see [tracking](tracking/README.md) for its independent cadence and limitations.
