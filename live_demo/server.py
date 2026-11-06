@@ -69,6 +69,7 @@ if str(DEMO_DIR) not in sys.path:
     sys.path.insert(0, str(DEMO_DIR))
 
 from provider import MODEL, VISION_MODEL, complete, structured, has_api_key, InferenceError
+import speech
 from live_tools import SYSTEM_INSTRUCTION, TOOL_NAMES, tool_headline
 
 LIVE_MODEL_ID = MODEL
@@ -491,7 +492,7 @@ def health() -> dict[str, Any]:
         "has_api_key": _has_api_key(),
         "live_model": LIVE_MODEL_ID,
         "tools": TOOL_NAMES,
-        "voice_enabled": False,
+        "voice_enabled": speech.enabled(),
     }
 
 
@@ -697,12 +698,14 @@ async def live_voice(websocket: WebSocket) -> None:
     await websocket.accept()
     send_lock = asyncio.Lock()
     tasks = set()
-    text_task = camera_task = None
+    text_task = camera_task = speech_task = workflow_task = None
+    voice_on = False
+    audio_queue = asyncio.Queue(maxsize=25)
     text_epoch = 0
     busy = 0
     last_capture_at = 0.0
     last_capture_frame = None
-    windows = {"text": deque(), "video": deque(), "camera_state": deque()}
+    windows = {kind: deque() for kind in ("text", "video", "camera_state", "voice_state", "audio")}
 
     async def send(payload):
         if not session.deleted:
@@ -753,16 +756,17 @@ async def live_voice(websocket: WebSocket) -> None:
         return workflow
 
     async def report_error(exc):
-        message = str(exc) if isinstance(exc, InferenceError) else "Processing failed. Your conversation is retained; please retry."
+        message = str(exc) if isinstance(exc, (InferenceError, speech.SpeechError)) else "Processing failed. Your conversation is retained; please retry."
         await send({"type": "error", "message": message})
 
     async def respond(epoch):
         nonlocal busy
         busy += 1
         try:
-            workflow = await update()
-            messages = [{"role": "system", "content": SYSTEM_INSTRUCTION + "\nCurrent packet: " + json.dumps(workflow) + "\nCamera observations: " + json.dumps(session.camera_notes)}]
-            messages.extend({"role": "user" if t["speaker"] == "Claimant" else "assistant", "content": t["text"]}
+            await send({"type": "processing", "active": True})
+            workflow = session.last_workflow or build_initial_workflow_state()
+            messages = [{"role": "system", "content": SYSTEM_INSTRUCTION + "\nLatest background packet (may lag the current conversation): " + json.dumps(workflow) + "\nCamera observations: " + json.dumps(session.camera_notes)}]
+            messages.extend({"role": "user" if t["speaker"] == "Claimant" else "assistant", "content": t["text"] + (" [Spoken playback was interrupted.]" if t.get("interrupted") else "")}
                             for t in session.transcript if t["speaker"] in {"Claimant", "Agent"})
             reply = await complete(messages, max_tokens=512)
             if epoch != text_epoch or session.deleted:
@@ -770,6 +774,13 @@ async def live_voice(websocket: WebSocket) -> None:
             turn_id = uuid.uuid4().hex
             append_turn(session, "Agent", reply, turn_id)
             await send({"type": "transcript", "speaker": "Agent", "text": reply, "id": turn_id, "final": True})
+            if voice_on:
+                await send({"type": "audio_start", "epoch": epoch, "turn_id": turn_id})
+                async for chunk in speech.synthesize(reply):
+                    if epoch != text_epoch or not voice_on:
+                        return
+                    await send({"type": "audio", "epoch": epoch, "data": base64.b64encode(chunk).decode("ascii")})
+                await send({"type": "audio_end", "epoch": epoch})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -778,6 +789,90 @@ async def live_voice(websocket: WebSocket) -> None:
             busy -= 1
             with contextlib.suppress(Exception):
                 await send({"type": "processing", "active": busy > 0})
+
+    async def refresh():
+        try:
+            await update()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await report_error(exc)
+
+    async def interrupt():
+        nonlocal text_epoch
+        text_epoch += 1
+        if text_task and not text_task.done():
+            text_task.cancel()
+            await asyncio.gather(text_task, return_exceptions=True)
+        if session.transcript and session.transcript[-1]["speaker"] == "Agent":
+            session.transcript[-1]["interrupted"] = True
+        await send({"type": "interrupted", "epoch": text_epoch})
+
+    async def submit(text, turn_id):
+        nonlocal text_task, workflow_task
+        if any(t.get("id") == turn_id for t in session.transcript):
+            return
+        await interrupt()
+        append_turn(session, "Claimant", text, turn_id)
+        await send({"type": "transcript", "speaker": "Claimant", "text": text, "id": turn_id, "final": True})
+        if workflow_task is None or workflow_task.done():
+            workflow_task = track(refresh())
+        text_task = track(respond(text_epoch))
+
+    async def listen_voice():
+        nonlocal voice_on
+        connection_id = uuid.uuid4().hex
+        try:
+            async with speech.listen() as connection:
+                async def upload():
+                    while True:
+                        await connection.send(await audio_queue.get())
+                async def receive():
+                    async for raw_event in connection:
+                        event = json.loads(raw_event)
+                        if event.get("type") == "Connected":
+                            await send({"type": "voice_state", "enabled": True})
+                        elif event.get("type") == "Error":
+                            raise speech.SpeechError("Deepgram transcription failed. Stop and restart voice, or type instead.")
+                        elif event.get("type") == "TurnInfo":
+                            name, text = event.get("event"), event.get("transcript", "")
+                            turn_id = f"voice-{connection_id}-{event.get('turn_index', 0)}"
+                            if name == "StartOfTurn":
+                                await interrupt()
+                            if name in {"StartOfTurn", "Update"} and text:
+                                await send({"type": "transcript", "speaker": "Claimant", "text": text, "id": turn_id, "final": False})
+                            elif name == "EndOfTurn" and text.strip():
+                                await submit(text[:8000], turn_id)
+                pair = [asyncio.create_task(upload()), asyncio.create_task(receive())]
+                try:
+                    done, _ = await asyncio.wait(pair, return_when=asyncio.FIRST_COMPLETED)
+                    for task in done:
+                        task.result()
+                    raise speech.SpeechError("Transcription disconnected. Restart voice or type instead.")
+                finally:
+                    for task in pair:
+                        task.cancel()
+                    await asyncio.gather(*pair, return_exceptions=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await report_error(exc if isinstance(exc, speech.SpeechError) else speech.SpeechError("Could not connect to Deepgram. Check your key and credits; typing still works."))
+        finally:
+            voice_on = False
+            with contextlib.suppress(Exception):
+                await send({"type": "voice_state", "enabled": False})
+
+    async def stop_voice():
+        nonlocal voice_on, speech_task
+        voice_on = False
+        await interrupt()
+        if speech_task and not speech_task.done():
+            speech_task.cancel()
+            await asyncio.gather(speech_task, return_exceptions=True)
+        speech_task = None
+        while not audio_queue.empty():
+            audio_queue.get_nowait()
+        await send({"type": "voice_state", "enabled": False})
 
     async def capture():
         nonlocal last_capture_frame
@@ -796,7 +891,7 @@ async def live_voice(websocket: WebSocket) -> None:
         if not _has_api_key():
             await send({"type": "error", "message": "Set CRUSOE_API_KEY in .env and restart the server."})
             return
-        await send({"type": "session", "model": MODEL, "tools": TOOL_NAMES})
+        await send({"type": "session", "model": MODEL, "tools": TOOL_NAMES, "voice_enabled": speech.enabled()})
         await send({"type": "state", "state": _current_ui_state(session)})
         await send({"type": "ready"})
         while True:
@@ -811,10 +906,10 @@ async def live_voice(websocket: WebSocket) -> None:
                 if kind == "close":
                     break
                 if kind not in windows:
-                    raise ValueError("Use typed text and camera frames; voice is not enabled.")
+                    raise ValueError("Unknown input type")
                 now = time.monotonic()
                 window = windows[kind]
-                period, limit = (60, 20) if kind == "text" else (1, 5)
+                period, limit = (60, 20) if kind == "text" else (1, 30 if kind == "audio" else 5)
                 while window and now - window[0] >= period:
                     window.popleft()
                 if len(window) >= limit:
@@ -833,15 +928,33 @@ async def live_voice(websocket: WebSocket) -> None:
                     turn_id = message.get("id") or uuid.uuid4().hex
                     if not isinstance(turn_id, str) or len(turn_id) > 100:
                         raise ValueError("Invalid turn identifier")
-                    if any(t.get("id") == turn_id for t in session.transcript):
-                        continue
-                    text_epoch += 1
-                    if text_task and not text_task.done():
-                        text_task.cancel()
-                        await asyncio.gather(text_task, return_exceptions=True)
-                    append_turn(session, "Claimant", text, turn_id)
-                    await send({"type": "transcript", "speaker": "Claimant", "text": text, "id": turn_id, "final": True})
-                    text_task = track(respond(text_epoch))
+                    await submit(text, turn_id)
+                elif kind == "voice_state":
+                    if not isinstance(message.get("enabled"), bool):
+                        raise ValueError("Voice state must be true or false")
+                    if message["enabled"]:
+                        if not speech.enabled():
+                            await send({"type": "voice_state", "enabled": False})
+                            raise ValueError("Set DEEPGRAM_API_KEY in .env and restart to enable voice.")
+                        if speech_task is None or speech_task.done():
+                            voice_on = True
+                            speech_task = track(listen_voice())
+                    else:
+                        await stop_voice()
+                elif kind == "audio":
+                    if not voice_on:
+                        raise ValueError("Start voice before sending microphone audio.")
+                    encoded = message.get("data")
+                    if not isinstance(encoded, str):
+                        raise ValueError("Missing microphone audio")
+                    data = base64.b64decode(encoded, validate=True)
+                    if not data or len(data) > 32000 or len(data) % 2:
+                        raise ValueError("Microphone audio must be PCM16 at 16 kHz.")
+                    try:
+                        audio_queue.put_nowait(data)
+                    except asyncio.QueueFull:
+                        await stop_voice()
+                        raise ValueError("Speech connection is too slow. Restart voice or type instead.")
                 else:
                     encoded = message.get("data")
                     if not isinstance(encoded, str):
@@ -891,3 +1004,12 @@ def styles():
     return FileResponse(DEMO_DIR / "styles.css", media_type="text/css")
 
 
+
+@app.get("/voice.js")
+def voice_javascript():
+    return FileResponse(DEMO_DIR / "voice.js", media_type="text/javascript")
+
+
+@app.get("/audio-worklet.js")
+def audio_worklet():
+    return FileResponse(DEMO_DIR / "audio-worklet.js", media_type="text/javascript")

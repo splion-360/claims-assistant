@@ -9,6 +9,7 @@ const readinessEl = document.querySelector("#readiness");
 const callStatus = document.querySelector("#callStatus");
 const modelLabel = document.querySelector("#modelLabel");
 const pageDate = document.querySelector("#pageDate");
+const micButton = document.querySelector("#micButton");
 const cameraButton = document.querySelector("#cameraButton");
 const cameraStage = document.querySelector("#cameraStage");
 const cameraPreview = document.querySelector("#cameraPreview");
@@ -41,6 +42,16 @@ let sessionId = null;
 let state = null;
 let writing = false;
 const seenNotes = new Set();
+const voice = window.ClaimVoice ? new window.ClaimVoice({
+  send: message => {
+    if (liveSocket?.readyState === WebSocket.OPEN) liveSocket.send(JSON.stringify(message));
+  },
+  status: label => {
+    micButton.querySelector('.round-label').textContent = label === 'Voice off' ? 'Talk' : label;
+    micButton.classList.toggle('active', label !== 'Voice off');
+  },
+  error: message => appendSystem(message),
+}) : null;
 
 const routeLabels = {
   emergency_escalation: ["Escalate to human", "danger"],
@@ -204,7 +215,7 @@ function buildNotes() {
     }
   }
   if (!notes.length) {
-    notes.push({ key: "empty", cls: "aside", text: "Waiting for the claimant. Type below or show the camera. Voice is not enabled." });
+    notes.push({ key: "empty", cls: "aside", text: "Waiting for the claimant. Talk, type below, or show the camera." });
   }
   return notes;
 }
@@ -354,6 +365,7 @@ function clearBusy() {
 }
 
 function disconnectLive() {
+  voice?.stop(false);
   generation += 1;
   const socket = liveSocket;
   liveSocket = null;
@@ -389,6 +401,8 @@ async function createSession(resume = false) {
     setState(payload.state);
     const health = await api("/api/health");
     modelLabel.textContent = health.live_model;
+    micButton.disabled = !health.voice_enabled;
+    micButton.title = health.voice_enabled ? "Start or stop voice" : "Set DEEPGRAM_API_KEY and restart to enable voice";
     setStatus(payload.has_api_key ? "Ready" : "API key required", payload.has_api_key ? "" : "danger");
     textInput.focus();
   } catch (error) {
@@ -421,6 +435,18 @@ function connectLive() {
         resolve();
       } else if (message.type === "session") {
         modelLabel.textContent = message.model;
+      } else if (message.type === "voice_state") {
+        voice?.setReady(message.enabled);
+        if (!message.enabled) {
+          state.transcript = state.transcript.filter(t => !(t.speaker === 'Claimant' && t.streaming));
+          render();
+        }
+      } else if (message.type === "interrupted") {
+        voice?.interrupt();
+      } else if (message.type === "audio_start") {
+        voice?.begin(message.epoch);
+      } else if (message.type === "audio") {
+        voice?.play(message);
       } else if (message.type === "processing") {
         processing = message.active;
         render();
@@ -445,6 +471,7 @@ function connectLive() {
       liveSocket = null;
       connectionPromise = null;
       stopCamera();
+      voice?.stop(false);
       clearBusy();
       setStatus("Disconnected — reconnect to continue", "warning");
     };
@@ -454,6 +481,7 @@ function connectLive() {
 
 
 async function sendClaimantTurn(text) {
+  voice?.interrupt();
   const epoch = generation;
   try {
     await connectLive();
@@ -531,6 +559,14 @@ function sendFrame() {
 
 
 
+micButton.addEventListener("click", async () => {
+  if (voice?.enabled) { voice.stop(); return; }
+  const epoch = generation;
+  try {
+    await connectLive();
+    if (epoch === generation) await voice?.start();
+  } catch (error) { appendSystem(error.message); }
+});
 cameraButton.addEventListener("click", () => (cameraStream ? stopCamera() : startCamera()));
 newIntakeButton.addEventListener("click", () => createSession(false));
 window.addEventListener("pagehide", disconnectLive);
