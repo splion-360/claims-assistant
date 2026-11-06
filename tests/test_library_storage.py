@@ -1,4 +1,4 @@
-"""Persistence invariants independent of providers, browser, and model inference."""
+"""Verify capture persistence, association constraints, and evidence integrity."""
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
@@ -19,7 +19,9 @@ BOX = Box(x_min=.1, y_min=.2, x_max=.3, y_max=.9)
 
 
 class StorageTests(unittest.TestCase):
+    """Exercise persistence invariants with isolated temporary storage."""
     def setUp(self):
+        """Create an isolated database, evidence directory, and capture records."""
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / 'claims.sqlite3'
@@ -33,11 +35,20 @@ class StorageTests(unittest.TestCase):
                                         evidence_key=self.key, width_px=640, height_px=480))
 
     def observation(self, **changes):
+        """Build an observation with optional field overrides.
+
+        Args:
+            **changes: Fields that override the fixture association and box.
+
+        Returns:
+            A validated book observation.
+        """
         values = dict(sweep_id=self.sweep.id, book_id=self.book.id,
                       frame_id=self.frame.id, bbox=BOX)
         return BookObservation(**(values | changes))
 
     def test_multiple_observations_survive_restart_without_increasing_book_count(self):
+        """Verify that reopened storage retains two observations of one physical book."""
         first = self.repo.add(self.observation(unresolved_fields=['title']))
         frame2 = self.repo.add(Frame(sweep_id=self.sweep.id, captured_at=NOW,
                                     evidence_key=self.key, width_px=640, height_px=480))
@@ -53,6 +64,7 @@ class StorageTests(unittest.TestCase):
                              b'\xff\xd8\xfftest capture')
 
     def test_foreign_keys_prevent_missing_or_cross_sweep_associations(self):
+        """Verify invalid associations roll back without poisoning the connection."""
         other = self.repo.add(Sweep(captured_at=NOW))
         other_book = self.repo.add(Book(sweep_id=other.id))
         for changes in ({'book_id': 'missing'}, {'book_id': other_book.id},
@@ -63,6 +75,7 @@ class StorageTests(unittest.TestCase):
         self.repo.add(self.observation())  # A failed insert does not poison the connection.
 
     def test_duplicate_ids_and_evidence_updates_do_not_overwrite_history(self):
+        """Verify duplicate inserts and evidence updates preserve observation history."""
         observation = self.repo.add(self.observation())
         with self.assertRaises(sqlite3.IntegrityError):
             self.repo.add(observation)
@@ -71,6 +84,7 @@ class StorageTests(unittest.TestCase):
         self.assertIsNone(self.repo.get(BookObservation, observation.id).title)
 
     def test_book_exclusion_review_and_job_persist(self):
+        """Verify exclusions, review issues, and job status survive reopening."""
         self.repo.update(self.book.model_copy(update={'excluded': True}))
         issue = self.repo.add(ReviewIssue(sweep_id=self.sweep.id, book_id=self.book.id,
                                          field='title', reason='Unreadable spine'))
@@ -86,6 +100,7 @@ class StorageTests(unittest.TestCase):
             self.repo.update(job.model_copy(update={'frame_id': 'another'}))
 
     def test_migration_is_idempotent_and_rejects_newer_schema(self):
+        """Verify repeated migration preserves data and rejects unsupported versions."""
         migrate(self.repo.connection)
         self.assertEqual(self.repo.get(Book, self.book.id), self.book)
         self.repo.connection.execute('PRAGMA user_version = 999')
@@ -93,6 +108,7 @@ class StorageTests(unittest.TestCase):
             Repository(self.path)
 
     def test_contract_validation(self):
+        """Verify invalid geometry, confidence, and timestamps are rejected."""
         with self.assertRaises(ValidationError):
             Box(x_min=.7, y_min=0, x_max=.2, y_max=1)
         with self.assertRaises(ValidationError):
@@ -103,6 +119,7 @@ class StorageTests(unittest.TestCase):
             self.repo.update(self.book.model_copy(update={'id_confidence': float('nan')}))
 
     def test_evidence_deduplication_paths_and_integrity(self):
+        """Verify file deduplication, path validation, and corruption detection."""
         self.assertEqual(self.evidence.save(b'\xff\xd8\xfftest capture', 'image/jpeg'), self.key)
         self.assertEqual(len(list(self.evidence.root.iterdir())), 1)
         with self.assertRaises(ValueError):

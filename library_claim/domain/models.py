@@ -1,4 +1,4 @@
-"""Internal capture contracts; these are not the final claim-packet schema."""
+"""Define validated records for sweeps, books, observations, and processing jobs."""
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
@@ -9,15 +9,22 @@ Identifier = Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,128}$')]
 
 
 def new_id() -> str:
+    """Generate a unique record identifier.
+
+    Returns:
+        A UUID represented as a hexadecimal string.
+    """
     return uuid4().hex
 
 
 class Record(BaseModel):
+    """Define a frozen record with a stable identifier."""
     model_config = ConfigDict(extra='forbid', frozen=True)
     id: Identifier = Field(default_factory=new_id)
 
 
 class Sweep(Record):
+    """Record the capture session and its current sweep state."""
     captured_at: AwareDatetime
     device: str = ''
     country: str = ''
@@ -26,6 +33,7 @@ class Sweep(Record):
 
 
 class Frame(Record):
+    """Reference a saved image and its capture metadata."""
     sweep_id: Identifier
     captured_at: AwareDatetime
     evidence_key: Annotated[str, Field(pattern=r'^[a-f0-9]{64}\.(jpg|png)$')]
@@ -43,12 +51,21 @@ class Box(BaseModel):
 
     @model_validator(mode='after')
     def ordered(self):
+        """Validate that the box encloses a positive image area.
+
+        Returns:
+            The validated box.
+
+        Raises:
+            ValueError: The coordinate bounds have zero or negative extent.
+        """
         if self.x_min >= self.x_max or self.y_min >= self.y_max:
             raise ValueError('Box must have positive width and height')
         return self
 
 
 class Book(Record):
+    """Store the accepted identity of a physical book copy."""
     sweep_id: Identifier
     shelf_id: Identifier | None = None
     position: Annotated[int, Field(ge=0)] | None = None
@@ -74,6 +91,7 @@ class Quality(BaseModel):
 
 
 class BookObservation(Record):
+    """Associate frame evidence and extracted facts with a physical book."""
     sweep_id: Identifier
     book_id: Identifier
     frame_id: Identifier
@@ -91,6 +109,7 @@ class BookObservation(Record):
 
 
 class ReviewIssue(Record):
+    """Track an unresolved field requiring review."""
     sweep_id: Identifier
     book_id: Identifier
     field: str
@@ -99,6 +118,7 @@ class ReviewIssue(Record):
 
 
 class ProcessingJob(Record):
+    """Persist a processing request and its execution status."""
     sweep_id: Identifier
     frame_id: Identifier
     book_id: Identifier | None = None
