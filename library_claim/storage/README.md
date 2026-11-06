@@ -1,7 +1,8 @@
 # Capture persistence
 
 This is an internal storage contract, not `claim_packet.json`. No database or
-provider is started at import, and the existing application is not wired to it yet.
+provider is started at import. The live camera uses `LiveCaptureStore` to persist
+selected reference and evidence frames.
 
 Use `Repository(path)` as a context manager. Create the parent directory first;
 `.claim-data/` is the suggested ignored runtime location. SQLite migrations run
@@ -32,6 +33,8 @@ cleanup and backup tooling are deferred. Repository.add(Frame) is a low-level
 operation and does not itself check that the evidence file exists; the caller
 must save evidence first. Back up the database and evidence directory together.
 
+Frame payloads also retain selection reasons, optional measured quality, and
+quality-method metadata. These optional fields keep older payloads readable.
 Only IDs, foreign keys and job status are relational columns initially. Validated
 Pydantic payloads retain evolving fields as JSON. Foreign-key columns cannot be
 reassigned through update(). There is no automatic merge or cascade deletion.
@@ -47,3 +50,34 @@ Validation:
 ```sh
 .venv/bin/python -m unittest discover -s tests -p 'test_library_storage.py'
 ```
+
+## Live capture files
+
+The default location is `.claim-data/` at the project root:
+
+```text
+.claim-data/
+├── claims.sqlite3          # sweeps, frames, associations and other domain records
+└── frames/
+    └── <sha256>.jpg        # original browser JPEG bytes
+```
+
+The live sweep ID is the browser session ID. Each retained frame logs its absolute
+file path, frame ID, and selection reason. Frame and association records commit in
+one transaction. Referenced keyframes must already exist in the same sweep.
+Repeated JPEG bytes share a file even if distinct captures have different IDs.
+The directory is ignored by Git and is not exposed as a public static route.
+
+New tracking reference views are retained. At the existing one-second quality
+cadence, associated views can be retained for additional coverage, closer detail,
+or measured quality improvements. If a reference was captured between quality
+samples, a later scored view can establish its quality baseline. Intermediate,
+unchanged and unverified views are not saved by this selector. References can
+contain non-book objects until the relevance classifier is integrated.
+
+Camera toggles and backend restarts do not delete saved evidence. Tracking still
+reacquires its in-memory context; this does not restore the browser's session or
+reload old descriptors. The stored frames remain inspectable through the
+repository or a SQLite viewer. Automatic retention cleanup is not implemented.
+Captured frames selected by a worker already in progress may finish saving after
+camera shutdown; they remain historical evidence, not current guidance.

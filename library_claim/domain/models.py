@@ -35,15 +35,6 @@ class Sweep(Record):
     context_revision: Annotated[int, Field(ge=0)] = 0
 
 
-class Frame(Record):
-    """Reference a saved image and its capture metadata."""
-    sweep_id: Identifier
-    captured_at: AwareDatetime
-    evidence_key: Annotated[str, Field(pattern=r'^[a-f0-9]{64}\.(jpg|png)$')]
-    width_px: Annotated[int, Field(gt=0)]
-    height_px: Annotated[int, Field(gt=0)]
-
-
 class Box(BaseModel):
     """Normalized image coordinates; independent of image resolution."""
     model_config = ConfigDict(extra='forbid', frozen=True)
@@ -94,6 +85,19 @@ class Quality(BaseModel):
     temporal_change: Score | None = None
     glare_fraction: Score | None = None
     dark_fraction: Score | None = None
+
+
+class Frame(Record):
+    """Reference a saved image and its capture metadata."""
+    sweep_id: Identifier
+    captured_at: AwareDatetime
+    evidence_key: Annotated[str, Field(pattern=r'^[a-f0-9]{64}\.(jpg|png)$')]
+    width_px: Annotated[int, Field(gt=0)]
+    height_px: Annotated[int, Field(gt=0)]
+    selection_reason: str | None = None
+    quality: Quality | None = None
+    quality_metadata: dict[str, Any] | None = None
+
 
 
 class BookObservation(Record):

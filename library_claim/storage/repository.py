@@ -58,21 +58,36 @@ class Repository:
             KeyError: The record type has no registered table.
             sqlite3.IntegrityError: An ID is duplicated or an association is invalid.
         """
-        record = type(record).model_validate(record.model_dump())
-        table = TABLES[type(record)]
-        values = {'id': record.id}
-        for field in ('sweep_id', 'book_id', 'frame_id', 'reference_frame_id'):
-            if hasattr(record, field):
-                values[field] = getattr(record, field)
-        if isinstance(record, ProcessingJob):
-            values['status'] = record.status
-        values['data'] = record.model_dump_json()
+        self.add_many([record])
+        return self.get(type(record), record.id)
+
+    def add_many(self, records: list[Record]) -> None:
+        """Insert related records in one transaction.
+
+        Args:
+            records: Domain records ordered with referenced parents first.
+
+        Raises:
+            pydantic.ValidationError: A record violates its domain contract.
+            KeyError: A record type has no registered table.
+            sqlite3.IntegrityError: A duplicate or invalid association is found.
+        """
+        validated = [type(record).model_validate(record.model_dump()) for record in records]
+        # A failed association must not leave a partially inserted evidence record.
         with self.connection:
-            self.connection.execute(
-                f"INSERT INTO {table} ({','.join(values)}) VALUES ({','.join('?' for _ in values)})",
-                tuple(values.values()),
-            )
-        return record
+            for record in validated:
+                table = TABLES[type(record)]
+                values = {'id': record.id}
+                for field in ('sweep_id', 'book_id', 'frame_id', 'reference_frame_id'):
+                    if hasattr(record, field):
+                        values[field] = getattr(record, field)
+                if isinstance(record, ProcessingJob):
+                    values['status'] = record.status
+                values['data'] = record.model_dump_json()
+                self.connection.execute(
+                    f"INSERT INTO {table} ({','.join(values)}) VALUES ({','.join('?' for _ in values)})",
+                    tuple(values.values()),
+                )
 
     def get(self, kind: type[T], identifier: str) -> T:
         """Retrieve a typed record by its identifier.

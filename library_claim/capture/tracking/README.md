@@ -45,8 +45,8 @@ work; the live tracker currently assesses the complete frame.
 `BookObservation.polygon` can preserve four normalized image corners alongside
 its enclosing box. `FrameAssociation` stores a verified normalized mapping between
 two saved Frame records. Migration 002 enforces that both frames belong to the
-same sweep. Association records are immutable. Only persist a mapping after both
-supporting images have been saved; temporary live frame IDs are not saved evidence.
+same sweep. Association records are immutable. The live selector persists a mapping after both
+supporting images have been saved; only selected live frame IDs receive persistent records.
 
 ## Memory and runtime
 
@@ -79,3 +79,16 @@ The initial novelty and quality deltas are heuristic. A candidate does not prove
 new readable information. Relevance classification and calibrated quality gating
 remain separate. Region-specific quality comparison deliberately requires target
 mapping rather than assuming the same crop coordinates depict the same book.
+
+## Live persistence integration
+
+`CameraTracking` now runs tracking, sampled quality assessment, and selective
+persistence sequentially in one background worker. This pairs quality measurements
+with the exact tracked frame and avoids duplicate BRISQUE computation. Quality
+remains capped at once per second; tracking drops incoming frames while busy.
+New references save their original JPEG immediately. Later scored frames use
+`compare_evidence()` against the last retained view for that reference.
+
+See [storage](../../storage/README.md) for file locations, transactional association
+writes, retention, and restart behavior. Persisted frames are candidate evidence;
+book relevance, identity resolution, and final packet assembly remain later steps.

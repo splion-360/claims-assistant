@@ -65,7 +65,7 @@ These verify implementation behavior, not book-readability accuracy.
 ## Live camera logging
 
 The browser's existing camera frames are scored locally at most once per second,
-with one quality job in flight per WebSocket and no scoring queue. CPU work runs
+inside the single local tracking worker per WebSocket, with no frame backlog. CPU work runs
 in a background thread. The previous scored frame supplies temporal change;
 a camera mode change resets that history. This diagnostic path is independent of
 remote vision requests and does not gate them yet.

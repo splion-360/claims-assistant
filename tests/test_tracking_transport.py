@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 import cv2
 
+from library_claim.domain.models import Frame
+from library_claim.storage.repository import Repository
 from live_demo import server
 import test_live_turns
 from test_tracking import textured_view
@@ -56,6 +58,10 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
                 return {'type': 'video', 'data': base64.b64encode(encoded).decode()}
             await asyncio.wait_for(ready.wait(), 2)
             self.assertEqual(records[0].frame_id, session.last_frame_id)
+            with Repository(server.CAPTURE_DATA_DIR / 'claims.sqlite3') as repository:
+                saved = repository.get(Frame, session.last_frame_id)
+                self.assertEqual(saved.sweep_id, session.session_id)
+                self.assertTrue((server.CAPTURE_DATA_DIR / 'frames' / saved.evidence_key).exists())
             return {'type': 'close'}
 
         with patch.object(server.CameraTracking, 'log', side_effect=log), \

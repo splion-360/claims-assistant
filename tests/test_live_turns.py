@@ -2,6 +2,8 @@
 import asyncio
 import base64
 import json
+import tempfile
+from pathlib import Path
 import unittest
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, patch
@@ -10,6 +12,18 @@ from live_demo import server as s
 
 class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
     async def drive(self, receive, *, workflow=None, reply=None):
+        """Exercise live transport with isolated evidence storage.
+
+        Args:
+            receive: Async function supplying simulated browser messages.
+            workflow: Optional background workflow implementation.
+            reply: Optional conversation implementation.
+
+        Returns:
+            The session and emitted transport messages.
+        """
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
         session = s.IntakeSession('transport', owner='owner')
         s.sessions[session.session_id] = session
         self.addCleanup(s.sessions.pop, session.session_id, None)
@@ -24,7 +38,8 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             async def close(self, **kwargs): pass
             async def send_json(self, payload): sent.append(payload)
             async def receive_text(self): return json.dumps(await receive(session, sent))
-        with patch.object(s, '_has_api_key', return_value=True), \
+        with patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name)), \
+             patch.object(s, '_has_api_key', return_value=True), \
              patch.object(s, 'run_claim_workflow', side_effect=workflow or AsyncMock(return_value=s.build_initial_workflow_state())), \
              patch.object(s, 'complete', side_effect=reply or AsyncMock(return_value='What happened?')):
             await asyncio.wait_for(s.live_voice(WS()), 3)
