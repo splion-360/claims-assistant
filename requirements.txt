@@ -4,3 +4,5 @@ pydantic>=2.7
 httpx>=0.28
 python-dotenv>=1.0
 websockets>=15,<16
+numpy>=1.26,<3
+opencv-contrib-python-headless==4.10.0.84

@@ -88,6 +88,9 @@ class Quality(BaseModel):
     model_config = ConfigDict(extra='forbid', frozen=True)
     sharpness: Annotated[float, Field(ge=0, allow_inf_nan=False)] | None = None
     brisque: Annotated[float, Field(allow_inf_nan=False)] | None = None
+    # Bright pixels are measurable; glare requires contextual interpretation.
+    bright_fraction: Score | None = None
+    temporal_change: Score | None = None
     glare_fraction: Score | None = None
     dark_fraction: Score | None = None
 
