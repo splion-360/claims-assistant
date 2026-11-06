@@ -1,4 +1,4 @@
-"""Demo prompts for ADK Web."""
+"""Example typed claim narratives."""
 
 BASEMENT_FLOOD_WITH_PHOTOS = """
 I need to start a homeowners claim. Policyholder is Maya Singh, policy H0-44721.

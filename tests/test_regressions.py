@@ -145,11 +145,11 @@ class DomainTests(unittest.TestCase):
 class AsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_frozen_frame_reverified_despite_new_arrival(self):
         session=s.IntakeSession('frame',last_frame=b'FRAME_A',last_frame_id='a',last_frame_at=time.monotonic())
-        async def model(**kwargs):
-            self.assertEqual(kwargs['contents'][0].inline_data.data,b'FRAME_A')
+        async def model(instruction, content, schema, **kwargs):
+            self.assertEqual(base64.b64decode(content[1]['image_url']['url'].split(',')[1]),b'FRAME_A')
             session.last_frame=b'FRAME_B'
-            return NS(text=json.dumps(dict(observation='Blank wall',supports_claimant_description=False,document_types=[])))
-        with patch.object(s,'_client',return_value=NS(aio=NS(models=NS(generate_content=model)))):
+            return s.FrameObservation(observation='Blank wall',supports_claimant_description=False,document_types=[])
+        with patch.object(s,'structured',side_effect=model):
             result=await s._pin_evidence_photo(session,dict(observation='Huge crack',confirmed=True,claimant_description='A crack'))
         photo=session.evidence_photos[0]
         self.assertEqual(base64.b64decode(photo['data_url'].split(',')[1]),b'FRAME_A')
@@ -158,8 +158,8 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_without_claimant_description_capture_is_unconfirmed(self):
         session=s.IntakeSession('frame',last_frame=b'FRAME',last_frame_at=time.monotonic())
-        async def model(**kwargs): return NS(text=json.dumps(dict(observation='Wall',supports_claimant_description=True,document_types=[])))
-        with patch.object(s,'_client',return_value=NS(aio=NS(models=NS(generate_content=model)))):
+        async def model(*args, **kwargs): return s.FrameObservation(observation='Wall',supports_claimant_description=True,document_types=[])
+        with patch.object(s,'structured',side_effect=model):
             self.assertFalse((await s._pin_evidence_photo(session,{}))['confirmed'])
         self.assertIn('unconfirmed',session.camera_notes[0])
 
@@ -179,33 +179,6 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((await s._pin_evidence_photo(session,{}))['pinned'])
 
 
-    async def test_camera_state_turns_inform_model_without_claimant_facts(self):
-        session=s.IntakeSession('camera-wire',owner='owner');s.sessions[session.session_id]=session
-        messages=[dict(type='camera_state',enabled=True),dict(type='camera_state',enabled=False),dict(type='close')]
-        delivered=[]
-        class WS:
-            headers={'host':'127.0.0.1:4188','origin':'http://127.0.0.1:4188'}
-            client=NS(host='127.0.0.1');url=NS(scheme='ws');cookies={'intake_owner':'owner'};query_params={'session_id':'camera-wire'}
-            async def accept(self):pass
-            async def close(self,**kw):pass
-            async def send_json(self,payload):pass
-            async def receive_text(self):return json.dumps(messages.pop(0))
-        class Live:
-            async def send_client_content(self,**kw):delivered.append(kw)
-            async def receive(self):
-                await asyncio.Event().wait()
-                yield None
-        class CM:
-            async def __aenter__(self):return Live()
-            async def __aexit__(self,*args):pass
-        fake=NS(aio=NS(live=NS(connect=lambda **kw:CM())))
-        with patch.object(s,'_has_api_key',return_value=True),patch.object(s,'_client',return_value=fake):
-            await asyncio.wait_for(s.live_voice(WS()),1)
-        self.assertEqual([x['turn_complete'] for x in delivered],[False,False])
-        self.assertIn('STATE: ON',delivered[0]['turns'].parts[0].text)
-        self.assertIn('STATE: OFF',delivered[1]['turns'].parts[0].text)
-        self.assertEqual(session.transcript,[])
-        s.sessions.pop(session.session_id)
 
     async def test_workflow_reruns_if_facts_change_in_flight(self):
         session=s.IntakeSession('race');s.append_turn(session,'Claimant','Original','one')
@@ -223,35 +196,6 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
         await s.cleanup_sessions()
         self.assertNotIn('expired',s.sessions);self.assertTrue(job.cancelled());self.assertIsNone(session.last_frame);self.assertEqual(session.evidence_photos,[])
 
-    async def test_slow_workflow_does_not_block_video_audio_or_close(self):
-        session=s.IntakeSession('transport',owner='owner');s.sessions[session.session_id]=session
-        started=asyncio.Event();media=[]
-        class WS:
-            headers={'host':'127.0.0.1:4188','origin':'http://127.0.0.1:4188'}
-            client=NS(host='127.0.0.1');url=NS(scheme='ws');cookies={'intake_owner':'owner'};query_params={'session_id':'transport'}
-            def __init__(self):self.i=0;self.sent=[]
-            async def accept(self):pass
-            async def close(self,**kw):pass
-            async def send_json(self,payload):self.sent.append(payload)
-            async def receive_text(self):
-                messages=[dict(type='text',text='Test claim',id='1'),dict(type='video',data=base64.b64encode(b'\xff\xd8\xffTEST').decode()),dict(type='audio',data='AAA='),dict(type='close')]
-                if self.i==1:await started.wait()
-                value=messages[self.i];self.i+=1;return json.dumps(value)
-        class Live:
-            async def send_client_content(self,**kw):pass
-            async def send_realtime_input(self,**kw):media.extend(kw)
-            async def receive(self):
-                await asyncio.Event().wait()
-                yield None
-        class CM:
-            async def __aenter__(self):return Live()
-            async def __aexit__(self,*args):pass
-        async def run(*args,**kw):started.set();await asyncio.Event().wait()
-        fake=NS(aio=NS(live=NS(connect=lambda **kw:CM())))
-        with patch.object(s,'_has_api_key',return_value=True),patch.object(s,'_client',return_value=fake),patch.object(s,'run_claim_workflow',side_effect=run):
-            ws=WS();await asyncio.wait_for(s.live_voice(ws),1)
-        self.assertEqual(media,['video','audio']);self.assertFalse(session.camera_enabled);self.assertIsNone(session.live_socket);self.assertEqual(session.transcript[0]['id'],'1')
-        s.sessions.pop('transport')
 
 
 class AccessTests(unittest.TestCase):

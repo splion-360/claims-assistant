@@ -637,7 +637,7 @@ def build_claim_intake_packet(
     checklist_value: Any,
     fraud_gate_value: Any,
 ) -> dict[str, Any]:
-    """Build the final Markdown claim intake packet for ADK Web."""
+    """Build the final Markdown claim intake packet for download."""
 
     claim = _as_model(ClaimNarrative, claim_value)
     validation = _as_model(FieldValidation, validation_value)

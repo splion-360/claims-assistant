@@ -155,7 +155,7 @@ class FraudSafetyGate(BaseModel):
 
 
 class ClaimIntakePacket(BaseModel):
-    """Final polished packet returned to ADK Web."""
+    """Final polished packet included in the download."""
 
     claim_type: ClaimType
     intake_status: IntakeStatus

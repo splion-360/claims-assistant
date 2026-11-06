@@ -9,7 +9,6 @@ const readinessEl = document.querySelector("#readiness");
 const callStatus = document.querySelector("#callStatus");
 const modelLabel = document.querySelector("#modelLabel");
 const pageDate = document.querySelector("#pageDate");
-const micButton = document.querySelector("#micButton");
 const cameraButton = document.querySelector("#cameraButton");
 const cameraStage = document.querySelector("#cameraStage");
 const cameraPreview = document.querySelector("#cameraPreview");
@@ -24,7 +23,7 @@ const DEFAULT_API_ORIGIN = "http://127.0.0.1:4177";
 const API_ORIGIN = window.location.protocol === "file:" ? DEFAULT_API_ORIGIN : window.location.origin;
 const WS_ORIGIN = API_ORIGIN.replace(/^http/, "ws");
 const FRAME_INTERVAL_MS = 1000;
-const FRAME_WIDTH = 512;
+const FRAME_WIDTH = 1024;
 
 if (window.location.protocol === "file:") {
   window.location.replace(`${API_ORIGIN}/index.html`);
@@ -34,18 +33,10 @@ let liveSocket = null;
 let connectionPromise = null;
 let generation = 0;
 let processing = false;
-let micPending = false;
 let cameraPending = false;
 let resetting = false;
-const playbackSources = new Set();
-let audioContext = null;
-let inputProcessor = null;
-let inputSource = null;
-let audioStream = null;
 let cameraStream = null;
 let frameTimer = null;
-let isRecording = false;
-let nextPlaybackTime = 0;
 let sessionId = null;
 let state = null;
 let writing = false;
@@ -213,7 +204,7 @@ function buildNotes() {
     }
   }
   if (!notes.length) {
-    notes.push({ key: "empty", cls: "aside", text: "Waiting for the claimant. Tap Talk, show the camera, or type below." });
+    notes.push({ key: "empty", cls: "aside", text: "Waiting for the claimant. Type below or show the camera. Voice is not enabled." });
   }
   return notes;
 }
@@ -274,7 +265,7 @@ function renderNeeded() {
   }
   neededListEl.innerHTML = items.length
     ? items.map((item) => `<li class="${item.cls}"><span class="tick-box"></span><span>${escapeHtml(item.text)}</span></li>`).join("")
-    : `<li class="empty">Nothing yet. The list fills in as the claim team reads the call.</li>`;
+    : `<li class="empty">Nothing yet. The list fills in as the claim team reads the conversation.</li>`;
   const progress = Number(state.progress || 0);
   readinessEl.textContent = `${progress}% collected`;
   readinessEl.className = `pill ${progress >= 80 ? "" : progress >= 40 ? "warning" : "neutral"}`;
@@ -355,11 +346,6 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function stopPlayback() {
-  for (const source of playbackSources) { try { source.stop(); } catch (_) {} }
-  playbackSources.clear();
-  nextPlaybackTime = audioContext?.currentTime || 0;
-}
 
 function clearBusy() {
   processing = false;
@@ -372,9 +358,7 @@ function disconnectLive() {
   const socket = liveSocket;
   liveSocket = null;
   connectionPromise = null;
-  stopLiveVoice(false);
   stopCamera();
-  stopPlayback();
   if (socket) socket.close();
   if (state) clearBusy();
 }
@@ -444,12 +428,9 @@ function connectLive() {
         upsertStreamingTurn(message.speaker, message.text, message.final, message.id);
       } else if (message.type === "tool") {
         applyToolEvent(message);
-      } else if (message.type === "audio") {
-        playPcm24(message.data);
+
       } else if (message.type === "state") {
         applyServerState(message.state);
-      } else if (message.type === "interrupted") {
-        stopPlayback();
       } else if (message.type === "error") {
         processing = false;
         appendSystem(message.message);
@@ -463,9 +444,7 @@ function connectLive() {
       if (!current()) return;
       liveSocket = null;
       connectionPromise = null;
-      stopLiveVoice(false);
       stopCamera();
-      stopPlayback();
       clearBusy();
       setStatus("Disconnected — reconnect to continue", "warning");
     };
@@ -473,18 +452,10 @@ function connectLive() {
   return connectionPromise;
 }
 
-async function unlockAudio() {
-  if (window.AudioContext) {
-    audioContext = audioContext || new AudioContext();
-    await audioContext.resume();
-  }
-}
 
 async function sendClaimantTurn(text) {
   const epoch = generation;
   try {
-    stopPlayback();
-    await unlockAudio();
     await connectLive();
     if (epoch !== generation) return;
     const id = crypto.randomUUID();
@@ -499,60 +470,7 @@ async function sendClaimantTurn(text) {
   }
 }
 
-async function startLiveVoice() {
-  if (micPending || isRecording) return;
-  const epoch = generation;
-  if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) {
-    appendSystem("This browser cannot capture microphone audio. Type instead.");
-    return;
-  }
-  try {
-    micPending = true;
-    await unlockAudio();
-    await connectLive();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-    if (epoch !== generation || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) { stream.getTracks().forEach(track => track.stop()); return; }
-    audioStream = stream;
-    audioContext = audioContext || new AudioContext();
-    await audioContext.resume();
-    inputSource = audioContext.createMediaStreamSource(audioStream);
-    inputProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-    inputProcessor.onaudioprocess = (event) => {
-      event.outputBuffer.getChannelData(0).fill(0);
-      if (!liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
-      const pcm16 = resampleToPcm16(event.inputBuffer.getChannelData(0), audioContext.sampleRate, 16000);
-      liveSocket.send(JSON.stringify({ type: "audio", data: arrayBufferToBase64(pcm16.buffer) }));
-    };
-    inputSource.connect(inputProcessor);
-    inputProcessor.connect(audioContext.destination);
-    isRecording = true;
-    micButton.classList.add("active");
-    micButton.querySelector(".round-label").textContent = "Listening";
-    setStatus("Live, listening", "");
-  } catch (error) {
-    const denied = error.name === "NotAllowedError" || /denied|permission/i.test(error.message);
-    appendSystem(denied ? "Microphone access was denied. Allow it for this site or type instead." : `Voice failed: ${error.message}`);
-    stopLiveVoice(false);
-  } finally { micPending = false; }
-}
 
-function stopLiveVoice(closeSocket = true) {
-  isRecording = false;
-  micButton.classList.remove("active");
-  micButton.querySelector(".round-label").textContent = "Talk";
-  inputProcessor?.disconnect();
-  inputSource?.disconnect();
-  audioStream?.getTracks().forEach((track) => track.stop());
-  inputProcessor = null;
-  inputSource = null;
-  audioStream = null;
-  if (closeSocket) {
-    disconnectLive();
-    setStatus("Call ended — intake saved for reconnect", "neutral");
-  }
-}
 
 async function startCamera() {
   if (cameraPending || cameraStream) return;
@@ -563,9 +481,8 @@ async function startCamera() {
   }
   try {
     cameraPending = true;
-    await unlockAudio();
     await connectLive();
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "environment" } });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" } });
     if (epoch !== generation || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) { stream.getTracks().forEach(track => track.stop()); return; }
     cameraStream = stream;
     stream.getVideoTracks().forEach(track => track.addEventListener("ended", stopCamera, { once: true }));
@@ -575,7 +492,7 @@ async function startCamera() {
     cameraButton.classList.add("active");
     cameraButton.querySelector(".round-label").textContent = "Stop camera";
     frameTimer = window.setInterval(sendFrame, FRAME_INTERVAL_MS);
-    if (!isRecording) setStatus("Camera on, agent can see", "");
+    setStatus("Camera on, agent can see", "");
   } catch (error) {
     const denied = error.name === "NotAllowedError" || /denied|permission/i.test(error.message);
     appendSystem(denied ? "Camera access was denied. Allow it for this site to show the damage." : `Camera failed: ${error.message}`);
@@ -595,7 +512,7 @@ function stopCamera() {
   cameraButton.querySelector(".round-label").textContent = "Show camera";
   if (wasOn && liveSocket?.readyState === WebSocket.OPEN) {
     liveSocket.send(JSON.stringify({ type: "camera_state", enabled: false }));
-    if (!isRecording) setStatus("Camera off, describing the scene", "");
+    setStatus("Camera off, describing the scene", "");
   }
 }
 
@@ -607,52 +524,13 @@ function sendFrame() {
   frameCanvas.height = Math.round(cameraPreview.videoHeight * scale);
   const ctx = frameCanvas.getContext("2d");
   ctx.drawImage(cameraPreview, 0, 0, frameCanvas.width, frameCanvas.height);
-  const dataUrl = frameCanvas.toDataURL("image/jpeg", 0.6);
+  const dataUrl = frameCanvas.toDataURL("image/jpeg", 0.8);
   liveSocket.send(JSON.stringify({ type: "video", data: dataUrl.split(",")[1] }));
 }
 
-function resampleToPcm16(input, inputRate, outputRate) {
-  const ratio = inputRate / outputRate;
-  const outputLength = Math.floor(input.length / ratio);
-  const pcm = new Int16Array(outputLength);
-  for (let i = 0; i < outputLength; i += 1) {
-    const index = i * ratio;
-    const before = Math.floor(index);
-    const after = Math.min(before + 1, input.length - 1);
-    const weight = index - before;
-    const sample = Math.max(-1, Math.min(1, input[before] * (1 - weight) + input[after] * weight));
-    pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-  }
-  return pcm;
-}
 
-function arrayBufferToBase64(buffer) {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.byteLength; i += 1) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
 
-function playPcm24(base64) {
-  audioContext = audioContext || new AudioContext();
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  const pcm = new Int16Array(bytes.buffer);
-  const audioBuffer = audioContext.createBuffer(1, pcm.length, 24000);
-  const channel = audioBuffer.getChannelData(0);
-  for (let i = 0; i < pcm.length; i += 1) channel[i] = pcm[i] / 32768;
-  const source = audioContext.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(audioContext.destination);
-  const startAt = Math.max(audioContext.currentTime, nextPlaybackTime);
-  playbackSources.add(source);
-  source.onended = () => playbackSources.delete(source);
-  source.start(startAt);
-  nextPlaybackTime = startAt + audioBuffer.duration;
-}
 
-micButton.addEventListener("click", () => (isRecording ? stopLiveVoice() : startLiveVoice()));
 cameraButton.addEventListener("click", () => (cameraStream ? stopCamera() : startCamera()));
 newIntakeButton.addEventListener("click", () => createSession(false));
 window.addEventListener("pagehide", disconnectLive);

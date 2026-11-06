@@ -12,18 +12,8 @@ function env(){
 const tests=[];const test=(name,fn)=>tests.push([name,fn]);
 test('new intake closes original socket and rejects late messages',async()=>{const e=env();await e.run('connectLive()');const old=e.sockets[0];await e.run('createSession(false)');old.onmessage({data:JSON.stringify({type:'transcript',session_id:'initial',id:'late',speaker:'Claimant',text:'Old claim'})});await e.run('sendClaimantTurn("Second claimant")');assert(old.closed);assert.equal(e.sockets.length,2);assert.equal(e.run('state.transcript.length'),1);assert.equal(old.sent,undefined);});
 test('concurrent connects share a socket',async()=>{const e=env();await Promise.all([e.run('connectLive()'),e.run('connectLive()')]);assert.equal(e.sockets.length,1);e.run('disconnectLive()');});
-test('reconnect uses the same claim session',async()=>{const e=env();await e.run('connectLive()');e.run('stopLiveVoice()');await e.run('connectLive()');assert.equal(e.sockets[0].url,e.sockets[1].url);e.run('disconnectLive()');});
-test('interruption stops all scheduled audio',async()=>{const e=env();await e.run('connectLive()');e.run('playPcm24(btoa("\\0\\0".repeat(24000)));playPcm24(btoa("\\0\\0".repeat(24000)))');e.sockets[0].onmessage({data:JSON.stringify({type:'interrupted',session_id:'initial'})});assert.equal(e.sources.filter(x=>x.stopped).length,2);e.run('disconnectLive()');});
-test('reset stops queued speech',async()=>{const e=env();e.run('playPcm24(btoa("\\0\\0".repeat(24000)))');await e.run('createSession(false)');assert(e.sources[0].stopped);});
-test('typed interruption stops playback before sending the new turn',async()=>{
- const e=env();await e.run('connectLive()');
- e.run('playPcm24(btoa("\\0\\0".repeat(24000)))');
- const socket=e.sockets[0],send=socket.send.bind(socket);
- socket.send=message=>{assert(e.sources[0].stopped);send(message)};
- await e.run('sendClaimantTurn("Stop, please wait.")');
- assert.equal(socket.sent.at(-1).text,'Stop, please wait.');e.run('disconnectLive()');
-});
-test('disconnect releases microphone and camera',async()=>{const e=env();await e.run('connectLive()');e.run('let stopped=0;isRecording=true;audioStream={getTracks:()=>[{stop(){stopped++}}]};cameraStream={getTracks:()=>[{stop(){stopped++}}]};');e.sockets[0].close();assert.equal(e.run('stopped'),2);assert.equal(e.run('isRecording'),false);assert.equal(e.run('cameraStream'),null);});
+test('reconnect uses the same claim session',async()=>{const e=env();await e.run('connectLive()');e.run('disconnectLive()');await e.run('connectLive()');assert.equal(e.sockets[0].url,e.sockets[1].url);e.run('disconnectLive()');});
+test('disconnect releases camera',async()=>{const e=env();await e.run('connectLive()');e.run('let stopped=0;cameraStream={getTracks:()=>[{stop(){stopped++}}]};');e.sockets[0].close();assert.equal(e.run('stopped'),1);assert.equal(e.run('cameraStream'),null);});
 test('state merge preserves final turns not yet in snapshot',()=>{const e=env();assert.equal(e.run('mergeTranscript([{id:"1",speaker:"Agent",text:"Earlier reply"}],[{id:"2",speaker:"Claimant",text:"Correction",streaming:false}]).length'),2);});
 test('short answers are distinct; repeated final ID is idempotent',()=>{const e=env();e.run('upsertStreamingTurn("Claimant","No injuries",true,"a");upsertStreamingTurn("Claimant","No",true,"b");upsertStreamingTurn("Claimant","No",true,"b")');assert.equal(e.run('state.transcript.length'),2);});
 test('finished and failed tools clear writing indicator',()=>{const e=env();for(const phase of ['done','error','cancelled']){e.run(`state={...emptyState,tool_activity:[{id:"1",name:"sync_claim_packet",phase:"${phase}"}]};setWriting(true);renderTeam()`);assert.equal(e.run('writing'),false);}});

@@ -1,20 +1,8 @@
-"""ADK hybrid graph workflow for AI Insurance Claim Intake."""
-
+"""Structured claim extraction followed by deterministic intake rules."""
 from __future__ import annotations
-
-import inspect
 import json
-import uuid
-from typing import Any, AsyncGenerator, Callable
-
-from google.adk.agents import BaseAgent, LlmAgent, SequentialAgent
-from google.adk.agents.invocation_context import InvocationContext
-from google.adk.events import Event, EventActions
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.genai import types as genai_types
-from pydantic import BaseModel, ConfigDict
-from typing_extensions import override
+from typing import Any
+from provider import MODEL, structured
 
 try:
     from .policies import (
@@ -27,12 +15,7 @@ try:
     )
     from .schemas import (
         ClaimClassification,
-        ClaimIntakePacket,
         ClaimNarrative,
-        CoverageEvidenceDecision,
-        DocumentChecklist,
-        FieldValidation,
-        FraudSafetyGate,
     )
 except ImportError:
     from policies import (
@@ -45,190 +28,11 @@ except ImportError:
     )
     from schemas import (
         ClaimClassification,
-        ClaimIntakePacket,
         ClaimNarrative,
-        CoverageEvidenceDecision,
-        DocumentChecklist,
-        FieldValidation,
-        FraudSafetyGate,
     )
 
 
-MODEL = "gemini-3.8-flash"
-APP_NAME = "insurance_claim_live_agent_team"
-
-
-async def _await_if_needed(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
-
-
-def _plain(value: Any) -> Any:
-    if isinstance(value, BaseModel):
-        return value.model_dump(exclude_none=True)
-    if isinstance(value, str):
-        text = value.strip()
-        if text.startswith("{") or text.startswith("["):
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return value
-    return value
-
-
-def blank_claim() -> dict[str, Any]:
-    return {
-        "policyholder_name": "not specified",
-        "policy_number": "not specified",
-        "contact_method": "not specified",
-        "date_of_loss": "not specified",
-        "reported_date": "not specified",
-        "loss_location": "not specified",
-        "loss_description": "not specified",
-        "estimated_loss_usd": None,
-        "injuries_or_safety_concerns": [],
-        "parties_involved": [],
-        "evidence_available": [],
-        "documents_mentioned": [],
-        "missing_or_uncertain_facts": [],
-        "raw_narrative_summary": "not specified",
-        "assumptions": [],
-    }
-
-
-def initial_classification() -> dict[str, Any]:
-    return {
-        "claim_type": "other",
-        "severity": "medium",
-        "severity_rationale": "Waiting for claimant facts.",
-        "likely_policy_line": "unknown",
-        "loss_drivers": [],
-        "claimant_needs": ["Provide initial loss facts."],
-    }
-
-
-def build_initial_workflow_state() -> dict[str, Any]:
-    claim = blank_claim()
-    classification = initial_classification()
-    validation = validate_required_claim_fields(claim)
-    coverage = apply_coverage_and_evidence_rules(claim, validation, classification)
-    checklist = generate_document_checklist(claim, classification, coverage)
-    fraud_gate = fraud_signal_and_safety_gate(claim, validation, classification, coverage)
-    packet = build_claim_intake_packet(
-        claim,
-        validation,
-        classification,
-        coverage,
-        checklist,
-        fraud_gate,
-    )
-    return {
-        "normalized_claim": claim,
-        "field_validation": validation,
-        "claim_classification": classification,
-        "coverage_evidence_decision": coverage,
-        "document_checklist": checklist,
-        "fraud_safety_gate": fraud_gate,
-        "claim_intake_packet": packet,
-        "final_markdown": packet["markdown"],
-    }
-
-
-def _content(text: str) -> genai_types.Content:
-    return genai_types.Content(role="model", parts=[genai_types.Part(text=text)])
-
-
-def _state_event(author: str, text: str, updates: dict[str, Any]) -> Event:
-    return Event(
-        author=author,
-        content=_content(text),
-        actions=EventActions(state_delta=updates),
-    )
-
-
-class FunctionNode(BaseAgent):
-    """Deterministic workflow node that reads and writes ADK session state."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
-
-    handler: Callable[[InvocationContext], dict[str, Any]]
-    output_key: str
-    summary: str
-
-    @override
-    async def _run_async_impl(
-        self, ctx: InvocationContext
-    ) -> AsyncGenerator[Event, None]:
-        result = self.handler(ctx)
-        ctx.session.state[self.output_key] = result
-        updates = {self.output_key: result}
-        if self.output_key == "field_validation":
-            updates["normalized_claim"] = ctx.session.state["normalized_claim"]
-        yield _state_event(self.name, self.summary, updates)
-
-
-class FinalPacketNode(FunctionNode):
-    """Function node that returns the final packet Markdown as ADK Web output."""
-
-    @override
-    async def _run_async_impl(
-        self, ctx: InvocationContext
-    ) -> AsyncGenerator[Event, None]:
-        result = self.handler(ctx)
-        updates = {self.output_key: result, "final_markdown": result["markdown"]}
-        ctx.session.state.update(updates)
-        yield _state_event(self.name, result["markdown"], updates)
-
-
-def _validate_claim_handler(ctx: InvocationContext) -> dict[str, Any]:
-    claim = prepare_claim(ctx.session.state.get("normalized_claim"), ctx.session.state.get("received_evidence", []))
-    ctx.session.state["normalized_claim"] = claim
-    return validate_required_claim_fields(claim)
-
-
-def _coverage_evidence_handler(ctx: InvocationContext) -> dict[str, Any]:
-    return apply_coverage_and_evidence_rules(
-        ctx.session.state.get("normalized_claim"),
-        ctx.session.state.get("field_validation"),
-        ctx.session.state.get("claim_classification"),
-    )
-
-
-def _document_checklist_handler(ctx: InvocationContext) -> dict[str, Any]:
-    return generate_document_checklist(
-        ctx.session.state.get("normalized_claim"),
-        ctx.session.state.get("claim_classification"),
-        ctx.session.state.get("coverage_evidence_decision"),
-    )
-
-
-def _fraud_safety_handler(ctx: InvocationContext) -> dict[str, Any]:
-    return fraud_signal_and_safety_gate(
-        ctx.session.state.get("normalized_claim"),
-        ctx.session.state.get("field_validation"),
-        ctx.session.state.get("claim_classification"),
-        ctx.session.state.get("coverage_evidence_decision"),
-    )
-
-
-def _final_packet_handler(ctx: InvocationContext) -> dict[str, Any]:
-    return build_claim_intake_packet(
-        ctx.session.state.get("normalized_claim"),
-        ctx.session.state.get("field_validation"),
-        ctx.session.state.get("claim_classification"),
-        ctx.session.state.get("coverage_evidence_decision"),
-        ctx.session.state.get("document_checklist"),
-        ctx.session.state.get("fraud_safety_gate"),
-    )
-
-
-def create_normalizer() -> LlmAgent:
-    return LlmAgent(
-        name="NormalizeClaimNarrative",
-        model=MODEL,
-        description="Normalizes messy insurance claim narratives into structured intake facts.",
-        disallow_transfer_to_parent=True,
-        disallow_transfer_to_peers=True,
-        instruction="""
+NORMALIZE_INSTRUCTION = """
 You are the intake specialist for an AI Insurance Claim Intake Agent.
 
 Read the user's messy insurance claim narrative and produce a structured
@@ -265,20 +69,9 @@ Extraction rules:
 - missing_or_uncertain_facts: unresolved core loss facts (cause, location, date, identity). Do not list missing documents here; they have their own evidence checklist.
 
 This is an intake normalization step only. Do not confirm coverage or payment.
-""",
-        output_schema=ClaimNarrative,
-        output_key="normalized_claim",
-    )
+"""
 
-
-def create_classifier() -> LlmAgent:
-    return LlmAgent(
-        name="ClassifyClaimTypeAndSeverity",
-        model=MODEL,
-        description="Classifies claim type, severity, policy line, and claimant needs.",
-        disallow_transfer_to_parent=True,
-        disallow_transfer_to_peers=True,
-        instruction="""
+CLASSIFY_INSTRUCTION = """
 Classify this normalized claim for insurance intake routing.
 
 Normalized claim:
@@ -303,60 +96,62 @@ Severity rubric:
 
 Return only the structured ClaimClassification. This is classification, not a
 coverage decision.
-""",
-        output_schema=ClaimClassification,
-        output_key="claim_classification",
+"""
+
+def blank_claim() -> dict[str, Any]:
+    return {
+        "policyholder_name": "not specified",
+        "policy_number": "not specified",
+        "contact_method": "not specified",
+        "date_of_loss": "not specified",
+        "reported_date": "not specified",
+        "loss_location": "not specified",
+        "loss_description": "not specified",
+        "estimated_loss_usd": None,
+        "injuries_or_safety_concerns": [],
+        "parties_involved": [],
+        "evidence_available": [],
+        "documents_mentioned": [],
+        "missing_or_uncertain_facts": [],
+        "raw_narrative_summary": "not specified",
+        "assumptions": [],
+    }
+
+def initial_classification() -> dict[str, Any]:
+    return {
+        "claim_type": "other",
+        "severity": "medium",
+        "severity_rationale": "Waiting for claimant facts.",
+        "likely_policy_line": "unknown",
+        "loss_drivers": [],
+        "claimant_needs": ["Provide initial loss facts."],
+    }
+
+def build_initial_workflow_state() -> dict[str, Any]:
+    claim = blank_claim()
+    classification = initial_classification()
+    validation = validate_required_claim_fields(claim)
+    coverage = apply_coverage_and_evidence_rules(claim, validation, classification)
+    checklist = generate_document_checklist(claim, classification, coverage)
+    fraud_gate = fraud_signal_and_safety_gate(claim, validation, classification, coverage)
+    packet = build_claim_intake_packet(
+        claim,
+        validation,
+        classification,
+        coverage,
+        checklist,
+        fraud_gate,
     )
-
-
-def create_workflow() -> SequentialAgent:
-    return SequentialAgent(
-        name="insurance_claim_live_agent_team",
-        description="Hybrid voice-first agent team for insurance claim intake, evidence triage, and routing.",
-        sub_agents=[
-            create_normalizer(),
-            FunctionNode(
-                name="ValidateRequiredClaimFields",
-                description="Deterministically validates required claim intake fields.",
-                handler=_validate_claim_handler,
-                output_key="field_validation",
-                summary="Validated required claim intake fields.",
-            ),
-            create_classifier(),
-            FunctionNode(
-                name="ApplyCoverageAndEvidenceRules",
-                description="Applies deterministic coverage, evidence, severity, and routing gates.",
-                handler=_coverage_evidence_handler,
-                output_key="coverage_evidence_decision",
-                summary="Applied deterministic coverage and evidence rules.",
-            ),
-            FunctionNode(
-                name="GenerateDocumentChecklist",
-                description="Builds a claimant-facing document checklist from deterministic rules.",
-                handler=_document_checklist_handler,
-                output_key="document_checklist",
-                summary="Generated required document checklist.",
-            ),
-            FunctionNode(
-                name="FraudSignalAndSafetyGate",
-                description="Applies deterministic fraud signal, suspicious timing, and safety gates.",
-                handler=_fraud_safety_handler,
-                output_key="fraud_safety_gate",
-                summary="Applied fraud, timing, and safety routing gates.",
-            ),
-            FinalPacketNode(
-                name="FinalClaimIntakePacket",
-                description="Builds the final polished Markdown claim intake packet.",
-                handler=_final_packet_handler,
-                output_key="claim_intake_packet",
-                summary="Built final claim intake packet.",
-            ),
-        ],
-    )
-
-
-root_agent = create_workflow()
-
+    return {
+        "normalized_claim": claim,
+        "field_validation": validation,
+        "claim_classification": classification,
+        "coverage_evidence_decision": coverage,
+        "document_checklist": checklist,
+        "fraud_safety_gate": fraud_gate,
+        "claim_intake_packet": packet,
+        "final_markdown": packet["markdown"],
+    }
 
 async def run_claim_workflow(
     claimant_transcript: str,
@@ -365,83 +160,27 @@ async def run_claim_workflow(
     user_id: str = "live-ui",
     received_evidence: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Run the ADK claim graph for the current claimant transcript snapshot."""
-
-    transcript = str(claimant_transcript or "").strip()
-    if not transcript:
+    """Extract, validate, classify, and assemble a packet from a transcript snapshot."""
+    if not str(claimant_transcript or "").strip():
         return build_initial_workflow_state()
-
-    adk_session_id = f"claim-{session_id or uuid.uuid4().hex}"
-    session_service = InMemorySessionService()
-    await _await_if_needed(
-        session_service.create_session(
-            app_name=APP_NAME,
-            user_id=user_id,
-            session_id=adk_session_id,
-            state={"received_evidence": received_evidence or []},
-        )
-    )
-    runner = Runner(
-        app_name=APP_NAME,
-        agent=root_agent,
-        session_service=session_service,
-    )
-    message = genai_types.Content(
-        role="user",
-        parts=[
-            genai_types.Part(
-                text=(
-                    "Use this full claimant transcript as the source of truth for "
-                    "the insurance intake workflow. Do not invent missing facts.\n\n"
-                    f"{transcript}"
-                )
-            )
-        ],
-    )
-
-    event_count = 0
-    async for _event in runner.run_async(
-        user_id=user_id,
-        session_id=adk_session_id,
-        new_message=message,
-    ):
-        event_count += 1
-    if event_count == 0:
-        raise RuntimeError("ADK workflow completed without emitting any events.")
-
-    session = await _await_if_needed(
-        session_service.get_session(
-            app_name=APP_NAME,
-            user_id=user_id,
-            session_id=adk_session_id,
-        )
-    )
-    state = session.state
-    claim = ClaimNarrative.model_validate(_plain(state.get("normalized_claim")))
-    validation = FieldValidation.model_validate(_plain(state.get("field_validation")))
-    classification = ClaimClassification.model_validate(_plain(state.get("claim_classification")))
-    coverage = CoverageEvidenceDecision.model_validate(_plain(state.get("coverage_evidence_decision")))
-    checklist = DocumentChecklist.model_validate(_plain(state.get("document_checklist")))
-    fraud_gate = FraudSafetyGate.model_validate(_plain(state.get("fraud_safety_gate")))
-    packet = ClaimIntakePacket.model_validate(_plain(state.get("claim_intake_packet")))
+    extracted = await structured(NORMALIZE_INSTRUCTION, claimant_transcript, ClaimNarrative)
+    claim = prepare_claim(extracted.model_dump(), received_evidence or [])
+    validation = validate_required_claim_fields(claim)
+    prompt = CLASSIFY_INSTRUCTION.replace("{normalized_claim}", json.dumps(claim)).replace(
+        "{field_validation}", json.dumps(validation))
+    classified = await structured(prompt, "Classify the supplied claim.", ClaimClassification)
+    classification = classified.model_dump()
+    coverage = apply_coverage_and_evidence_rules(claim, validation, classification)
+    checklist = generate_document_checklist(claim, classification, coverage)
+    gate = fraud_signal_and_safety_gate(claim, validation, classification, coverage)
+    packet = build_claim_intake_packet(claim, validation, classification, coverage, checklist, gate)
     return {
-        "normalized_claim": claim.model_dump(exclude_none=True),
-        "field_validation": validation.model_dump(exclude_none=True),
-        "claim_classification": classification.model_dump(exclude_none=True),
-        "coverage_evidence_decision": coverage.model_dump(exclude_none=True),
-        "document_checklist": checklist.model_dump(exclude_none=True),
-        "fraud_safety_gate": fraud_gate.model_dump(exclude_none=True),
-        "claim_intake_packet": packet.model_dump(exclude_none=True),
-        "final_markdown": packet.markdown,
+        "normalized_claim": claim,
+        "field_validation": validation,
+        "claim_classification": classification,
+        "coverage_evidence_decision": coverage,
+        "document_checklist": checklist,
+        "fraud_safety_gate": gate,
+        "claim_intake_packet": packet,
+        "final_markdown": packet["markdown"],
     }
-
-
-__all__ = [
-    "APP_NAME",
-    "MODEL",
-    "blank_claim",
-    "build_initial_workflow_state",
-    "create_workflow",
-    "run_claim_workflow",
-    "root_agent",
-]

@@ -19,17 +19,17 @@
           <span class="brand-mark" aria-hidden="true"></span>
           <div>
             <h1>Insurance Claim Live Agent Team</h1>
-            <p id="modelLabel" class="brand-sub">Connecting to Gemini</p>
+            <p id="modelLabel" class="brand-sub">Connecting to Crusoe</p>
           </div>
         </div>
         <button id="openPacket" class="ghost-button" type="button">Adjuster packet</button>
       </header>
 
       <main class="desk-layout">
-        <aside class="side media-column" aria-label="Live call and camera">
+        <aside class="side media-column" aria-label="Text and camera and camera">
           <section class="card call-card">
             <div class="card-head">
-              <span class="card-kicker">Live call</span>
+              <span class="card-kicker">Text and camera</span>
               <span id="callStatus" class="pill">Connecting</span>
             </div>
 
@@ -38,11 +38,8 @@
               <span class="camera-tag"><span class="rec-dot" aria-hidden="true"></span> Agent is watching</span>
             </div>
 
+            <p class="card-hint">Type below or show the camera. Voice is not enabled.</p>
             <div class="controls">
-              <button id="micButton" class="round-button" type="button" aria-label="Start live voice">
-                <span class="icon-mic" aria-hidden="true"></span>
-                <span class="round-label">Talk</span>
-              </button>
               <button id="cameraButton" class="round-button" type="button" aria-label="Show the damage on camera">
                 <span class="icon-camera" aria-hidden="true"></span>
                 <span class="round-label">Show camera</span>
@@ -56,7 +53,7 @@
           <section class="card team-card">
             <div class="card-head">
               <span class="card-kicker">Claim team</span>
-              <span class="card-hint">Working in the background while the call continues</span>
+              <span class="card-hint">Working in the background while you type</span>
             </div>
             <ul id="teamFeed" class="team-feed" tabindex="0" aria-label="Claim team activity"></ul>
           </section>
@@ -67,7 +64,7 @@
             <div class="holes" aria-hidden="true"><span></span><span></span><span></span></div>
             <div class="page-head">
               <span id="pageDate">Claim intake notes</span>
-              <span id="pageAgent">Gemini 3.8 Live, field notes</span>
+              <span id="pageAgent">Crusoe, field notes</span>
             </div>
             <div id="notes" class="notes"></div>
             <div id="pinboard" class="pinboard"></div>
@@ -115,6 +112,6 @@
     </dialog>
 
     <canvas id="frameCanvas" hidden></canvas>
-    <script src="./app.js?v=voice-turns-2"></script>
+    <script src="./app.js?v=crusoe-text-1"></script>
   </body>
 </html>
