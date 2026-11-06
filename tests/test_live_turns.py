@@ -88,3 +88,21 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
         session,sent=await self.drive(receive)
         self.assertEqual(session.transcript,[])
         self.assertTrue(any(m['type']=='error' and 'voice' in m['message'] for m in sent))
+
+    async def test_failed_camera_analysis_can_retry_the_same_frame(self):
+        count=0
+        async def receive(session,sent):
+            nonlocal count
+            count+=1
+            if count==1:return {'type':'video','data':base64.b64encode(b'\xff\xd8\xffTEST').decode()}
+            if count==2:
+                while not any(m['type']=='error' for m in sent):await asyncio.sleep(.001)
+                clock[0]+=9
+                return {'type':'video','data':base64.b64encode(b'\xff\xd8\xffTEST').decode()}
+            while len([m for m in sent if m['type']=='error'])<2:await asyncio.sleep(.001)
+            return {'type':'close'}
+        clock=[100.0]
+        # Override only server timing; do not change the asyncio event loop clock.
+        with patch.object(s,'time',NS(monotonic=lambda:clock[0])),patch.object(s,'_pin_evidence_photo',side_effect=s.InferenceError('Temporary failure')) as capture:
+            await self.drive(receive)
+        self.assertEqual(capture.call_count,2)

@@ -724,7 +724,7 @@ async def live_voice(websocket: WebSocket) -> None:
     async def activity(name, operation):
         nonlocal busy
         entry = {"id": uuid.uuid4().hex, "name": name, "phase": "running",
-                 "headline": tool_headline(name, {}, None), "model": MODEL}
+                 "headline": tool_headline(name, {}, None), "model": VISION_MODEL if name == "pin_evidence_photo" else MODEL}
         session.tool_activity = (session.tool_activity + [entry])[-30:]
         busy += 1
         started = time.monotonic()
@@ -780,9 +780,11 @@ async def live_voice(websocket: WebSocket) -> None:
                 await send({"type": "processing", "active": busy > 0})
 
     async def capture():
+        nonlocal last_capture_frame
         try:
             result = await activity("pin_evidence_photo", lambda: _pin_evidence_photo(session, {}))
             if result.get("pinned"):
+                last_capture_frame = base64.b64decode(session.evidence_photos[-1]["data_url"].split(",", 1)[1])
                 await send({"type": "state", "state": _current_ui_state(session)})
                 await update()
         except asyncio.CancelledError:
@@ -852,7 +854,7 @@ async def live_voice(websocket: WebSocket) -> None:
                     session.last_frame_id = uuid.uuid4().hex
                     # One vision job at a time; no frame queue or repeated identical captures.
                     if (camera_task is None or camera_task.done()) and now - last_capture_at >= 8 and data != last_capture_frame and len(session.evidence_photos) < MAX_PHOTOS:
-                        last_capture_at, last_capture_frame = now, data
+                        last_capture_at = now
                         camera_task = track(capture())
             except (ValueError, TypeError) as exc:
                 await send({"type": "error", "message": str(exc)})
