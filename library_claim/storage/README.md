@@ -9,7 +9,7 @@ transactionally on open and use `PRAGMA user_version`. Foreign keys prevent
 missing references and associations across sweeps. One connection belongs to one
 thread; the eventual async scheduler must keep this synchronous work off its
 latency-sensitive path. Job records persist state; they do not execute jobs or
-claim work. Resume policy belongs to step 2.
+claim work. The scheduler in `../orchestration/` owns restart recovery and execution.
 
 A book ID identifies a physical copy. A BookObservation links that ID to a frame
 and a normalized image box. Observations and frames are append-only. A clearer

@@ -30,6 +30,8 @@ class Sweep(Record):
     country: str = ''
     currency: str = ''
     state: Literal['Sweeping', 'Approaching', 'Capturing', 'Resuming'] = 'Sweeping'
+    active_target: Identifier | None = None
+    context_revision: Annotated[int, Field(ge=0)] = 0
 
 
 class Frame(Record):
@@ -127,5 +129,8 @@ class ProcessingJob(Record):
     created_at: AwareDatetime
     model: str | None = None
     configuration_version: str = '1'
+    target_id: Identifier | None = None
+    evidence_score: Score = 0
+    context_revision: Annotated[int, Field(ge=0)] = 0
     result: dict[str, Any] | None = None
     error: str | None = None
