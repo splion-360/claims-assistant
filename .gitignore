@@ -221,3 +221,5 @@ __marimo__/
 
 # misc 
 docs/*Assignment*
+# Local claim evidence and SQLite state
+.claim-data/
