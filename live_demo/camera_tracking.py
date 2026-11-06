@@ -43,7 +43,11 @@ class CameraTracking:
         if timestamp - self.last_log_at < 1:
             return
         self.last_log_at = timestamp
-        overlap = 'unknown' if result.reference_overlap is None else f'{result.reference_overlap:.0%}'
+        # A new reference maps to itself; that is not a recovered-view match.
+        if result.status == 'reference_created':
+            overlap = 'N/A — new reference'
+        else:
+            overlap = 'unknown' if result.reference_overlap is None else f'{result.reference_overlap:.0%}'
         logger.info('Camera tracking: %s | matches=%d | reference overlap=%s | %.1f ms',
                     result.status, result.matched_points, overlap, result.elapsed_ms)
         logger.debug('camera_tracking %s', result.model_dump_json())
