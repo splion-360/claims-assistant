@@ -77,6 +77,8 @@ Run from the repository root:
 ```
 
 Open `http://127.0.0.1:4177`, connect the session and enable the camera. Look for
-`camera_quality session=... frame=... scores={...}` in that terminal. Logs contain
-numeric assessments and frame/session references, not images or credentials.
+`Camera quality` multiline summaries in that terminal. Normal logs show raw
+BRISQUE, sharpness, dark/bright pixel percentages, frame change, and elapsed time.
+Full JSON with frame/session references is available with `--log-level debug`.
+Logs exclude images and credentials.
 The existing session setup still requires the configured Crusoe API key.

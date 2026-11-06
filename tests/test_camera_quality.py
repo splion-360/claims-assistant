@@ -26,9 +26,10 @@ class CameraQualityTests(unittest.TestCase):
         self.assertEqual(second.signals.temporal_change, 0)
         with self.assertLogs('uvicorn.error.camera_quality', level='INFO') as logs:
             log_scores('session', 'frame', second)
-        self.assertIn('"brisque":', logs.output[0])
-        self.assertIn('"sharpness":', logs.output[0])
-        self.assertIn('frame=frame', logs.output[0])
+        self.assertIn('BRISQUE:', logs.output[0])
+        self.assertIn('Sharpness:', logs.output[0])
+        self.assertIn('Frame change: 0.0%', logs.output[0])
+        self.assertNotIn('frame=frame', logs.output[0])
 
     def test_invalid_jpeg_does_not_advance_stream(self):
         """Reject a malformed image without treating it as a previous frame."""
