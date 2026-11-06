@@ -60,6 +60,7 @@ class ClaimVoice {
   }
   interrupt() {
     this.epoch = null;
+    this.finishedEpoch = null;
     for (const source of this.sources) { try { source.stop(); } catch (_) {} }
     this.sources.clear();
     this.nextTime = this.context?.currentTime || 0;
@@ -81,9 +82,20 @@ class ClaimVoice {
     source.connect(this.context.destination);
     const start = Math.max(this.context.currentTime, this.nextTime);
     this.sources.add(source);
-    source.onended = () => this.sources.delete(source);
+    source.onended = () => { this.sources.delete(source); this.reportPlayback(); };
     source.start(start);
     this.nextTime = start + buffer.duration;
+  }
+  end(epoch) {
+    if (this.epoch !== epoch) return;
+    this.finishedEpoch = epoch;
+    this.reportPlayback();
+  }
+  reportPlayback() {
+    if (this.epoch !== null && this.finishedEpoch === this.epoch && this.sources.size === 0) {
+      this.send({ type: 'playback_done', epoch: this.epoch });
+      this.finishedEpoch = null;
+    }
   }
   stop(notify = true) {
     const wasEnabled = this.enabled;

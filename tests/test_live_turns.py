@@ -106,3 +106,46 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(s,'time',NS(monotonic=lambda:clock[0])),patch.object(s,'_pin_evidence_photo',side_effect=s.InferenceError('Temporary failure')) as capture:
             await self.drive(receive)
         self.assertEqual(capture.call_count,2)
+
+    async def test_spoken_turn_dispatches_once_and_returns_audio(self):
+        events=asyncio.Queue()
+        events.put_nowait(json.dumps({'type':'Connected'}))
+        class Connection:
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):pass
+            def __aiter__(self):return self
+            async def __anext__(self):return await events.get()
+            async def send(self,data):
+                self.last_audio=data
+                for name in ['StartOfTurn','EndOfTurn','EndOfTurn']:
+                    events.put_nowait(json.dumps({'type':'TurnInfo','event':name,'turn_index':0,'transcript':'No injuries.'}))
+        connection=Connection()
+        async def audio(text):yield b'\0\0\1\0'
+        count=0
+        async def receive(session,sent):
+            nonlocal count
+            count+=1
+            if count==1:return {'type':'voice_state','enabled':True}
+            if count==2:
+                while not any(m['type']=='voice_state' and m['enabled'] for m in sent):await asyncio.sleep(.001)
+                return {'type':'audio','data':'AAA='}
+            while not any(m['type']=='audio_end' for m in sent):await asyncio.sleep(.001)
+            return {'type':'close'}
+        with patch.object(s.speech,'enabled',return_value=True),patch.object(s.speech,'listen',return_value=connection),patch.object(s.speech,'synthesize',side_effect=audio):
+            session,sent=await self.drive(receive)
+        self.assertEqual([t['text'] for t in session.transcript],['No injuries.','What happened?'])
+        self.assertTrue(any(m['type']=='audio' for m in sent))
+        self.assertFalse(session.tasks)
+
+    async def test_reply_does_not_wait_for_background_packet(self):
+        count=0
+        async def workflow(*args,**kwargs):await asyncio.Event().wait()
+        async def receive(session,sent):
+            nonlocal count
+            count+=1
+            if count==1:return {'type':'text','text':'Hello','id':'one'}
+            while not any(m['type']=='transcript' and m['speaker']=='Agent' for m in sent):await asyncio.sleep(.001)
+            return {'type':'close'}
+        session,_=await self.drive(receive,workflow=workflow)
+        self.assertEqual(session.transcript[-1]['text'],'What happened?')
+        self.assertFalse(session.tasks)

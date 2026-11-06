@@ -2,4 +2,4 @@ Based on Insurance Claim Live Agent Team from Shubhamsaboo/awesome-llm-apps.
 Source: https://github.com/Shubhamsaboo/awesome-llm-apps/tree/7aab134864933379a691e13a32904daa935a3ff9/voice_ai_agents/insurance_claim_live_agent_team
 Licensed under Apache 2.0; see LICENSE.
 Local modifications: removed optional avatar and incident-sketch features;
-replaced Gemini/ADK with Crusoe text and camera inference; deferred voice.
+replaced Gemini/ADK with Crusoe text and camera inference; added Deepgram voice.

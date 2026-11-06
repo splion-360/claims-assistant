@@ -700,12 +700,13 @@ async def live_voice(websocket: WebSocket) -> None:
     tasks = set()
     text_task = camera_task = speech_task = workflow_task = None
     voice_on = False
+    spoken_turn_id = None
     audio_queue = asyncio.Queue(maxsize=25)
     text_epoch = 0
     busy = 0
     last_capture_at = 0.0
     last_capture_frame = None
-    windows = {kind: deque() for kind in ("text", "video", "camera_state", "voice_state", "audio")}
+    windows = {kind: deque() for kind in ("text", "video", "camera_state", "voice_state", "audio", "playback_done")}
 
     async def send(payload):
         if not session.deleted:
@@ -760,7 +761,7 @@ async def live_voice(websocket: WebSocket) -> None:
         await send({"type": "error", "message": message})
 
     async def respond(epoch):
-        nonlocal busy
+        nonlocal busy, spoken_turn_id
         busy += 1
         try:
             await send({"type": "processing", "active": True})
@@ -775,6 +776,7 @@ async def live_voice(websocket: WebSocket) -> None:
             append_turn(session, "Agent", reply, turn_id)
             await send({"type": "transcript", "speaker": "Agent", "text": reply, "id": turn_id, "final": True})
             if voice_on:
+                spoken_turn_id = turn_id
                 await send({"type": "audio_start", "epoch": epoch, "turn_id": turn_id})
                 async for chunk in speech.synthesize(reply):
                     if epoch != text_epoch or not voice_on:
@@ -799,13 +801,16 @@ async def live_voice(websocket: WebSocket) -> None:
             await report_error(exc)
 
     async def interrupt():
-        nonlocal text_epoch
+        nonlocal text_epoch, spoken_turn_id
         text_epoch += 1
         if text_task and not text_task.done():
             text_task.cancel()
             await asyncio.gather(text_task, return_exceptions=True)
-        if session.transcript and session.transcript[-1]["speaker"] == "Agent":
-            session.transcript[-1]["interrupted"] = True
+        if spoken_turn_id:
+            for turn in session.transcript:
+                if turn["id"] == spoken_turn_id:
+                    turn["interrupted"] = True
+            spoken_turn_id = None
         await send({"type": "interrupted", "epoch": text_epoch})
 
     async def submit(text, turn_id):
@@ -929,6 +934,9 @@ async def live_voice(websocket: WebSocket) -> None:
                     if not isinstance(turn_id, str) or len(turn_id) > 100:
                         raise ValueError("Invalid turn identifier")
                     await submit(text, turn_id)
+                elif kind == "playback_done":
+                    if message.get("epoch") == text_epoch:
+                        spoken_turn_id = None
                 elif kind == "voice_state":
                     if not isinstance(message.get("enabled"), bool):
                         raise ValueError("Voice state must be true or false")

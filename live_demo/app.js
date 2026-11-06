@@ -445,6 +445,8 @@ function connectLive() {
         voice?.interrupt();
       } else if (message.type === "audio_start") {
         voice?.begin(message.epoch);
+      } else if (message.type === "audio_end") {
+        voice?.end(message.epoch);
       } else if (message.type === "audio") {
         voice?.play(message);
       } else if (message.type === "processing") {

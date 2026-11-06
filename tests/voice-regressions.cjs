@@ -36,3 +36,24 @@ function setup() {
   voice.stop(false);
   console.log('PASS incomplete PCM sample is rejected');
 }
+{
+  const {voice, sources, sent} = setup();
+  voice.begin(5); voice.play({epoch: 5, data: 'AAAAAA=='}); voice.end(5);
+  assert.equal(sent.length, 0);
+  sources[0].onended();
+  assert.equal(sent[0].type, 'playback_done'); assert.equal(sent[0].epoch, 5);
+  voice.stop(false);
+  console.log('PASS completed playback acknowledged only after audio finishes');
+}
+{
+  let Processor;
+  const context = vm.createContext({AudioWorkletProcessor: class {constructor() {this.port = {postMessage: x => output.push(x)};}},
+    sampleRate: 48000, registerProcessor: (name, cls) => Processor = cls, Int16Array});
+  const output = [];
+  vm.runInContext(fs.readFileSync('live_demo/audio-worklet.js', 'utf8'), context);
+  const processor = new Processor();
+  for (let i = 0; i < 30; i++) processor.process([[new Float32Array(128).fill(.5)]]);
+  assert.equal(output.length, 1); assert.equal(output[0].byteLength, 2560);
+  assert.equal(new Int16Array(output[0])[0], 16383);
+  console.log('PASS microphone resampling emits 80 ms PCM16 at 16 kHz');
+}
