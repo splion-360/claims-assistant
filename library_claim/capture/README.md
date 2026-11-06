@@ -61,3 +61,22 @@ Tests exercise the real pretrained model on deterministic synthetic imagery,
 blur sensitivity of the sharpness signal, exposure extremes, temporal change,
 region preprocessing, invalid inputs, unavailable scores, and SQLite round trips.
 These verify implementation behavior, not book-readability accuracy.
+
+## Live camera logging
+
+The browser's existing camera frames are scored locally at most once per second,
+with one quality job in flight per WebSocket and no scoring queue. CPU work runs
+in a background thread. The previous scored frame supplies temporal change;
+a camera mode change resets that history. This diagnostic path is independent of
+remote vision requests and does not gate them yet.
+
+Run from the repository root:
+
+```sh
+.venv/bin/python -m uvicorn live_demo.server:app --host 127.0.0.1 --port 4177 --log-level info
+```
+
+Open `http://127.0.0.1:4177`, connect the session and enable the camera. Look for
+`camera_quality session=... frame=... scores={...}` in that terminal. Logs contain
+numeric assessments and frame/session references, not images or credentials.
+The existing session setup still requires the configured Crusoe API key.

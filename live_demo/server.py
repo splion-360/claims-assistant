@@ -70,6 +70,7 @@ if str(DEMO_DIR) not in sys.path:
 
 from provider import MODEL, VISION_MODEL, complete, structured, has_api_key, InferenceError
 import speech
+from live_demo.camera_quality import CameraQuality, log_scores, logger as quality_logger
 from live_tools import SYSTEM_INSTRUCTION, TOOL_NAMES, tool_headline
 
 LIVE_MODEL_ID = MODEL
@@ -699,6 +700,9 @@ async def live_voice(websocket: WebSocket) -> None:
     send_lock = asyncio.Lock()
     tasks = set()
     text_task = camera_task = speech_task = workflow_task = None
+    quality_task = None
+    quality_stream = CameraQuality()
+    last_quality_at = float("-inf")
     voice_on = False
     spoken_turn_id = None
     audio_queue = asyncio.Queue(maxsize=25)
@@ -724,6 +728,25 @@ async def live_voice(websocket: WebSocket) -> None:
                 logger.error("Background task failed: %s", type(done.exception()).__name__)
         task.add_done_callback(finished)
         return task
+
+    async def score_camera(data, frame_id, revision, stream):
+        """Assess a frozen frame off-loop and log it while its camera is active.
+
+        Args:
+            data: JPEG bytes captured by the browser.
+            frame_id: Identifier of this exact frame.
+            revision: Camera mode revision when the frame arrived.
+            stream: Quality assessor owned by this camera activation.
+        """
+        try:
+            result = await asyncio.to_thread(stream.assess, data)
+            if not session.deleted and session.camera_enabled and session.camera_mode_revision == revision:
+                log_scores(session.session_id, frame_id, result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            quality_logger.warning('camera_quality session=%s frame=%s failed=%s',
+                                   session.session_id, frame_id, type(error).__name__)
 
     async def activity(name, operation):
         nonlocal busy
@@ -925,7 +948,8 @@ async def live_voice(websocket: WebSocket) -> None:
                     enabled = message.get("enabled")
                     if not isinstance(enabled, bool):
                         raise ValueError("Camera state must be true or false")
-                    set_camera_mode(session, enabled)
+                    if set_camera_mode(session, enabled):
+                        quality_stream = CameraQuality()
                 elif kind == "text":
                     text = message.get("text", "")
                     if not isinstance(text, str) or not text.strip() or len(text) > 8000:
@@ -973,6 +997,11 @@ async def live_voice(websocket: WebSocket) -> None:
                     set_camera_mode(session, True)
                     session.last_frame, session.last_frame_at = data, now
                     session.last_frame_id = uuid.uuid4().hex
+                    # Sample local scores independently of the eight-second vision cadence.
+                    if (quality_task is None or quality_task.done()) and now - last_quality_at >= 1:
+                        last_quality_at = now
+                        quality_task = track(score_camera(data, session.last_frame_id,
+                                                         session.camera_mode_revision, quality_stream))
                     # One vision job at a time; no frame queue or repeated identical captures.
                     if (camera_task is None or camera_task.done()) and now - last_capture_at >= 8 and data != last_capture_frame and len(session.evidence_photos) < MAX_PHOTOS:
                         last_capture_at = now
