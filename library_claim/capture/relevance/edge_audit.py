@@ -23,7 +23,7 @@ def run(manifest: Path, full_precision_text: Path, output: Path) -> dict:
         output: JSON destination for detailed, reproducible comparison results.
 
     Returns:
-        Report with variant totals, group counts, per-crop scores, and runtime settings.
+        Report with variant totals, group counts, per-crop book scores, and runtime settings.
 
     Raises:
         ValueError: Labels are invalid, either class is missing, or images cannot decode.

@@ -32,19 +32,14 @@ class EdgeAuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             crop_boxes(100, 100, 1)
 
-    def test_qualifying_book_crop_wins_over_larger_but_weak_margin(self):
-        """Retain genuine threshold-qualified evidence from any inspected crop."""
-        scores = np.array([[.21, .05], [.30, .26], [.05, .50]])
+    def test_highest_book_crop_wins(self):
+        """Use the strongest crop regardless of where the book appears."""
+        scores = np.array([[.21], [.30], [.25]])
         self.assertEqual(select_crop(scores), 1)
-        # Book and background scores stay paired within a single crop.
-        np.testing.assert_array_equal(scores[select_crop(scores)], [.30, .26])
 
-    def test_ambiguous_views_do_not_invent_cross_crop_confidence(self):
-        """Keep uncertain evidence when every crop fails the existing margin."""
-        scores = np.array([[.30, .29], [.25, .24], [.20, .21]])
-        chosen = select_crop(scores)
-        self.assertIn(chosen, (0, 1))
-        self.assertLess(scores[chosen, 0] - scores[chosen, 1], .025)
+    def test_tied_crops_select_first(self):
+        """Keep deterministic provenance when two crops have the same score."""
+        self.assertEqual(select_crop(np.array([[.3], [.3], [.2]])), 0)
 
     def test_prompt_groups_reduce_each_crop_independently(self):
         """Use max similarity within configured target prompts for each view."""
@@ -53,4 +48,4 @@ class EdgeAuditTests(unittest.TestCase):
         output = grouped_scores(similarities)
         boundary = len(PROMPTS['books'])
         np.testing.assert_array_equal(output[:, 0], similarities[:, :boundary].max(axis=1))
-        np.testing.assert_array_equal(output[:, 1], similarities[:, boundary:].max(axis=1))
+        self.assertEqual(output.shape, (2, 1))

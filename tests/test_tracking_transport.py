@@ -20,7 +20,7 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_tracking_reports_while_remote_capture_is_pending(self):
         """Produce a local reference before a blocked remote request completes."""
         _, encoded = cv2.imencode('.jpg', textured_view())
-        relevance = Mock(assess=Mock(return_value=decide(dict(books=.4, empty_background=.1), 12)))
+        relevance = Mock(assess=Mock(return_value=decide(dict(books=.4), 12)))
         ready = asyncio.Event()
         records = []
         count = 0

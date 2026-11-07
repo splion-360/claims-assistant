@@ -24,9 +24,8 @@ class Artifact(Settings):
 
 
 class Prompts(Settings):
-    """Define the two supported semantic targets without a catch-all class."""
+    """Define the positive book descriptions used for similarity scoring."""
     books: Annotated[list[Text], Field(min_length=1)]
-    empty_background: Annotated[list[Text], Field(min_length=1)]
 
 
 class Artifacts(Settings):
@@ -44,7 +43,6 @@ class RelevanceConfig(Settings):
     crop_count: Annotated[int, Field(ge=2)]
     method: Text
     min_similarity: Annotated[float, Field(ge=-1, le=1)]
-    min_margin: Annotated[float, Field(ge=0, le=2)]
     prompts: Prompts
     image_size: PositiveInt
     image_mean: tuple[Unit, Unit, Unit]

@@ -36,18 +36,19 @@ def quality(**signals):
 class RelevanceTests(unittest.TestCase):
     """Exercise classifier decisions without downloads or pretrained weights."""
 
-    def test_strong_matches_and_uncertainty(self):
-        """Keep both target classes distinct and abstain on weak or ambiguous matches."""
-        for label in ('books', 'empty_background'):
-            scores = dict(books=.2, empty_background=.2)
-            scores[label] = .35
-            self.assertEqual(decide(scores, 10).label, label)
-        self.assertEqual(decide(dict(books=.31, empty_background=.30), 1).label, 'uncertain')
-        self.assertEqual(decide(dict(books=.18, empty_background=.1), 1).reason, 'weak_match')
+    def test_threshold_boundary_is_the_only_decision_rule(self):
+        """Pass at the threshold and abstain immediately below it."""
+        from library_claim.config import CONFIG
+
+        threshold = CONFIG.relevance.min_similarity
+        self.assertEqual(decide({'books': threshold}, 10).label, 'books')
+        self.assertEqual(decide({'books': threshold - .0001}, 10).label, 'uncertain')
+        self.assertEqual(decide({'books': .9}, 10).reason, 'book_threshold_met')
 
     def test_invalid_scores_are_not_claimed_as_classifications(self):
-        """Reject missing and nonfinite model scores."""
-        for scores in ({}, dict(books=float('nan'), empty_background=.2)):
+        """Reject missing, obsolete, nonfinite, and out-of-range scores."""
+        for scores in ({}, {'books': float('nan')}, {'books': 1.1},
+                       {'books': .4, 'empty_background': .1}):
             with self.assertRaises(ValueError):
                 decide(scores, 1)
 
@@ -88,7 +89,7 @@ class RelevanceTests(unittest.TestCase):
 
     def test_saved_candidate_is_scored_once_and_logs_its_own_id(self):
         """Persist exact-frame diagnostics and skip repeated tracked views."""
-        result = decide(dict(books=.4, empty_background=.1), 12)
+        result = decide(dict(books=.4), 12)
         service = Mock(assess=Mock(return_value=result))
         with tempfile.TemporaryDirectory() as directory:
             store = LiveCaptureStore(Path(directory), 'sweep')
@@ -130,14 +131,14 @@ class RelevanceTests(unittest.TestCase):
                 self.assertEqual(repo.get(Frame, 'first').relevance_metadata['status'], 'unavailable')
 
     def test_live_crops_keep_paired_scores_and_original_coordinates(self):
-        """Select an edge book crop and retain all three views in frame metadata."""
+        """Select the highest book score and retain all three views in frame metadata."""
         from library_claim.capture.relevance.classifier import BookRelevanceClassifier, PROMPTS
 
         classifier = BookRelevanceClassifier.__new__(BookRelevanceClassifier)
         classifier._vision = Mock()
         classifier._vision.run.side_effect = [[np.eye(3, dtype=np.float32)[i:i + 1]] for i in range(3)]
         # Give only the right crop a qualifying book signal.
-        pairs = np.array([[.1, .4], [.24, .23], [.35, .2]], dtype=np.float32)
+        pairs = np.array([[.1], [.23], [.35]], dtype=np.float32)
         classifier._text = np.concatenate([
             np.repeat(pairs[:, i:i + 1], len(prompts), axis=1)
             for i, prompts in enumerate(PROMPTS.values())
@@ -148,6 +149,6 @@ class RelevanceTests(unittest.TestCase):
         self.assertEqual(result.selected_crop, 2)
         self.assertEqual(result.crop_boxes, [(0, 0, 360, 360), (140, 0, 500, 360), (280, 0, 640, 360)])
         self.assertEqual(result.scores, result.crop_scores[2])
-        self.assertAlmostEqual(result.scores['empty_background'], .2)
+        self.assertAlmostEqual(result.scores['books'], .35)
         for call in classifier._vision.run.call_args_list:
             self.assertEqual(call.args[1]['pixel_values'].shape, (1, 3, 224, 224))

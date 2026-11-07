@@ -45,7 +45,7 @@ def summarize(scores: np.ndarray, labels: np.ndarray, timings: list[float]) -> d
     """Describe score separation and routing outcomes on the labelled sample.
 
     Args:
-        scores: Per-frame book and background scores, in that order.
+        scores: Per-frame maximum book-prompt score as a single column.
         labels: Boolean book-presence annotations.
         timings: Per-frame preprocessing and image-encoder durations.
 

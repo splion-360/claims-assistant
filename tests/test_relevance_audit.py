@@ -16,17 +16,17 @@ class RelevanceAuditTests(unittest.TestCase):
 
     def test_overlap_and_auc_reflect_known_book_scores(self):
         """Measure tied rankings and positive detection separately from score means."""
-        scores = np.array([[.3, .1], [.2, .19], [.2, .1], [.25, .24]])
+        scores = np.array([[.3], [.2], [.2], [.25]])
         result = summarize(scores, np.array([True, True, False, False]), [1, 2, 3, 4])
         self.assertAlmostEqual(result['book_score_auc'], .625)
         self.assertTrue(result['book_score_ranges_overlap'])
         self.assertEqual(result['book_predictions_on_books'], 1)
-        self.assertEqual(result['book_predictions_on_negatives'], 0)
-        self.assertEqual(result['uncertain_count'], 3)
+        self.assertEqual(result['book_predictions_on_negatives'], 1)
+        self.assertEqual(result['uncertain_count'], 2)
 
     def test_separated_scores_are_not_reported_as_overlapping(self):
         """Distinguish complete sample separation from noisy overlap."""
-        scores = np.array([[.4, .1], [.35, .1], [.15, .3], [.1, .3]])
+        scores = np.array([[.4], [.35], [.15], [.1]])
         result = summarize(scores, np.array([True, True, False, False]), [1, 1, 1, 1])
         self.assertEqual(result['book_score_auc'], 1)
         self.assertFalse(result['book_score_ranges_overlap'])

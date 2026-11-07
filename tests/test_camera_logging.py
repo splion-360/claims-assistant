@@ -16,7 +16,7 @@ class CameraLoggingTests(unittest.TestCase):
         """Aggregate all saves while keeping a previous classification visibly dated."""
         summary = CameraSummary()
         tracking = TrackingResult(frame_id='private-frame', status='tracked', elapsed_ms=4)
-        relevance = decide({'books': .233, 'empty_background': .245}, 35)
+        relevance = decide({'books': .233}, 35)
         interval = CONFIG.capture.summary_log_interval_s
         with self.assertLogs('uvicorn.error.camera_quality', level='INFO') as logs:
             for time in (0, interval / 4, interval / 2, interval):
@@ -29,7 +29,8 @@ class CameraLoggingTests(unittest.TestCase):
         self.assertIn('uncertain', final)
         self.assertIn(f'{interval:.1f}s ago', final)
         self.assertIn('Books 0.233', final)
-        self.assertIn('Background 0.245', final)
+        self.assertIn(f'Threshold {CONFIG.relevance.min_similarity:.3f}', final)
+        self.assertNotIn('Background', final)
         self.assertRegex(final, r'Evidence saved\s+3')
         self.assertNotIn('private-frame', final)
         self.assertNotIn('Dark pixels', final)
@@ -39,7 +40,7 @@ class CameraLoggingTests(unittest.TestCase):
         """Do not retain old similarity scores after a blocked assessment arrives."""
         summary = CameraSummary()
         tracking = TrackingResult(frame_id='frame', status='uncertain', elapsed_ms=4)
-        first = decide({'books': .4, 'empty_background': .1}, 10)
+        first = decide({'books': .4}, 10)
         blocked = first.model_copy(update={'label': 'uncertain', 'status': 'quality_blocked',
                                           'scores': {}, 'reason': 'extreme_exposure'})
         with self.assertLogs('uvicorn.error.camera_quality', level='INFO') as logs:

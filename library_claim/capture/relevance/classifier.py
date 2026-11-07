@@ -16,7 +16,6 @@ REVISION = SETTINGS.revision
 MODEL_DIR = ROOT / SETTINGS.model_dir
 PROMPTS = SETTINGS.prompts.model_dump()
 MIN_SIMILARITY = SETTINGS.min_similarity
-MIN_MARGIN = SETTINGS.min_margin
 METHOD = SETTINGS.method
 _SHARED = None
 _LOAD_LOCK = Lock()
@@ -26,10 +25,9 @@ class RelevanceAssessment(BaseModel):
     """Report relative cosine scores and an explicitly provisional decision."""
 
     model_config = ConfigDict(extra='forbid', frozen=True)
-    label: Literal['books', 'empty_background', 'uncertain']
+    label: Literal['books', 'uncertain']
     status: Literal['assessed', 'quality_blocked', 'unavailable'] = 'assessed'
     scores: dict[str, float] = Field(default_factory=dict)
-    margin: float | None = None
     reason: str
     elapsed_ms: float = 0
     model: str = MODEL_ID
@@ -37,14 +35,13 @@ class RelevanceAssessment(BaseModel):
     method: str = METHOD
     config_digest: str = CONFIG_DIGEST
     min_similarity: float = MIN_SIMILARITY
-    min_margin: float = MIN_MARGIN
     crop_boxes: list[tuple[int, int, int, int]] = Field(default_factory=list)
     crop_scores: list[dict[str, float]] = Field(default_factory=list)
     selected_crop: int | None = None
 
 
 def decide(scores: dict[str, float], elapsed_ms: float) -> RelevanceAssessment:
-    """Abstain when cosine similarities are weak or too close to distinguish.
+    """Compare the strongest book similarity with the configured threshold.
 
     Args:
         scores: Maximum prompt cosine similarity for each configured class.
@@ -58,16 +55,10 @@ def decide(scores: dict[str, float], elapsed_ms: float) -> RelevanceAssessment:
     """
     if set(scores) != set(PROMPTS) or any(not np.isfinite(v) or not -1 <= v <= 1 for v in scores.values()):
         raise ValueError('Expected one finite cosine score per relevance class')
-    ranked = sorted(scores, key=scores.get, reverse=True)
-    top = ranked[0]
-    margin = scores[top] - scores[ranked[1]]
-    reason = 'separated_match'
-    if scores[top] < MIN_SIMILARITY:
-        reason = 'weak_match'
-    elif margin < MIN_MARGIN:
-        reason = 'ambiguous_match'
-    return RelevanceAssessment(label=top if reason == 'separated_match' else 'uncertain',
-                               scores=scores, margin=margin, reason=reason, elapsed_ms=elapsed_ms)
+    passed = scores['books'] >= MIN_SIMILARITY
+    return RelevanceAssessment(label='books' if passed else 'uncertain', scores=scores,
+                               reason='book_threshold_met' if passed else 'below_book_threshold',
+                               elapsed_ms=elapsed_ms)
 
 
 def prepare_image(bgr: np.ndarray) -> np.ndarray:
@@ -141,17 +132,15 @@ def crop_boxes(width: int, height: int, count: int) -> list[tuple[int, int, int,
 
 
 def select_crop(scores: np.ndarray) -> int:
-    """Choose book evidence without comparing scores from unrelated crops.
+    """Select the crop with the highest book similarity.
 
     Args:
-        scores: Per-crop book and background score pairs.
+        scores: One row per crop and one book-score column.
 
     Returns:
-        Index of the strongest qualifying book margin, or strongest margin if none qualify.
+        Index of the highest-scoring crop, with ties resolved to the first.
     """
-    eligible = [i for i, row in enumerate(scores) if decide(dict(zip(PROMPTS, row)), 0).label == 'books']
-    candidates = eligible or list(range(len(scores)))
-    return max(candidates, key=lambda i: scores[i, 0] - scores[i, 1])
+    return int(np.argmax(scores[:, 0]))
 
 
 def grouped_scores(similarities: np.ndarray) -> np.ndarray:
@@ -161,7 +150,7 @@ def grouped_scores(similarities: np.ndarray) -> np.ndarray:
         similarities: One row per crop and one column per configured prompt.
 
     Returns:
-        Book and background scores for each crop.
+        Maximum book-prompt similarity for each crop.
     """
     offset, columns = 0, []
     for prompts in PROMPTS.values():
@@ -212,7 +201,7 @@ class BookRelevanceClassifier:
             image: Decoded uint8 BGR camera frame.
 
         Returns:
-            Label, cosine scores, margin, provenance, and warm inference timing.
+            Label, cosine scores, provenance, and warm inference timing.
         """
         started = perf_counter()
         if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3 or min(image.shape[:2]) < 1:

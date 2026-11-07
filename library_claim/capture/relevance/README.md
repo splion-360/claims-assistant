@@ -28,16 +28,17 @@ classification. Full per-frame relevance JSON is available at debug level.
 All model choices, prompts, thresholds, and preprocessing values come from
 [`config.yml`](../../../config.yml). Restart the backend after edits.
 
-Scores are cosine similarities, **not confidence percentages**. A label is
-`uncertain` when the best score is below 0.22 or its lead is below 0.025. These
-thresholds and the configured prompts are provisional, versioned heuristics; they
-have not been calibrated on a representative book dataset.
+Scores are cosine similarities, **not confidence percentages**. The classifier
+uses 16 positive descriptions covering covers, spines, open pages, notebooks,
+stacks, shelves, upright/flat books, angles, partial views, and occlusion. No
+prompt set guarantees coverage of every configuration.
 
-The only scored targets are `books` and `empty_background`. There is no
-catch-all object prompt. A frame matching neither target clearly remains
-`uncertain`; the classifier does not force unrelated objects into one of the
-two targets. Mixed scenes can still receive an incorrect label, so a scene
-label cannot prove book absence.
+The frame score is the maximum similarity over all configured book prompts and
+all crops. A score at or above `relevance.min_similarity` (currently 0.24) produces
+`books`; a lower score produces `uncertain`. There is no background prompt or
+margin requirement. Uncertain means insufficient book evidence, not proof that
+no books exist. The threshold is a provisional choice on a small development
+sample; see the [book-only experiment](../../../docs/evaluations/relevance-book-only.md).
 
 ## Execution and persistence
 
@@ -69,14 +70,12 @@ retain the full height; portrait crops are top/center/bottom. Each crop is resiz
 to 224 pixels with CLIP normalization and inferred separately. Square inputs use
 one unique crop; unsupported extreme aspect ratios fail explicitly.
 
-If any crop qualifies as books, the qualifying crop with the largest book-minus-
-background margin wins. Otherwise the largest margin supplies the diagnostic
-result. Both reported scores come from that same crop; a background match does
-not establish that the entire frame is empty. Metadata stores all crop boxes in
-original-frame pixels, their scores, and the selected zero-based crop index.
-The Rich table shows a one-based crop number and total classification time.
-Small or occluded books may still be missed. Crops never replace saved full-frame
-images or the images sent to Crusoe.
+The crop with the maximum book score supplies the reported frame score.
+Metadata stores all crop boxes in original-frame pixels, their book scores, and
+the selected zero-based crop index. The Rich table shows the book score, threshold,
+one-based crop number, and total classification time. Old stored metadata remains
+historical and is not rewritten. Small or occluded books may still be missed.
+Crops never replace saved full-frame images or the images sent to Crusoe.
 
 ## Evaluation checkpoint
 
@@ -91,7 +90,7 @@ per-image scores and latency; images remain private and ignored by Git. This
 command evaluates all supplied images directly, without the live quality or
 novelty gates, to make model behavior inspectable.
 
-After removing the catch-all prompts on 2026-11-06, the same 63 existing JPEGs
+Historical result, superseded by the book-only experiment: after removing the catch-all prompts on 2026-11-06, the same 63 existing JPEGs
 produced the following results. The prior three-target evaluation is superseded.
 
 | Measurement | Result |

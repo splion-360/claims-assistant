@@ -64,7 +64,7 @@ class CameraSummary:
                           f'{timestamp - self.relevance_at:.1f}s ago · {assessment.reason.replace("_", " ")}')
             if assessment.scores:
                 table.add_row('Similarity', f'Books {assessment.scores["books"]:.3f}',
-                              f'Background {assessment.scores["empty_background"]:.3f} (not probabilities)')
+                              f'Threshold {assessment.min_similarity:.3f} (not probability)')
                 if assessment.selected_crop is not None:
                     table.add_row('Crop', f'{assessment.selected_crop + 1}/{len(assessment.crop_boxes)}',
                                   f'Selected view · {assessment.elapsed_ms:.0f} ms total')

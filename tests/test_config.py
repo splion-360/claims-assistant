@@ -23,7 +23,7 @@ class ConfigTests(unittest.TestCase):
         cases = [
             ('relevance', 'min_similarity', 2),
             ('relevance', 'min_similiarity', .4),
-            ('relevance', 'prompts', {'books': ['book'], 'empty_background': []}),
+            ('relevance', 'prompts', {'books': []}),
             ('relevance', 'prompts', {'books': ['book'], 'empty_background': ['wall'], 'other_objects': ['mug']}),
             ('quality', 'dark_cutoff', 250),
             ('tracking', 'min_matches', 3),
@@ -41,14 +41,12 @@ class ConfigTests(unittest.TestCase):
                     with self.assertRaises(ValidationError):
                         load_config(path)
 
-    def test_two_targets_do_not_force_a_choice(self):
-        """Keep unrelated or ambiguous scenes uncertain without a catch-all class."""
-        self.assertEqual(set(CONFIG.relevance.prompts.model_dump()), {'books', 'empty_background'})
-        for scores in ({'books': .1, 'empty_background': .12},
-                       {'books': .3, 'empty_background': .31}):
-            self.assertEqual(decide(scores, 1).label, 'uncertain')
+    def test_book_only_target_abstains_below_threshold(self):
+        """Keep low similarity uncertain without a competing background target."""
+        self.assertEqual(set(CONFIG.relevance.prompts.model_dump()), {'books'})
+        self.assertEqual(decide({'books': .1}, 1).label, 'uncertain')
         with self.assertRaises(ValidationError):
-            RelevanceAssessment(label='other_objects', reason='retired')
+            RelevanceAssessment(label='empty_background', reason='retired')
 
     def test_experiment_values_reach_processing_defaults(self):
         """Load alternate YAML before consumers and verify settings affect behavior."""
@@ -82,7 +80,7 @@ import provider, speech
 from live_demo.server import health
 assessor = QualityAssessor()
 tracker = FrameTracker()
-print(json.dumps(dict(label=decide(dict(books=.4, empty_background=.1),1).label,
+print(json.dumps(dict(label=decide(dict(books=.4),1).label,
  prompts=PROMPTS, dimension=assessor.max_dimension, dark=assessor.dark_cutoff,
  capacity=tracker.keyframes.capacity, reanchor=tracker.reanchor_every,
  coverage=selection.new_coverage_fraction,

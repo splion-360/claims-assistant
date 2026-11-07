@@ -3,21 +3,27 @@ relevance:
   model_id: Xenova/clip-vit-base-patch32
   revision: 6b7c523703ae26e39be4b03774966f8571c7f523
   model_dir: .cache/book-relevance
-  method: clip-int8-image-fp32-text-overlap-v3
+  method: clip-book-only-overlap-v4
   crop_count: 3
-  min_similarity: 0.22
-  min_margin: 0.025
+  min_similarity: 0.24
   prompts:
     books:
       - a photo of a book
       - a photo of books on a bookshelf
       - a photo of a stack of books
       - a photo of book spines
-    empty_background:
-      - a photo of a blank wall
-      - a photo of an empty shelf
-      - a photo of a bare floor
-      - a photo of a ceiling
+      - a photo of the front cover of a book
+      - a photo of the back cover of a book
+      - a photo of an open book with visible pages
+      - a photo of a closed notebook
+      - a photo of an open notebook
+      - a photo of a composition notebook
+      - a photo of a book viewed at an angle
+      - a photo of a partially visible book at the edge of the image
+      - a photo of a partially obscured book
+      - a photo of books lying flat
+      - a photo of books standing upright
+      - a photo of a person holding a book
   # These preprocessing/tokenizer values must match the selected model.
   image_size: 224
   image_mean: [0.48145466, 0.4578275, 0.40821073]

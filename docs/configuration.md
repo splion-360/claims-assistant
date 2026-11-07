@@ -6,7 +6,7 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 
 | Section | Controls |
 | --- | --- |
-| `relevance` | Local model/revision, artifact hashes, prompts, similarity/margin, preprocessing, live crop count, CPU threads |
+| `relevance` | Local model/revision, artifact hashes, prompts, similarity threshold, preprocessing, live crop count, CPU threads |
 | `quality` | Assessment resolution, brightness cutoffs, BRISQUE assets/ranking scale, relevance quality gates |
 | `tracking` | SIFT, FLANN, keyframe budget, Lucas–Kanade, RANSAC and geometric verification |
 | `selection` | New coverage, detail gain, BRISQUE improvement, sharpness improvement |
@@ -31,10 +31,13 @@ Model IDs now come from YAML. The previous `CRUSOE_MODEL`, `CRUSOE_VISION_MODEL`
 read. `.env` retains API credentials and the optional `CRUSOE_BASE_URL` endpoint.
 No credentials are exposed through the health response or config file.
 
-The relevance classifier scores only books and empty background. `uncertain`
-remains an outcome for weak or close matches; it has no text prompt. Editing
-prompts or thresholds does not require retraining. Scores are cosine similarity,
-not probabilities, and the classifier remains diagnostic only.
+The relevance classifier scores only positive book prompts. It uses the maximum
+cosine similarity across prompts and crops, with one `relevance.min_similarity`
+threshold. There are no empty-background prompts or margin settings. Below the
+threshold the result is `uncertain`; quality-blocked/unavailable results also
+remain uncertain with an explicit status. Scores are not probabilities. Editing
+prompts or the threshold does not require retraining, but can change false-positive
+rates. Classification remains diagnostic only.
 
 For a different local model, use a compatible CLIP ONNX export. Update its ID,
 revision, artifact paths/hashes, cache directory, and matching preprocessing and
