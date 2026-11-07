@@ -92,3 +92,11 @@ retains existing rate/freshness constraints. Exact replay output is retained at
 `.claim-data/book-only-experiment/background-filter-verification.json`. This is
 local replay plus mocked-provider integration verification, not a live paid API
 load test. The comparison table above remains applicable to book admission.
+
+## Provisional threshold update
+
+At the user's request, the configured book threshold was subsequently raised
+to 0.26. The original table above records the unchanged development experiment:
+at 0.26, 50/89 positives passed and 4/63 negatives passed. This trades lower
+recall for fewer false positives; it is not an independently validated optimum.
+The proposed stricter quality gates are not part of this threshold-only change.

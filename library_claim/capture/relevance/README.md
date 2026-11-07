@@ -34,7 +34,7 @@ stacks, shelves, upright/flat books, angles, partial views, and occlusion. No
 prompt set guarantees coverage of every configuration.
 
 The frame score is the maximum similarity over all configured book prompts and
-all crops. A score at or above `relevance.min_similarity` (currently 0.24) produces
+all crops. A score at or above `relevance.min_similarity` (currently 0.26) produces
 `books`; a lower score produces `uncertain`. Ten empty-background descriptions score bare walls, shelves, tables, ceilings,
 floors, corners, and windowsills for diagnostics. They do not veto books or
 participate in the threshold decision; there is no margin requirement. Uncertain means insufficient book evidence, not proof that

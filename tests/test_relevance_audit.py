@@ -16,7 +16,7 @@ class RelevanceAuditTests(unittest.TestCase):
 
     def test_overlap_and_auc_reflect_known_book_scores(self):
         """Measure tied rankings and positive detection separately from score means."""
-        scores = np.array([[.3], [.2], [.2], [.25]])
+        scores = np.array([[.3], [.2], [.2], [.27]])
         result = summarize(scores, np.array([True, True, False, False]), [1, 2, 3, 4])
         self.assertAlmostEqual(result['book_score_auc'], .625)
         self.assertTrue(result['book_score_ranges_overlap'])

@@ -5,7 +5,7 @@ relevance:
   model_dir: .cache/book-relevance
   method: clip-book-filter-background-diagnostics-v5
   crop_count: 3
-  min_similarity: 0.24
+  min_similarity: 0.26
   prompts:
     books:
       - a photo of a book
