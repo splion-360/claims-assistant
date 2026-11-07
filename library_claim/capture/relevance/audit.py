@@ -8,11 +8,10 @@ from time import perf_counter
 import cv2
 import numpy as np
 import onnxruntime as ort
-from PIL import Image
 from tokenizers import Tokenizer
 
 from library_claim.config import CONFIG, CONFIG_DIGEST
-from .classifier import MODEL_DIR, PROMPTS, prepare_image, decide
+from .classifier import center_crop, MODEL_DIR, PROMPTS, prepare_image, decide
 
 
 def session(path: Path) -> ort.InferenceSession:
@@ -40,27 +39,6 @@ def unit(vectors: np.ndarray) -> np.ndarray:
         Unit-length row vectors.
     """
     return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
-
-
-def center_crop(image: np.ndarray) -> np.ndarray:
-    """Apply CLIP's reference shortest-edge resize and center crop.
-
-    Args:
-        image: Original uint8 BGR camera frame.
-
-    Returns:
-        Normalized RGB model tensor using the configured CLIP normalization.
-    """
-    size = CONFIG.relevance.image_size
-    rgb = Image.fromarray(image[:, :, ::-1])
-    width, height = rgb.size
-    scale = size / min(width, height)
-    rgb = rgb.resize((int(width * scale), int(height * scale)), Image.Resampling.BICUBIC)
-    left, top = (rgb.width - size) // 2, (rgb.height - size) // 2
-    rgb = rgb.crop((left, top, left + size, top + size))
-    pixels = np.asarray(rgb, dtype=np.float32) / 255
-    pixels = (pixels - np.float32(CONFIG.relevance.image_mean)) / np.float32(CONFIG.relevance.image_std)
-    return np.ascontiguousarray(pixels.transpose(2, 0, 1)[None])
 
 
 def summarize(scores: np.ndarray, labels: np.ndarray, timings: list[float]) -> dict:
@@ -124,7 +102,7 @@ def audit(manifest: Path, full_precision_dir: Path, output: Path) -> dict:
     tokens = np.array([item.ids for item in tokenizer.encode_batch(prompts)], dtype=np.int64)
     models = {
         'int8': (MODEL_DIR / Path(CONFIG.relevance.artifacts.vision.remote).name,
-                 MODEL_DIR / Path(CONFIG.relevance.artifacts.text.remote).name),
+                 MODEL_DIR / 'text_model_quantized.onnx'),
         'fp32': (full_precision_dir / 'vision_model.onnx', full_precision_dir / 'text_model.onnx'),
     }
     text_vectors = {}

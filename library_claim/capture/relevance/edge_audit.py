@@ -11,60 +11,7 @@ from tokenizers import Tokenizer
 
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from .audit import center_crop, session, summarize, unit
-from .classifier import BookRelevanceClassifier, MODEL_DIR, PROMPTS, decide, prepare_image
-
-
-def crop_boxes(width: int, height: int, count: int) -> list[tuple[int, int, int, int]]:
-    """Cover the long image axis with evenly spaced overlapping square views.
-
-    Args:
-        width: Original image width.
-        height: Original image height.
-        count: Requested number of crops, including both image edges.
-
-    Returns:
-        Unique left, top, right, bottom pixel boxes covering the full image.
-
-    Raises:
-        ValueError: Dimensions or count are invalid, or crops would leave gaps.
-    """
-    if min(width, height) < 1 or count < 2:
-        raise ValueError('Use positive dimensions and at least two crops')
-    side = min(width, height)
-    offsets = sorted(set(round(value) for value in np.linspace(0, max(width, height) - side, count)))
-    if any(b - a > side for a, b in zip(offsets, offsets[1:])):
-        raise ValueError('Crop count is too small to cover this aspect ratio')
-    return [(x, 0, x + side, side) if width >= height else (0, x, side, x + side) for x in offsets]
-
-
-def select_crop(scores: np.ndarray) -> int:
-    """Choose book evidence without comparing scores from unrelated crops.
-
-    Args:
-        scores: Per-crop book and background score pairs.
-
-    Returns:
-        Index of the strongest qualifying book margin, or strongest margin if none qualify.
-    """
-    eligible = [i for i, row in enumerate(scores) if decide(dict(zip(PROMPTS, row)), 0).label == 'books']
-    candidates = eligible or list(range(len(scores)))
-    return max(candidates, key=lambda i: scores[i, 0] - scores[i, 1])
-
-
-def grouped_scores(similarities: np.ndarray) -> np.ndarray:
-    """Reduce per-prompt similarities using the live classifier's prompt grouping.
-
-    Args:
-        similarities: One row per crop and one column per configured prompt.
-
-    Returns:
-        Book and background scores for each crop.
-    """
-    offset, columns = 0, []
-    for prompts in PROMPTS.values():
-        columns.append(similarities[:, offset:offset + len(prompts)].max(axis=1))
-        offset += len(prompts)
-    return np.stack(columns, axis=1)
+from .classifier import BookRelevanceClassifier, MODEL_DIR, PROMPTS, decide, prepare_image, crop_boxes, grouped_scores, select_crop
 
 
 def run(manifest: Path, full_precision_text: Path, output: Path) -> dict:

@@ -128,3 +128,26 @@ class RelevanceTests(unittest.TestCase):
             stream.assess(encoded.tobytes(), 'first', 0)
             with Repository(store.database) as repo:
                 self.assertEqual(repo.get(Frame, 'first').relevance_metadata['status'], 'unavailable')
+
+    def test_live_crops_keep_paired_scores_and_original_coordinates(self):
+        """Select an edge book crop and retain all three views in frame metadata."""
+        from library_claim.capture.relevance.classifier import BookRelevanceClassifier, PROMPTS
+
+        classifier = BookRelevanceClassifier.__new__(BookRelevanceClassifier)
+        classifier._vision = Mock()
+        classifier._vision.run.side_effect = [[np.eye(3, dtype=np.float32)[i:i + 1]] for i in range(3)]
+        # Give only the right crop a qualifying book signal.
+        pairs = np.array([[.1, .4], [.24, .23], [.35, .2]], dtype=np.float32)
+        classifier._text = np.concatenate([
+            np.repeat(pairs[:, i:i + 1], len(prompts), axis=1)
+            for i, prompts in enumerate(PROMPTS.values())
+        ], axis=1).T
+        result = classifier.assess(np.zeros((360, 640, 3), np.uint8))
+        self.assertEqual(classifier._vision.run.call_count, 3)
+        self.assertEqual(result.label, 'books')
+        self.assertEqual(result.selected_crop, 2)
+        self.assertEqual(result.crop_boxes, [(0, 0, 360, 360), (140, 0, 500, 360), (280, 0, 640, 360)])
+        self.assertEqual(result.scores, result.crop_scores[2])
+        self.assertAlmostEqual(result.scores['empty_background'], .2)
+        for call in classifier._vision.run.call_args_list:
+            self.assertEqual(call.args[1]['pixel_values'].shape, (1, 3, 224, 224))

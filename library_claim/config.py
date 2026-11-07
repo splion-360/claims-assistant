@@ -41,6 +41,7 @@ class RelevanceConfig(Settings):
     model_id: Text
     revision: Text
     model_dir: Path
+    crop_count: Annotated[int, Field(ge=2)]
     method: Text
     min_similarity: Annotated[float, Field(ge=-1, le=1)]
     min_margin: Annotated[float, Field(ge=0, le=2)]

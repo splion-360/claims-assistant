@@ -1,6 +1,6 @@
 # Local book relevance
 
-The live backend uses pretrained CLIP ViT-B/32 via the quantized ONNX export
+The live backend uses pretrained CLIP ViT-B/32 with an INT8 image encoder and FP32 text encoder from
 `Xenova/clip-vit-base-patch32`, pinned to revision
 `6b7c523703ae26e39be4b03774966f8571c7f523`. No training or fine-tuning is performed.
 This is a diagnostic pilot: labels do not gate Crusoe, trigger speech, change
@@ -15,7 +15,7 @@ uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python -m library_claim.capture.relevance setup
 ```
 
-Setup downloads about 156 MB into the ignored `.cache/book-relevance/` directory
+Setup downloads about 344 MB into the ignored `.cache/book-relevance/` directory
 and verifies SHA-256 checksums. Downloads use the pinned revision. The live path
 never downloads weights or uploads frames to a classification service. Restart
 the backend after installation; missing weights produce `status=unavailable`,
@@ -63,11 +63,20 @@ label cannot prove book absence.
   Unverified unsaved views are logged only. Old rows remain readable with a
   null relevance field. Labels never delete reference evidence.
 
-Full-frame square padding preserves edge objects that CLIP's default center crop
-could remove. RGB conversion, bicubic resize, and CLIP channel normalization are
-applied before 224-pixel image inference. This padding differs from the original
-preprocessor and requires evaluation. Small or occluded books can still be lost
-at that resolution. Class scores are maxima over each target's configured text prompts.
+Three overlapping square crops cover the long image axis, controlled by
+`relevance.crop_count` (default 3). Landscape crops are left/center/right and
+retain the full height; portrait crops are top/center/bottom. Each crop is resized
+to 224 pixels with CLIP normalization and inferred separately. Square inputs use
+one unique crop; unsupported extreme aspect ratios fail explicitly.
+
+If any crop qualifies as books, the qualifying crop with the largest book-minus-
+background margin wins. Otherwise the largest margin supplies the diagnostic
+result. Both reported scores come from that same crop; a background match does
+not establish that the entire frame is empty. Metadata stores all crop boxes in
+original-frame pixels, their scores, and the selected zero-based crop index.
+The Rich table shows a one-based crop number and total classification time.
+Small or occluded books may still be missed. Crops never replace saved full-frame
+images or the images sent to Crusoe.
 
 ## Evaluation checkpoint
 
@@ -119,4 +128,4 @@ A controlled book/no-book comparison now exists: see the
 preprocessing, text precision, and image precision without changing live settings.
 
 The [overlapping-crop follow-up](../../../docs/evaluations/relevance-edge-experiment.md)
-compares edge coverage and latency offline; it does not enable multi-crop live inference.
+records the comparison that preceded enabling the three-crop version for live testing.

@@ -65,6 +65,9 @@ class CameraSummary:
             if assessment.scores:
                 table.add_row('Similarity', f'Books {assessment.scores["books"]:.3f}',
                               f'Background {assessment.scores["empty_background"]:.3f} (not probabilities)')
+                if assessment.selected_crop is not None:
+                    table.add_row('Crop', f'{assessment.selected_crop + 1}/{len(assessment.crop_boxes)}',
+                                  f'Selected view · {assessment.elapsed_ms:.0f} ms total')
         else:
             table.add_row('Last relevance', 'Not assessed', '')
         table.add_row('Evidence saved', str(self.saved_count), 'Since previous summary')

@@ -3,7 +3,8 @@ relevance:
   model_id: Xenova/clip-vit-base-patch32
   revision: 6b7c523703ae26e39be4b03774966f8571c7f523
   model_dir: .cache/book-relevance
-  method: clip-int8-full-frame-v2
+  method: clip-int8-image-fp32-text-overlap-v3
+  crop_count: 3
   min_similarity: 0.22
   min_margin: 0.025
   prompts:
@@ -33,8 +34,8 @@ relevance:
       remote: onnx/vision_model_quantized.onnx
       sha256: 583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299
     text:
-      remote: onnx/text_model_quantized.onnx
-      sha256: 73baab855d406190da9faa498cfedf65f15cf309f4cc7385b7b032e6d08e5c3a
+      remote: onnx/text_model.onnx
+      sha256: 3f6571f5bad13a97c469c1622e1cfc4d9aef78b79fdbfcff804ca357bfada8cc
     tokenizer:
       remote: tokenizer.json
       sha256: f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd

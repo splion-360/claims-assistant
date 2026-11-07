@@ -74,3 +74,13 @@ and manifests remain in ignored local storage.
 
 See [the preceding precision/preprocessing audit](relevance-audit.md) for the
 pinned model sources, weight hashes, and initial annotation limitations.
+
+## Live testing enabled
+
+The backend now uses the tested FP32-text/INT8-image overlapping-crop path.
+`relevance.crop_count: 3` controls live coverage; the separate
+`experiments.edge_crop_count` still controls offline comparisons. Prompts and
+thresholds are unchanged. The table above describes the historical baseline;
+rerunning the `live` variant now evaluates the current overlapping-crop path.
+Partial-occlusion performance remains unvalidated. Saved images remain full-frame,
+and relevance remains diagnostic rather than a Crusoe routing gate.

@@ -1,4 +1,4 @@
-"""Score book relevance locally using quantized CLIP image and text embeddings."""
+"""Score overlapping camera crops with local CLIP image and text embeddings."""
 from pathlib import Path
 from threading import Lock
 from time import perf_counter
@@ -38,6 +38,9 @@ class RelevanceAssessment(BaseModel):
     config_digest: str = CONFIG_DIGEST
     min_similarity: float = MIN_SIMILARITY
     min_margin: float = MIN_MARGIN
+    crop_boxes: list[tuple[int, int, int, int]] = Field(default_factory=list)
+    crop_scores: list[dict[str, float]] = Field(default_factory=list)
+    selected_crop: int | None = None
 
 
 def decide(scores: dict[str, float], elapsed_ms: float) -> RelevanceAssessment:
@@ -93,6 +96,80 @@ def prepare_image(bgr: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(((pixels - mean) / std).transpose(2, 0, 1)[None])
 
 
+def center_crop(image: np.ndarray) -> np.ndarray:
+    """Apply CLIP's reference shortest-edge resize and center crop.
+
+    Args:
+        image: Original uint8 BGR camera frame.
+
+    Returns:
+        Normalized RGB model tensor using the configured CLIP normalization.
+    """
+    size = CONFIG.relevance.image_size
+    rgb = Image.fromarray(image[:, :, ::-1])
+    width, height = rgb.size
+    scale = size / min(width, height)
+    rgb = rgb.resize((int(width * scale), int(height * scale)), Image.Resampling.BICUBIC)
+    left, top = (rgb.width - size) // 2, (rgb.height - size) // 2
+    rgb = rgb.crop((left, top, left + size, top + size))
+    pixels = np.asarray(rgb, dtype=np.float32) / 255
+    pixels = (pixels - np.float32(CONFIG.relevance.image_mean)) / np.float32(CONFIG.relevance.image_std)
+    return np.ascontiguousarray(pixels.transpose(2, 0, 1)[None])
+
+
+def crop_boxes(width: int, height: int, count: int) -> list[tuple[int, int, int, int]]:
+    """Cover the long image axis with evenly spaced overlapping square views.
+
+    Args:
+        width: Original image width.
+        height: Original image height.
+        count: Requested number of crops, including both image edges.
+
+    Returns:
+        Unique left, top, right, bottom pixel boxes covering the full image.
+
+    Raises:
+        ValueError: Dimensions or count are invalid, or crops would leave gaps.
+    """
+    if min(width, height) < 1 or count < 2:
+        raise ValueError('Use positive dimensions and at least two crops')
+    side = min(width, height)
+    offsets = sorted(set(round(value) for value in np.linspace(0, max(width, height) - side, count)))
+    if any(b - a > side for a, b in zip(offsets, offsets[1:])):
+        raise ValueError('Crop count is too small to cover this aspect ratio')
+    return [(x, 0, x + side, side) if width >= height else (0, x, side, x + side) for x in offsets]
+
+
+def select_crop(scores: np.ndarray) -> int:
+    """Choose book evidence without comparing scores from unrelated crops.
+
+    Args:
+        scores: Per-crop book and background score pairs.
+
+    Returns:
+        Index of the strongest qualifying book margin, or strongest margin if none qualify.
+    """
+    eligible = [i for i, row in enumerate(scores) if decide(dict(zip(PROMPTS, row)), 0).label == 'books']
+    candidates = eligible or list(range(len(scores)))
+    return max(candidates, key=lambda i: scores[i, 0] - scores[i, 1])
+
+
+def grouped_scores(similarities: np.ndarray) -> np.ndarray:
+    """Reduce per-prompt similarities using the live classifier's prompt grouping.
+
+    Args:
+        similarities: One row per crop and one column per configured prompt.
+
+    Returns:
+        Book and background scores for each crop.
+    """
+    offset, columns = 0, []
+    for prompts in PROMPTS.values():
+        columns.append(similarities[:, offset:offset + len(prompts)].max(axis=1))
+        offset += len(prompts)
+    return np.stack(columns, axis=1)
+
+
 class BookRelevanceClassifier:
     """Reuse a CPU image encoder and cached text vectors without network access."""
 
@@ -138,14 +215,22 @@ class BookRelevanceClassifier:
             Label, cosine scores, margin, provenance, and warm inference timing.
         """
         started = perf_counter()
-        vector = self._vision.run(['image_embeds'], {'pixel_values': prepare_image(image)})[0]
-        vector /= np.linalg.norm(vector, axis=1, keepdims=True)
-        similarities = (vector @ self._text.T)[0]
-        scores, offset = {}, 0
-        for label, prompts in PROMPTS.items():
-            scores[label] = float(np.clip(similarities[offset:offset + len(prompts)].max(), -1, 1))
-            offset += len(prompts)
-        return decide(scores, (perf_counter() - started) * 1000)
+        if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3 or min(image.shape[:2]) < 1:
+            raise ValueError('Expected nonempty uint8 BGR image')
+        boxes = crop_boxes(image.shape[1], image.shape[0], SETTINGS.crop_count)
+        vectors = []
+        # Sequential inference preserves the INT8 scaling used in the comparison.
+        for left, top, right, bottom in boxes:
+            tensor = center_crop(image[top:bottom, left:right])
+            vector = self._vision.run(['image_embeds'], {'pixel_values': tensor})[0]
+            vectors.append(vector / np.linalg.norm(vector, axis=1, keepdims=True))
+        pairs = np.clip(grouped_scores(np.concatenate(vectors) @ self._text.T), -1, 1)
+        selected = select_crop(pairs)
+        scores = [dict(zip(PROMPTS, map(float, pair))) for pair in pairs]
+        result = decide(scores[selected], (perf_counter() - started) * 1000)
+        return result.model_copy(update={'crop_boxes': boxes, 'crop_scores': scores,
+                                         'selected_crop': selected})
+
 
 
 def shared_classifier() -> BookRelevanceClassifier:
