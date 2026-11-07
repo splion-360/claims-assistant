@@ -63,8 +63,9 @@ dropping frames while busy. Work runs in a thread; results from an old camera
 activation are discarded. BRISQUE remains capped at once per second and remote
 vision remains at one request per eight seconds with one request in flight.
 
-Tracking summaries log at most once per second. Full matrices and frame references
-are emitted at debug level. Existing visual reasoning is not yet gated by these
+A combined Rich camera summary logs every five seconds by default, controlled by
+`capture.summary_log_interval_s`. Full matrices and frame references are emitted
+at debug level. Existing visual reasoning is not yet gated by these
 associations; relevance and persistent book association are subsequent increments.
 
 ## Evidence comparison

@@ -77,9 +77,13 @@ Run from the repository root:
 ```
 
 Open `http://127.0.0.1:4177`, connect the session and enable the camera. Look for
-`Camera quality` multiline summaries in that terminal. Normal logs show raw
-BRISQUE, sharpness, dark/bright pixel percentages, frame change, and elapsed time.
-Full JSON with frame/session references is available with `--log-level debug`.
+one compact Rich table every five seconds (and immediately on the first frame).
+It shows tracking, BRISQUE, sharpness, latest relevance/similarities, and the number
+of frames saved since the previous summary. Older quality/relevance measurements
+show their age. Change `capture.summary_log_interval_s` in `config.yml` and restart
+to adjust display frequency without changing processing or capture cadence.
+Detailed scores, matches, overlap, timing, file paths, and frame/session references
+are available with `--log-level debug`.
 Logs exclude images and credentials.
 The existing session setup still requires the configured Crusoe API key.
 

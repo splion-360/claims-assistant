@@ -151,7 +151,7 @@ class BrowserConfig(Settings):
 class CaptureConfig(Settings):
     """Configure live processing and logging cadences."""
     quality_interval_s: PositiveFloat
-    tracking_log_interval_s: PositiveFloat
+    summary_log_interval_s: PositiveFloat
     remote_interval_s: PositiveFloat
     frame_max_age_s: PositiveFloat
     browser: BrowserConfig

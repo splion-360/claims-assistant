@@ -21,11 +21,9 @@ never downloads weights or uploads frames to a classification service. Restart
 the backend after installation; missing weights produce `status=unavailable`,
 not a fabricated negative result. After a failure, retry by restarting the camera.
 
-The backend prints lines of this form (illustrative values):
-
-```text
-Camera relevance: books | status=assessed | books=0.340 empty_background=0.190 | 35.0 ms | reason=separated_match | frame=...
-```
+The backend includes the latest relevance result in a Rich camera summary every
+five seconds by default. Its age is displayed because repeated views can skip
+classification. Full per-frame relevance JSON is available at debug level.
 
 All model choices, prompts, thresholds, and preprocessing values come from
 [`config.yml`](../../../config.yml). Restart the backend after edits.

@@ -85,7 +85,7 @@ selection:
   sharpness_floor: 1
 capture:
   quality_interval_s: 1.0
-  tracking_log_interval_s: 1.0
+  summary_log_interval_s: 5.0  # Console only; processing cadence is unchanged.
   remote_interval_s: 8.0
   frame_max_age_s: 12.0
   # Only this subsection is sent to the browser.

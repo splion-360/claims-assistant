@@ -63,7 +63,8 @@ The default location is `.claim-data/` at the project root:
 ```
 
 The live sweep ID is the browser session ID. Each retained frame logs its absolute
-file path, frame ID, and selection reason. Frame and association records commit in
+file path, frame ID, and selection reason at debug level. Normal summaries show
+only the count of frames saved since the previous summary. Frame and association records commit in
 one transaction. Referenced keyframes must already exist in the same sweep.
 Repeated JPEG bytes share a file even if distinct captures have different IDs.
 The directory is ignored by Git and is not exposed as a public static route.

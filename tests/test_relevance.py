@@ -95,9 +95,9 @@ class RelevanceTests(unittest.TestCase):
             stream = CameraTracking(store, relevance=service)
             _, encoded = cv2.imencode('.jpg', textured_view())
             first = stream.assess(encoded.tobytes(), 'first', 0)
-            with self.assertLogs('uvicorn.error.camera_quality', level='INFO') as logs:
+            with self.assertLogs('uvicorn.error.camera_quality', level='DEBUG') as logs:
                 stream.log(first, 0)
-            self.assertTrue(any('Camera relevance: books' in log and 'frame=first' in log for log in logs.output))
+            self.assertTrue(any('camera_relevance frame=first' in log and '"label":"books"' in log for log in logs.output))
             for i in range(1, 8):
                 stream.assess(encoded.tobytes(), f'f{i}', i * .2)
             self.assertEqual(service.assess.call_count, 1)

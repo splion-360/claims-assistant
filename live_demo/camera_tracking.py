@@ -10,6 +10,7 @@ from library_claim.capture.selection import compare_evidence
 from library_claim.capture.tracking.tracker import FrameTracker, TrackingResult
 from library_claim.storage.live_capture import LiveCaptureStore
 from live_demo.camera_quality import logger
+from live_demo.camera_logging import CameraSummary
 from live_demo.camera_relevance import CameraRelevance
 from library_claim.config import CONFIG
 
@@ -30,7 +31,7 @@ class CameraTracking:
         self.relevance = relevance
         self.latest_relevance = None
         self.relevance_frame_id = None
-        self.last_log_at = float('-inf')
+        self.summary = CameraSummary()
         self.last_quality_at = float('-inf')
         self.latest_quality = None
         self.quality_frame_id = None
@@ -111,29 +112,19 @@ class CameraTracking:
         return result
 
     def log(self, result: TrackingResult, timestamp: float) -> None:
-        """Log selected evidence locations and a rate-limited tracking summary.
+        """Log detailed diagnostics at debug level and a periodic camera table.
 
         Args:
             result: Completed tracking result.
             timestamp: Monotonic capture arrival time.
         """
-        if self.latest_relevance is not None and self.relevance_frame_id == result.frame_id:
-            assessment = self.latest_relevance
-            scores = ' '.join(f'{key}={value:.3f}' for key, value in assessment.scores.items())
-            logger.info('Camera relevance: %s | status=%s | %s | %.1f ms | reason=%s | frame=%s',
-                        assessment.label, assessment.status, scores or 'scores=N/A',
-                        assessment.elapsed_ms, assessment.reason, result.frame_id)
+        assessment = self.latest_relevance if self.relevance_frame_id == result.frame_id else None
+        if assessment is not None:
+            logger.debug('camera_relevance frame=%s result=%s', result.frame_id, assessment.model_dump_json())
         if self.saved_path is not None:
-            logger.info('Evidence saved: %s | frame=%s | reason=%s',
-                        self.saved_path, result.frame_id, self.saved_reason)
-        if timestamp - self.last_log_at < CONFIG.capture.tracking_log_interval_s:
-            return
-        self.last_log_at = timestamp
-        # A new reference maps to itself; that is not a recovered-view match.
-        if result.status == 'reference_created':
-            overlap = 'N/A — new reference'
-        else:
-            overlap = 'unknown' if result.reference_overlap is None else f'{result.reference_overlap:.0%}'
-        logger.info('Camera tracking: %s | matches=%d | reference overlap=%s | %.1f ms',
-                    result.status, result.matched_points, overlap, result.elapsed_ms)
+            logger.debug('Evidence saved: %s | frame=%s | reason=%s',
+                         self.saved_path, result.frame_id, self.saved_reason)
         logger.debug('camera_tracking %s', result.model_dump_json())
+        self.summary.log(result, timestamp, quality=self.latest_quality,
+                         quality_at=self.last_quality_at, relevance=assessment,
+                         saved=self.saved_path is not None)

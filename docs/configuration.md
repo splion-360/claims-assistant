@@ -15,6 +15,10 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 | `inference` | Crusoe text/vision models, token budgets, temperature, Qwen thinking and request timeouts |
 | `speech` | Deepgram STT/TTS models, speech request chunk length and timeouts |
 
+For quieter console output, change `capture.summary_log_interval_s` (default 5
+seconds). It controls the combined Rich table only; scoring, tracking, and image
+saving retain their independent cadences. Debug logs retain per-frame details.
+
 Change a value, restart the backend, and refresh the browser. Configuration is
 loaded once per process; existing workers and cached prompt embeddings are not
 mutated mid-sweep. CLI evaluation loads the current file each time it starts.
