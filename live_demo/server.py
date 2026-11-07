@@ -83,7 +83,7 @@ from library_claim.storage.evidence import EvidenceStore
 from library_claim.domain.models import BookObservation, Frame
 from library_claim.identification.review import review_books
 from library_claim.orchestration.state_machine import SweepController
-from live_demo.book_guidance import capture_instruction
+from live_demo.book_guidance import capture_instruction, needs_capture, GuidancePolicy
 import cv2
 import numpy as np
 from live_demo.camera_quality import log_scores
@@ -142,7 +142,9 @@ class IntakeSession:
     capture_instruction: str = "Sweep slowly across the shelves."
     capture_target: str | None = None
     capture_attempts: int = 0
-    prompted_books: set[str] = field(default_factory=set)
+    guidance_policy: GuidancePolicy = field(default_factory=GuidancePolicy)
+    capture_started_at: float = 0.0
+    capture_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_frame: bytes | None = None
     last_frame_at: float = 0.0
     last_frame_id: str = ""
@@ -1122,7 +1124,7 @@ async def live_voice(websocket: WebSocket) -> None:
                 candidate = gate.take(
                     time.monotonic(),
                     revision,
-                    busy=(camera_task is not None and not camera_task.done()) or session.sweep_phase in {"Approaching", "Resuming"},
+                    busy=(camera_task is not None and not camera_task.done()) or session.sweep_phase == "Resuming",
                     at_limit=len(session.evidence_photos) >= MAX_PHOTOS,
                 )
                 quality_logger.debug(
@@ -1419,17 +1421,53 @@ async def live_voice(websocket: WebSocket) -> None:
             spoken_turn_id = turn_id
             track(speak_guidance(text, text_epoch, turn_id))
 
+    async def finish_capture(resolved=False):
+        """Return through the locked states without requiring user confirmation.
+
+        Args:
+            resolved: Whether fresh evidence supplied the missing title.
+        """
+        async with session.capture_lock:
+            if session.sweep_phase == "Sweeping":
+                return
+            tracking_stream.requested_capture = False
+            tracking_stream.remote_filter.pending = None
+            while session.sweep_phase != "Sweeping":
+                state = {"Approaching": "Capturing", "Capturing": "Resuming", "Resuming": "Sweeping"}[session.sweep_phase]
+                await asyncio.to_thread(transition_capture, session, state)
+            session.capture_target = None
+            session.guidance_policy.last_request_at = time.monotonic()
+            await guide("That title is clear; move back and continue your sweep." if resolved else
+                        "I have saved the unclear reading for review; continue your sweep.")
+
+    async def capture_timeout(started):
+        """End an unproductive intervention even when no frame passes the filters.
+
+        Args:
+            started: Request generation represented by its monotonic timestamp.
+        """
+        await asyncio.sleep(CONFIG.identification.guidance_timeout_s)
+        if session.capture_started_at == started and not session.deleted:
+            await finish_capture()
+
     async def request_capture(book):
-        """Start an explicit approach to the selected book.
+        """Request useful evidence and automatically inspect subsequent suitable frames.
 
         Args:
             book: Current canonical inventory card.
         """
-        await asyncio.to_thread(transition_capture, session, "Approaching", book['id'])
-        session.capture_target = book['id']
-        session.capture_attempts = 0
-        session.prompted_books.add(book['id'])
-        await guide(capture_instruction(book))
+        async with session.capture_lock:
+            if session.sweep_phase != "Sweeping":
+                return
+            await asyncio.to_thread(transition_capture, session, "Approaching", book['id'])
+            session.capture_target = book['id']
+            session.capture_attempts = 0
+            session.capture_started_at = time.monotonic()
+            session.guidance_policy.remember(book, session.capture_started_at)
+            tracking_stream.remote_filter.pending = None
+            tracking_stream.requested_capture = True
+            await guide(capture_instruction(book))
+            track(capture_timeout(session.capture_started_at))
 
     async def capture(candidate, gate):
         """Send only approved bytes and retain failed candidates for bounded retry.
@@ -1440,6 +1478,11 @@ async def live_voice(websocket: WebSocket) -> None:
         """
         success = False
         try:
+            async with session.capture_lock:
+                if session.sweep_phase == "Approaching":
+                    if candidate.timestamp < session.capture_started_at:
+                        return
+                    await asyncio.to_thread(transition_capture, session, "Capturing")
             result = await activity(
                 "pin_evidence_photo", lambda: _pin_evidence_photo(session, {}, candidate=candidate)
             )
@@ -1449,17 +1492,16 @@ async def live_voice(websocket: WebSocket) -> None:
                 await update()
                 if session.library_sweep and session.sweep_phase == "Capturing":
                     session.capture_attempts += 1
-                    target = next((book for book in session.book_inventory if book['id'] == session.capture_target), None)
-                    fresh = target and candidate.frame_id in target['frame_ids']
-                    tracking_stream.requested_capture = True
-                    if (fresh and not target['needs_review']) or session.capture_attempts >= CONFIG.identification.recapture_max_attempts:
-                        tracking_stream.requested_capture = False
-                        await asyncio.to_thread(transition_capture, session, "Resuming")
-                        await guide("Book reading updated. Return to your sweep position and tap Resume sweep." if fresh and not target['needs_review'] else
-                                    "This book still needs review. Return to your sweep position and tap Resume sweep; the evidence is saved.")
+                    target = next((book for book in session.book_inventory if session.capture_target in
+                                   set(book.get('member_ids', [])) | {book['id']}), None)
+                    resolved = bool(target and candidate.frame_id in target['frame_ids'] and not needs_capture(target))
+                    if resolved or session.capture_attempts >= CONFIG.identification.recapture_max_attempts:
+                        await finish_capture(resolved)
+                    else:
+                        tracking_stream.requested_capture = True
                 elif (session.library_sweep and session.sweep_phase == "Sweeping"
                       and (text_task is None or text_task.done()) and spoken_turn_id is None):
-                    book = next((book for book in session.book_inventory if book['needs_review'] and book['id'] not in session.prompted_books), None)
+                    book = session.guidance_policy.choose(session.book_inventory, time.monotonic(), candidate.frame_id)
                     if book:
                         await request_capture(book)
         except asyncio.CancelledError:
@@ -1522,32 +1564,21 @@ async def live_voice(websocket: WebSocket) -> None:
                         tracking_stream = CameraTracking(
                             capture_store, relevance=CameraRelevance()
                         )
-                        tracking_stream.requested_capture = session.sweep_phase == "Capturing"
+                        tracking_stream.requested_capture = session.sweep_phase in {"Approaching", "Capturing"}
+                        if not enabled and session.sweep_phase != "Sweeping":
+                            await finish_capture()
                 elif kind == "book_capture":
-                    if camera_task is not None and not camera_task.done():
-                        raise ValueError("Wait for the current capture to finish")
-                    action = message.get("action")
+                    if message.get("action"):
+                        raise ValueError("Capture and resumption are automatic; refresh the page")
+                    if not session.camera_enabled:
+                        raise ValueError("Start the camera to capture a clearer view")
+                    if session.sweep_phase != "Sweeping" or (camera_task is not None and not camera_task.done()):
+                        raise ValueError("A camera inspection is already in progress")
+                    book = next((book for book in session.book_inventory if book['id'] == message.get('book_id')), None)
+                    if book is None:
+                        raise ValueError("Select a current book")
                     await interrupt()
-                    if action == "ready" and session.sweep_phase == "Approaching":
-                        tracking_stream.remote_filter.pending = None
-                        tracking_stream.requested_capture = True
-                        await asyncio.to_thread(transition_capture, session, "Capturing")
-                        await guide("Hold the book and its neighbours in view while I inspect the next suitable frame.")
-                    elif action == "resume" and session.sweep_phase != "Sweeping":
-                        tracking_stream.requested_capture = False
-                        tracking_stream.remote_filter.pending = None
-                        while session.sweep_phase != "Sweeping":
-                            next_state = {"Approaching":"Capturing", "Capturing":"Resuming", "Resuming":"Sweeping"}[session.sweep_phase]
-                            await asyncio.to_thread(transition_capture, session, next_state)
-                        session.capture_target = None
-                        await guide("Resume your sweep from where you left off.")
-                    elif not action and session.sweep_phase == "Sweeping":
-                        book = next((book for book in session.book_inventory if book['id'] == message.get('book_id')), None)
-                        if book is None:
-                            raise ValueError("Select a current book")
-                        await request_capture(book)
-                    else:
-                        raise ValueError("Finish or resume the current capture first")
+                    await request_capture(book)
                 elif kind == "text":
                     text = message.get("text", "")
                     if (
@@ -1630,6 +1661,12 @@ async def live_voice(websocket: WebSocket) -> None:
         await asyncio.gather(*list(tasks), return_exceptions=True)
         session.live_socket = None
         set_camera_mode(session, False)
+        # A disconnected camera must not leave a later connection stuck approaching.
+        while session.sweep_phase != "Sweeping":
+            next_state = {"Approaching": "Capturing", "Capturing": "Resuming", "Resuming": "Sweeping"}[session.sweep_phase]
+            await asyncio.to_thread(transition_capture, session, next_state)
+        session.capture_target = None
+        session.capture_instruction = "Sweep slowly across the shelves."
         session.updated_at = time.monotonic()
         with contextlib.suppress(Exception):
             await websocket.close()

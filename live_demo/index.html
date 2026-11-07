@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600&family=Patrick+Hand&family=Inter:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=book-review-1" />
+    <link rel="stylesheet" href="./styles.css?v=book-review-2" />
   </head>
   <body>
     <div class="desk">
@@ -22,7 +22,7 @@
             <p id="modelLabel" class="brand-sub">Connecting to sweep assistant</p>
           </div>
         </div>
-        <button id="openPacket" class="ghost-button" type="button">Sweep evidence</button>
+        <button id="openPacket" class="ghost-button" type="button">Browse books</button>
       </header>
 
       <main class="desk-layout">
@@ -39,7 +39,7 @@
             </div>
 
             <p id="captureInstruction" class="card-hint" aria-live="polite">Sweep slowly across the shelves.</p>
-            <div class="capture-actions"><button id="captureReady" type="button" hidden>Ready to capture</button><button id="resumeSweep" type="button" hidden>Resume sweep</button></div>
+
             <div class="controls">
               <button id="micButton" class="round-button" type="button" aria-label="Start or stop voice" disabled>
                 <span class="icon-mic" aria-hidden="true"></span>
@@ -109,24 +109,17 @@
       </main>
     </div>
 
-    <dialog id="packetDialog" class="packet-dialog">
-      <div class="dialog-header">
-        <h2>Sweep evidence summary</h2>
-        <a id="downloadPacket" class="text-button" href="#" download>Download packet + evidence</a><button id="closePacket" type="button" aria-label="Close packet">Close</button>
-      </div>
-      <pre id="packetMarkdown"></pre><p>Local sweep evidence. Sessions expire after 30 minutes without activity. Download to keep a copy.</p>
-    </dialog>
-
     <dialog id="booksDialog" class="books-drawer" aria-labelledby="booksTitle">
-      <div class="dialog-header"><h2 id="booksTitle">Books</h2><button id="closeBooks" type="button">Back to sweep</button></div>
-      <p>Visual readings, not catalogue verification. Unresolved sightings are not extra copies.</p>
+      <div class="dialog-header"><h2 id="booksTitle">Your library</h2><button id="closeBooks" type="button">Back to sweep</button></div>
+      <p>Browse what the camera saw. Compare possible matches before combining them.</p>
+      <a id="downloadPacket" class="library-download" href="#" download>Download evidence</a>
       <div class="book-tabs" aria-label="Book views"><button id="reviewTab" type="button" aria-pressed="true">Needs review</button><button id="identifiedTab" type="button" aria-pressed="false">Identified</button></div>
       <p id="bookActionStatus" role="status"></p>
-      <section id="bookInventory" aria-live="polite"></section>
-      <section id="bookDetail" aria-label="Selected book"></section>
+      <div class="library-layout"><section id="bookInventory" aria-live="polite"></section>
+      <section id="bookDetail" aria-label="Selected book"></section></div>
     </dialog>
     <canvas id="frameCanvas" hidden></canvas>
     <script src="./voice.js?v=1"></script>
-    <script src="./app.js?v=book-review-1"></script>
+    <script src="./app.js?v=book-review-2"></script>
   </body>
 </html>

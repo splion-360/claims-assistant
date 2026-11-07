@@ -12,7 +12,7 @@ from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.domain.models import Book, BookObservation, Frame, FrameAssociation, ProcessingJob, Quality, ReviewIssue
 from library_claim.storage.repository import Repository
 from library_claim.storage.evidence import EvidenceStore
-from .matching import crop_features, visual_match, text_relation, preferred_reading
+from .matching import crop_features, visual_match, text_relation, preferred_reading, normalize
 from .models import BookFrameAnalysis
 from .review import identities, reconcile
 
@@ -205,6 +205,7 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
         needs_review = status == 'unresolved' or not readings['title'] or bool(latest and latest.visual_issues)
         result.append({'needs_review': needs_review, 'id': book.id, **readings, 'status': status,
                        'observation_count': len(evidence),
+                       'member_ids': [key for key, root in roots.items() if root == book.id],
                        'frame_ids': list(dict.fromkeys(row.frame_id for row in evidence)),
                        'observations': [{'id': row.id, 'frame_id': row.frame_id, 'bbox': row.bbox.model_dump(),
                                          'title': row.title, 'issues': row.visual_issues,
@@ -215,7 +216,10 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
         book['candidates'] = [other['id'] for other in result if other['id'] != book['id']
                               and not set(book['frame_ids']) & set(other['frame_ids'])
                               and frozenset((book['id'], other['id'])) not in separate
-                              and text_relation(book['title'], other['title']) in ('exact', 'partial', 'fuzzy')]
+                              and text_relation(book['author'], other['author']) != 'conflicting'
+                              and (text_relation(book['title'], other['title']) in ('exact', 'partial', 'fuzzy')
+                                   or (min(len(normalize(book['title'] or '')), len(normalize(other['title'] or ''))) >= CONFIG.identification.text_min_characters
+                                       and (normalize(book['title']) in normalize(other['title']) or normalize(other['title']) in normalize(book['title']))))]
         if book['candidates']:
             book['needs_review'] = True
     return result

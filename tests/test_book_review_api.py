@@ -78,17 +78,43 @@ class BookReviewApiTests(unittest.TestCase):
 
     def test_guidance_addresses_the_observed_problem(self):
         """Ask for stillness on blur and neighbouring books for uncertain identity."""
-        self.assertIn('Hold the camera still', capture_instruction({'title':'Example', 'observations':[{'issues':['blur']}]}))
-        self.assertIn('books beside it', capture_instruction({'status':'unresolved'}))
+        self.assertIn('Hold the camera steady', capture_instruction({'title':'Example', 'observations':[{'issues':['blur']}]}))
+        self.assertNotIn('Ready', capture_instruction({'status':'unresolved'}))
 
 
 class BookGuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
     """Exercise explicit drawer capture actions through the live socket handler."""
 
-    async def test_request_ready_and_resume_follow_locked_states(self):
-        """Keep drawer recapture controls responsive without invoking insurance inference."""
+    async def exercise_guidance(self, deliver_frame):
+        """Exercise capture success or timeout without manual state messages.
+
+        Args:
+            deliver_frame: Whether a suitable camera frame follows the request.
+        """
         from test_live_turns import LiveTurnTests
+        from unittest.mock import Mock
+        from library_claim.capture.relevance.classifier import decide
+        import asyncio
+        import base64
         count = 0
+
+        async def capture(session, args, candidate):
+            """Supply a clearer title after a real local filter pass.
+
+            Args:
+                session: Active session.
+                args: Tool arguments.
+                candidate: Approved camera frame.
+
+            Returns:
+                Successful capture response.
+            """
+            self.assertEqual(session.sweep_phase, 'Capturing')
+            book = session.book_inventory[0]
+            book['title'] = 'The Good People'
+            book['frame_ids'].append(candidate.frame_id)
+            return {'pinned': True}
+
 
         async def receive(session, sent):
             """Supply review actions and verify their emitted state changes.
@@ -114,14 +140,26 @@ class BookGuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
                                        BookFrameAnalysis(books=[detection()]), encoded.tobytes(), 'test')
                 session.book_inventory = result['inventory']
                 return {'type':'book_capture', 'book_id':session.book_inventory[0]['id']}
-            if count == 2:
+            if count == 2 and deliver_frame:
                 self.assertEqual(session.sweep_phase, 'Approaching')
-                return {'type':'book_capture', 'action':'ready'}
-            if count == 3:
-                self.assertEqual(session.sweep_phase, 'Capturing')
-                return {'type':'book_capture', 'action':'resume'}
-            self.assertEqual(session.sweep_phase, 'Sweeping')
-            self.assertTrue(any(message.get('text', '').startswith('Resume your sweep') for message in sent))
+                _, encoded = cv2.imencode('.jpg', textured_view())
+                return {'type':'video', 'data':base64.b64encode(encoded).decode()}
+            while session.sweep_phase != 'Sweeping':
+                await asyncio.sleep(.001)
+            self.assertTrue(any('continue your sweep' in message.get('text', '') for message in sent))
+            self.assertFalse(any('tap' in message.get('text', '').lower() for message in sent))
             return {'type':'close'}
 
-        await LiveTurnTests.drive(self, receive)
+        with patch.object(server, '_pin_evidence_photo', side_effect=capture):
+            await LiveTurnTests.drive(self, receive, relevance=Mock(assess=Mock(return_value=decide({'books':.4}, 1))))
+
+    async def test_request_automatically_captures_and_resumes(self):
+        """Resume after a suitable frame supplies the title without manual controls."""
+        await self.exercise_guidance(True)
+
+    async def test_no_qualifying_frame_times_out_and_resumes(self):
+        """A blocked quality gate cannot trap the user in an intervention."""
+        settings = server.CONFIG.model_copy(update={'identification': server.CONFIG.identification.model_copy(
+            update={'guidance_timeout_s': .05})})
+        with patch.object(server, 'CONFIG', settings):
+            await self.exercise_guidance(False)

@@ -1008,3 +1008,26 @@ h1 {
 .books-drawer button:focus-visible, #openBooks:focus-visible { outline: 3px solid #87653b; outline-offset: 2px; }
 body:has(.books-drawer[open]) { overflow: hidden; }
 .books-drawer { inset: 0 0 0 auto; }
+
+/* A visual library groups possible matches without changing physical copy identities. */
+.books-drawer { width: min(1180px, 96vw); }
+.library-layout { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(340px, 1.2fr); gap: 28px; align-items: start; margin-top: 20px; }
+#bookInventory { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; align-content: start; }
+.book-card { display: flex; flex-direction: column; padding: 14px; margin: 0; color: #29241e; }
+.group-crops { display: flex; width: 100%; gap: 6px; min-height: 160px; background: #eee7da; justify-content: center; overflow: hidden; }
+.group-crops img { min-width: 0; width: 100%; height: 170px; object-fit: contain; }
+.book-card-copy { display: flex; flex-direction: column; gap: 7px; }
+.book-badge { align-self: start; padding: 4px 7px; border-radius: 4px; background: #e9dfca; }
+.book-comparison { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+.book-comparison:has(.comparison-card:only-child) { grid-template-columns: 1fr; }
+.comparison-card { min-width: 0; border: 1px solid #d9ccb5; padding: 12px; background: white; }
+.comparison-card h3 { overflow-wrap: anywhere; }
+.book-best { height: 240px; }
+#bookDetail { margin: 0; padding: 0; border: 0; }
+.review-actions { display: flex; gap: 10px; margin-bottom: 12px; }
+.book-history { margin-top: 14px; }
+#bookDetail details { margin-top: 24px; }
+.library-download { display: inline-block; color: #664e2e; font-size: 13px; margin-bottom: 10px; }
+.detail-placeholder { color: #6b6051; padding: 30px; text-align: center; }
+.missing-crop { display: grid; place-items: center; min-height: 140px; color: #6b6051; }
+@media (max-width: 760px) { .books-drawer { width: 100vw; } .library-layout { grid-template-columns: 1fr; } .book-best { height: 190px; } }

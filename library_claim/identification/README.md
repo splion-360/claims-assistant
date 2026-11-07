@@ -123,15 +123,28 @@ Same book appends a merge decision; Separate books prevents subsequent automatic
 merges between those groups. All original images and observations remain stored.
 The SQLite schema upgrades automatically to version 3 for this decision ledger.
 
-Capture clearer view closes the drawer and enters Approaching. Ready to capture
-enters Capturing; an explicit request allows reconsideration of an already tracked
-view but preserves quality, book relevance, cadence, and duplicate-byte gates.
-After a useful associated result, or the configured `recapture_max_attempts`, the
-agent enters Resuming. Resume sweep returns to Sweeping. Resume also permits the
-user to abandon a capture; intermediate locked transitions are preserved. The
-agent can request one intervention per book ID during a live session, while manual
-recapture remains available. Missing qualifying frames do not consume attempts;
-the user can resume at any time. Speech uses existing Deepgram output when enabled.
+Automatic intervention is limited to a missing title in the current frame.
+Readable titles, optional author/publisher gaps, and duplicate-association review
+flags do not trigger requests. Reconciliation runs first. Requests remember aliases
+and candidate IDs, obey a 30-second cooldown and three-request session limit, and
+conservatively suppress new unidentified fragments after an unresolved request.
+This can defer genuinely different unreadable books to review rather than repeatedly
+interrupting the user. These settings are configurable in `config.yml`.
+
+Approaching begins with one spoken camera adjustment. A subsequent qualifying
+frame automatically enters Capturing. Quality, relevance, cadence and duplicate-byte
+gates stay active. Fresh associated title evidence, two unsuccessful inspected
+frames, or a 25-second timeout returns through Resuming to Sweeping automatically.
+There are no Ready/Resume buttons. The agent asks users to steady/reposition the
+camera, never to hold or move books. Explicit clearer-view requests remain available
+in review; camera shutdown also ends an intervention.
+
+The main Books and Browse books buttons open a spacious visual library. Possible
+matches are grouped as suggestions, not counted copies or merged records. Selecting
+a group shows crops side by side; capture history is collapsed by default. Download
+evidence remains secondary. Substring title similarity can suggest a review group
+but does not loosen automatic physical-identity merging. The raw Markdown summary
+is available in the download only, not the browsing interface.
 
 New browser sessions bypass the legacy insurance background workflow and use
 library guidance. Legacy insurance routines remain available for their existing

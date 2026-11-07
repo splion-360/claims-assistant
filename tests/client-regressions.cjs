@@ -77,4 +77,21 @@ test('main pinboard does not repeat book readings',()=>{
  assert.ok(!e.run('document.querySelector("#pinboard").innerHTML').includes('Secret title'));
 });
 
+test('possible duplicates form a visual group without changing records',()=>{
+ const e=env();e.run('state.book_inventory=[{id:"a",title:"THE GOOD PEOPLE",needs_review:true,candidates:["b"],frame_ids:["f1"]},{id:"b",title:"OD PEOPLE",needs_review:true,candidates:["a"],frame_ids:["f2"]}];renderBookInventory()');
+ assert.equal(e.run('state.book_inventory.length'),2);
+ assert.equal(e.run('bookGroups(state.book_inventory).length'),1);
+ assert.ok(e.run('document.querySelector("#bookInventory").innerHTML').includes('Possible same book'));
+ assert.ok(e.run('document.querySelector("#bookInventory").innerHTML').includes('not a copy count'));
+ e.run('state.book_inventory[1].frame_ids=["f1"]');
+ assert.equal(e.run('bookGroups(state.book_inventory).length'),2);
+});
+test('comparison shows both readings and collapses capture history',()=>{
+ const e=env();e.run('state.book_inventory=[{id:"a",title:"THE GOOD PEOPLE",candidates:["b"],frame_ids:["f1"]},{id:"b",title:"OD PEOPLE",frame_ids:["f2"]}];selectedBookId="a";renderBookDetail()');
+ const html=e.run('document.querySelector("#bookDetail").innerHTML');
+ assert.ok(html.includes('THE GOOD PEOPLE') && html.includes('OD PEOPLE'));
+ assert.ok(html.includes('Same book') && html.includes('Separate books'));
+ assert.ok(html.includes('<details>'));
+ assert.ok(!html.includes('Ready to capture'));
+});
 (async()=>{for(const [name,fn]of tests){await fn();console.log('PASS '+name)}console.log(`${tests.length} client regression tests passed`)})().catch(e=>{console.error(e);process.exitCode=1});

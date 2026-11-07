@@ -17,8 +17,6 @@ const frameCanvas = document.querySelector("#frameCanvas");
 const newIntakeButton = document.querySelector("#newIntakeButton");
 const textForm = document.querySelector("#textForm");
 const textInput = document.querySelector("#textInput");
-const packetDialog = document.querySelector("#packetDialog");
-const packetMarkdownEl = document.querySelector("#packetMarkdown");
 
 const DEFAULT_API_ORIGIN = "http://127.0.0.1:4177";
 const API_ORIGIN = window.location.protocol === "file:" ? DEFAULT_API_ORIGIN : window.location.origin;
@@ -145,7 +143,6 @@ function render() {
   renderTeam();
   renderStamp();
   document.querySelector("#downloadPacket").href = sessionId ? `${API_ORIGIN}/api/sessions/${sessionId}/packet` : "#";
-  packetMarkdownEl.textContent = state.packet_markdown || emptyState.packet_markdown;
 }
 
 function renderTranscript() {
@@ -238,6 +235,7 @@ function renderNotes() {
 
 let bookTab = "review";
 let selectedBookId = null;
+let compareBookId = null;
 let reviewBusy = false;
 
 function bookNeedsReview(book) {
@@ -252,45 +250,64 @@ function bestObservation(book) {
   return [...(book.observations || [])].sort((a,b) => (b.sharpness || 0) - (a.sharpness || 0))[0];
 }
 
+function bookGroups(books) {
+  const groups = [];
+  for (const book of books) {
+    // Suggestions group cards for inspection; they never merge identity records.
+    const group = groups.find(items => items.every(other =>
+      ((book.candidates || []).includes(other.id) || (other.candidates || []).includes(book.id)) &&
+      !(book.frame_ids || []).some(id => (other.frame_ids || []).includes(id))));
+    if (group) group.push(book); else groups.push([book]);
+  }
+  return groups;
+}
+
+function cropImage(book, className = "") {
+  const image = bestObservation(book);
+  return image ? `<img class="${className}" src="${observationUrl(image)}" alt="Observed crop: ${escapeHtml(book.title || "unreadable book")}" loading="lazy">` : '<span class="missing-crop">No clear image yet</span>';
+}
+
 function renderBookInventory() {
   const books = state.book_inventory || [];
-  const reviewCount = books.filter(bookNeedsReview).length;
-  document.querySelector("#openBooks").textContent = `Books · ${books.length - reviewCount} identified · ${reviewCount} need review`;
+  const groups = bookGroups(books);
+  const requiresReview = group => group.length > 1 || group.some(bookNeedsReview);
+  const reviewCount = groups.filter(requiresReview).length;
+  document.querySelector("#openBooks").textContent = `Books · ${groups.length - reviewCount} identified · ${reviewCount} need review`;
   document.querySelector("#reviewTab").setAttribute?.("aria-pressed", String(bookTab === "review"));
   document.querySelector("#identifiedTab").setAttribute?.("aria-pressed", String(bookTab === "identified"));
-  const visible = books.filter(book => bookNeedsReview(book) === (bookTab === "review"));
+  const visible = groups.filter(group => requiresReview(group) === (bookTab === "review"));
   const inventoryEl = document.querySelector("#bookInventory");
   inventoryEl.hidden = false;
-  inventoryEl.innerHTML = visible.length ? visible.map(book => {
-    const image = bestObservation(book);
+  inventoryEl.innerHTML = visible.length ? visible.map(group => {
+    const book = group[0];
     return `<button class="book-card" data-book-id="${escapeHtml(book.id)}" type="button">
-      ${image ? `<img src="${observationUrl(image)}" alt="Best available book crop" loading="lazy">` : ""}
-      <span><strong>${escapeHtml(book.title || "Unidentified book")}</strong><br>${escapeHtml(book.author || "Author unreadable")}<br>
-      <small>${Number(book.observation_count)} observation(s) · ${book.status === "unresolved" ? "Association unresolved" : bookNeedsReview(book) ? "Needs review" : "Visual reading"}</small></span></button>`;
+      <span class="group-crops">${group.map(item => cropImage(item)).join("")}</span>
+      <span class="book-card-copy"><small class="book-badge">${group.length > 1 ? "Possible same book" : bookNeedsReview(book) ? "Needs review" : "Title read"}</small>
+      <strong>${escapeHtml(book.title || "Unidentified book")}</strong>
+      <span>${escapeHtml(book.author || "Author unreadable")}</span>
+      <small>${group.length > 1 ? `${group.length} sightings to compare · not a copy count` : `${Number(book.observation_count)} observation(s)`}</small>
+      ${book.status === "unresolved" ? "<small>Association unresolved</small>" : ""}</span></button>`;
   }).join("") : `<p class="empty">${bookTab === "review" ? "No books need review yet." : "No identified books yet."}</p>`;
   renderBookDetail();
   document.querySelector("#captureInstruction").textContent = state.capture_instruction || "Sweep slowly across the shelves.";
-  document.querySelector("#captureReady").hidden = state.sweep_phase !== "Approaching";
-  document.querySelector("#resumeSweep").hidden = !state.sweep_phase || state.sweep_phase === "Sweeping";
 }
 
 function renderBookDetail() {
   const books = state.book_inventory || [];
   const book = books.find(item => item.id === selectedBookId);
   const detail = document.querySelector("#bookDetail");
-  if (!book) { selectedBookId = null; detail.innerHTML = ""; return; }
-  const best = bestObservation(book);
-  const reasons = book.status === "unresolved" ? "Association to an existing book is unresolved." :
-    !book.title ? "Title is unreadable." : book.candidates?.length ? "This may be another view of an existing book." :
-    best?.issues?.length ? best.issues.join(", ") : "Visible title recorded. Author or publisher may still be unknown.";
+  if (!book) { selectedBookId = null; detail.innerHTML = '<p class="detail-placeholder">Select a book or a possible-match group to inspect the images.</p>'; return; }
   const others = books.filter(item => item.id !== book.id && !(item.frame_ids || []).some(id => (book.frame_ids || []).includes(id)));
-  detail.innerHTML = `<h3>${escapeHtml(book.title || "Unidentified book")}</h3>
-    ${best ? `<img class="book-best" src="${observationUrl(best)}" alt="Best available crop of the selected book">` : ""}
-    <p>${escapeHtml(reasons)}</p><p>${escapeHtml(book.author || "Author unreadable")} · ${escapeHtml(book.publisher || "Publisher unreadable")}</p>
-    <button type="button" data-book-action="capture" ${reviewBusy ? "disabled" : ""}>Capture clearer view</button>
-    ${others.length ? `<label>Compare with <select id="compareBook">${others.map(other => `<option value="${escapeHtml(other.id)}">${escapeHtml(other.title || "Unidentified book")} · ${escapeHtml(other.id.slice(0,6))}</option>`).join("")}</select></label>
-    <button type="button" data-book-action="same" ${reviewBusy ? "disabled" : ""}>Same book</button><button type="button" data-book-action="separate" ${reviewBusy ? "disabled" : ""}>Separate books</button>` : ""}
-    <h4>Previous observations</h4><div class="book-history">${(book.observations || []).map(row => `<figure><img src="${observationUrl(row)}" alt="Previous book observation" loading="lazy"><figcaption>${escapeHtml(row.title || "Title unreadable")}</figcaption></figure>`).join("")}</div>`;
+  const other = others.find(item => item.id === compareBookId) || others.find(item => (book.candidates || []).includes(item.id));
+  compareBookId = other?.id || null;
+  const panel = item => `<article class="comparison-card">${cropImage(item, "book-best")}<h3>${escapeHtml(item.title || "Title unreadable")}</h3><p>${escapeHtml(item.author || "Author unreadable")}</p><small>${Number(item.observation_count)} observation(s)</small></article>`;
+  detail.innerHTML = `<h3>${other ? "Compare these sightings" : "Book details"}</h3>
+    <p>${other ? "These may show the same book. Compare the visible design and text; similar titles alone do not establish identity." : "Visual reading only; not catalogue verification."}</p>
+    <div class="book-comparison">${panel(book)}${other ? panel(other) : ""}</div>
+    ${others.length ? `<label>Compare another sighting <select id="compareBook"><option value="">Select a sighting</option>${others.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === compareBookId ? "selected" : ""}>${escapeHtml(item.title || "Unidentified book")} · ${escapeHtml(item.id.slice(0,6))}</option>`).join("")}</select></label>` : ""}
+    ${other ? `<div class="review-actions"><button type="button" data-book-action="same" ${reviewBusy ? "disabled" : ""}>Same book</button><button type="button" data-book-action="separate" ${reviewBusy ? "disabled" : ""}>Separate books</button></div>` : ""}
+    <button type="button" data-book-action="capture" ${reviewBusy ? "disabled" : ""}>Request a clearer view</button>
+    <details><summary>Capture history (${Number(book.observation_count)})</summary><div class="book-history">${(book.observations || []).map(row => `<figure><img src="${observationUrl(row)}" alt="Previous book observation" loading="lazy"><figcaption>${escapeHtml(row.title || "Title unreadable")}</figcaption></figure>`).join("")}</div></details>`;
 }
 
 async function reviewBook(action) {
@@ -299,6 +316,8 @@ async function reviewBook(action) {
   reviewBusy = true;
   try {
     if (action === "capture") {
+      if (!cameraStream) await startCamera();
+      if (!cameraStream) throw new Error("Start the camera to request a clearer view.");
       await connectLive();
       liveSocket.send(JSON.stringify({type:"book_capture", book_id:selectedBookId}));
       document.querySelector("#booksDialog").close();
@@ -672,15 +691,15 @@ textForm.addEventListener("submit", (event) => {
   textInput.value = "";
   sendClaimantTurn(value);
 });
-document.querySelector("#openPacket").addEventListener("click", () => packetDialog.showModal());
-document.querySelector("#closePacket").addEventListener("click", () => packetDialog.close());
+document.querySelector("#openPacket").addEventListener("click", () => { renderBookInventory(); document.querySelector("#booksDialog").showModal(); });
 
 document.querySelector("#openBooks").addEventListener("click", () => { renderBookInventory(); document.querySelector("#booksDialog").showModal(); });
 document.querySelector("#closeBooks").addEventListener("click", () => { document.querySelector("#booksDialog").close(); document.querySelector("#openBooks").focus(); });
 document.querySelector("#reviewTab").addEventListener("click", () => { bookTab = "review"; selectedBookId = null; renderBookInventory(); });
 document.querySelector("#identifiedTab").addEventListener("click", () => { bookTab = "identified"; selectedBookId = null; renderBookInventory(); });
-document.querySelector("#bookInventory").addEventListener("click", event => { const button = event.target.closest("[data-book-id]"); if (button) { selectedBookId = button.dataset.bookId; renderBookDetail(); } });
+document.querySelector("#bookInventory").addEventListener("click", event => { const button = event.target.closest("[data-book-id]"); if (button) { selectedBookId = button.dataset.bookId; compareBookId = null; renderBookDetail(); } });
 document.querySelector("#bookDetail").addEventListener("click", event => { const button = event.target.closest("[data-book-action]"); if (button) void reviewBook(button.dataset.bookAction); });
-for (const [id, action] of [["#captureReady", "ready"], ["#resumeSweep", "resume"]]) document.querySelector(id).addEventListener("click", async () => { await connectLive(); if (action === "ready" && !cameraStream) await startCamera(); if (action !== "ready" || cameraStream) liveSocket.send(JSON.stringify({type:"book_capture", action})); });
+
+document.querySelector("#bookDetail").addEventListener("change", event => { if (event.target.id === "compareBook") { compareBookId = event.target.value; renderBookDetail(); } });
 
 createSession(true);

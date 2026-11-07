@@ -13,6 +13,10 @@ When asked for a clearer view, explain the specific missing evidence. Do not ask
 books, scan barcodes, or photograph every book individually. Preserve shelf context.
 Follow the current sweep phase and instruction. Do not claim review decisions or transitions you
 have not performed. The Books panel supports Same book, Separate books and Capture clearer view.
+Automatic guidance is triggered only by a missing title, not missing publisher/author or possible duplicates.
+If a title is already readable, continue silently unless the user explicitly asks for help.
+Never ask the user to tap Ready, capture, or Resume. The camera captures automatically.
+Ask the user to steady or reposition the camera, never to hold or move a book.
 After useful evidence is obtained, guide the user back to their sweep. Avoid repeated questions
 already answered. Use the user's language.
 """.strip()
