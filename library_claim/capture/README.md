@@ -45,11 +45,12 @@ an explicit reason. Model computation failures and nonfinite results likewise
 remain unknown while other measurements survive. Raw out-of-range BRISQUE scores
 are preserved, and only the convenience ranking score is clipped.
 
-There is no combined pass threshold or automatic voice instruction yet. The
-intensity cutoffs define descriptive pixel fractions, not routing thresholds.
-Real sweep footage and ground truth are required before calibrating rejection or
-guidance policies. The current browser path is unchanged; this increment delivers
-the local assessor and a CLI for collecting measurements.
+The live relevance adapter applies provisional quality rejection rules before
+CLIP and Crusoe: BRISQUE >60, sharpness <20, either extreme-pixel fraction >80%,
+or BRISQUE >45 together with sharpness <50. Missing BRISQUE falls back to the
+other measurements. All thresholds are in `config.yml`; the assessor itself
+continues to report measurements without deciding admission. These whole-frame
+checks do not guarantee spine readability or trigger automatic voice guidance.
 
 Validation:
 
@@ -67,8 +68,8 @@ These verify implementation behavior, not book-readability accuracy.
 The browser's existing camera frames are scored locally at most once per second,
 inside the single local tracking worker per WebSocket, with no frame backlog. CPU work runs
 in a background thread. The previous scored frame supplies temporal change;
-a camera mode change resets that history. This diagnostic path is independent of
-remote vision requests and does not gate them yet.
+a camera mode change resets that history. Quality rejection precedes local
+relevance, and only passing book candidates can authorize remote vision requests.
 
 Run from the repository root:
 
@@ -93,8 +94,9 @@ Tracking now receives up to five camera frames per second; see [tracking](tracki
 
 The live backend can label sampled candidate views using a pretrained local
 CLIP model. See [setup, score semantics, and evaluation](relevance/README.md).
-It logs books, empty background, or uncertain, and stores the
-assessment with selected frames. This pilot does not yet gate remote inference.
+It logs books or uncertain, plus diagnostic empty-background similarity, and
+stores the assessment with selected frames. Quality-blocked and below-threshold
+frames do not authorize remote inference.
 
 ## Experiment settings
 

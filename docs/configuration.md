@@ -67,3 +67,19 @@ coordinate dimensions, matrix singularity tolerances, image minimum dimensions,
 audio sample formats/rates, protocol limits, and local-access checks. They are
 not inference tuning parameters. Runtime constructor arguments (for example, a
 scheduler timeout in a test) can explicitly override their YAML defaults.
+
+## Provisional live quality gates
+
+Before local relevance inference, reject a frame if any condition holds:
+
+| Setting | Rejection condition |
+| --- | --- |
+| `quality.max_brisque` | BRISQUE >60 |
+| `quality.min_sharpness` | Laplacian variance <20 |
+| `quality.max_extreme_fraction` | Dark fraction >0.80 OR bright fraction >0.80 |
+| `quality.combined_brisque_threshold`, `quality.combined_sharpness_threshold` | BRISQUE >45 AND sharpness <50 |
+
+Dark pixels have intensity ≤16 and bright pixels ≥239. Missing BRISQUE does not
+invent a pass/fail score; exposure and sharpness still apply. A surviving frame
+must then meet book similarity ≥0.26. These are initial whole-frame heuristics,
+not calibrated book-readability guarantees. Restart the backend after editing.

@@ -68,9 +68,15 @@ frame is skipped; this always sends the original approved image.
   second. New references and heuristic evidence gains are candidates.
 - Unverified views are also considered: a featureless scene must not require a
   successful geometric association to reach the relevance stage.
-- More than 95% near-black/near-white pixels, or Laplacian variance below 10,
-  produces `quality_blocked` without loading or running the model. Low variance
-  can mean a flat wall rather than blur, so no movement instruction is inferred.
+- Quality rejection happens before loading or running CLIP: BRISQUE >60,
+  sharpness <20, dark pixels >80%, bright pixels >80%, or the combination
+  BRISQUE >45 AND sharpness <50. Near-black means intensity ≤16 and near-white
+  means intensity ≥239. These produce `quality_blocked`, preventing Crusoe
+  admission for that frame. Thresholds live in the `quality` YAML section.
+- Missing BRISQUE falls back to exposure and sharpness. Frame change and
+  background similarity do not reject frames. These are provisional whole-frame
+  heuristics, not a guarantee that individual book spines are readable. Low
+  sharpness can mean a flat wall rather than blur; no voice instruction is inferred.
 - Verified duplicate views skip classification. Unverified repeats may still be
   sampled because tracking cannot establish their identity.
 - The text encoder runs once at lazy process initialization to encode the configured

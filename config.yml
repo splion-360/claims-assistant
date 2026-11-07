@@ -65,8 +65,12 @@ quality:
   brisque_range: library_claim/capture/assets/brisque_range_live.yml
   method: opencv-quality-v1/brisque-live-4.10.0
   brisque_ranking_scale: 100
-  max_extreme_fraction: 0.95
-  min_sharpness: 10
+  max_extreme_fraction: 0.80
+  min_sharpness: 20
+  max_brisque: 60
+  # Reject moderate degradation only when both conditions hold.
+  combined_brisque_threshold: 45
+  combined_sharpness_threshold: 50
 tracking:
   max_dimension: 640
   capacity: 24

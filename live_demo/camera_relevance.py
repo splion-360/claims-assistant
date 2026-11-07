@@ -1,4 +1,4 @@
-"""Apply conservative quality checks before local relevance diagnostics."""
+"""Gate local book classification on image exposure, sharpness, and BRISQUE."""
 from time import perf_counter
 
 import numpy as np
@@ -26,11 +26,20 @@ class CameraRelevance:
             Relevance diagnostics, or an explicit blocked/unavailable result.
         """
         signals = quality.signals
-        # These broad thresholds reject unusable captures, not subtle OCR defects.
+        # Apply whole-frame quality gates before loading or calling the relevance model.
         if (signals.dark_fraction or 0) > CONFIG.quality.max_extreme_fraction or (signals.bright_fraction or 0) > CONFIG.quality.max_extreme_fraction:
             return RelevanceAssessment(label='uncertain', status='quality_blocked', reason='extreme_exposure')
         if signals.sharpness is not None and signals.sharpness < CONFIG.quality.min_sharpness:
             return RelevanceAssessment(label='uncertain', status='quality_blocked', reason='insufficient_texture_or_sharpness')
+        # Missing BRISQUE falls back to exposure and sharpness rather than inventing a score.
+        if signals.brisque is not None:
+            if signals.brisque > CONFIG.quality.max_brisque:
+                return RelevanceAssessment(label='uncertain', status='quality_blocked', reason='high_brisque')
+            if (signals.brisque > CONFIG.quality.combined_brisque_threshold
+                    and signals.sharpness is not None
+                    and signals.sharpness < CONFIG.quality.combined_sharpness_threshold):
+                return RelevanceAssessment(label='uncertain', status='quality_blocked',
+                                           reason='combined_brisque_and_low_sharpness')
         if self._failure is None:
             try:
                 started = perf_counter()

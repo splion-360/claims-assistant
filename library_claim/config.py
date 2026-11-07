@@ -69,6 +69,9 @@ class QualityConfig(Settings):
     brisque_ranking_scale: PositiveFloat
     max_extreme_fraction: Unit
     min_sharpness: Annotated[float, Field(ge=0)]
+    max_brisque: Annotated[float, Field(ge=0)]
+    combined_brisque_threshold: Annotated[float, Field(ge=0)]
+    combined_sharpness_threshold: Annotated[float, Field(ge=0)]
 
     @model_validator(mode='after')
     def ordered_cutoffs(self):

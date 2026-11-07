@@ -153,3 +153,46 @@ class RelevanceTests(unittest.TestCase):
         self.assertAlmostEqual(result.scores['books'], .35)
         for call in classifier._vision.run.call_args_list:
             self.assertEqual(call.args[1]['pixel_values'].shape, (1, 3, 224, 224))
+
+    def test_strict_quality_rejections_block_both_model_stages(self):
+        """Reject each quality failure before CLIP and remote candidate admission."""
+        from live_demo.camera_filter import CameraCandidate, CameraFilter
+
+        cases = [
+            ({'dark_fraction': .801}, 'extreme_exposure'),
+            ({'bright_fraction': .801}, 'extreme_exposure'),
+            ({'sharpness': 19.9}, 'insufficient_texture_or_sharpness'),
+            ({'brisque': 60.1}, 'high_brisque'),
+            ({'brisque': 45.1, 'sharpness': 49.9}, 'combined_brisque_and_low_sharpness'),
+            ({'brisque': None, 'sharpness': 19.9}, 'insufficient_texture_or_sharpness'),
+        ]
+        with patch('live_demo.camera_relevance.shared_classifier') as loader:
+            for signals, reason in cases:
+                with self.subTest(signals=signals):
+                    result = CameraRelevance().assess(np.zeros((32, 32, 3), np.uint8), quality(**signals))
+                    self.assertEqual(result.status, 'quality_blocked')
+                    self.assertEqual(result.reason, reason)
+                    gate = CameraFilter()
+                    gate.offer(CameraCandidate(b'image', 'frame', 0, 1), result)
+                    self.assertIsNone(gate.take(0, 1, busy=False, at_limit=False))
+            loader.assert_not_called()
+
+    def test_quality_boundaries_and_missing_brisque_allow_relevance(self):
+        """Respect strict inequalities and require both moderate-degradation signals."""
+        cases = [
+            {'dark_fraction': .80, 'bright_fraction': .1},
+            {'bright_fraction': .80},
+            {'sharpness': 20, 'brisque': 45},
+            {'sharpness': 50, 'brisque': 60},
+            {'sharpness': 49, 'brisque': 45},
+            {'sharpness': 100, 'brisque': 55},
+            {'sharpness': 20, 'brisque': None},
+        ]
+        classifier = Mock(assess=Mock(return_value=decide({'books': .4}, 1)))
+        with patch('live_demo.camera_relevance.shared_classifier', return_value=classifier):
+            for signals in cases:
+                with self.subTest(signals=signals):
+                    result = CameraRelevance().assess(np.zeros((32, 32, 3), np.uint8), quality(**signals))
+                    self.assertEqual(result.label, 'books')
+                    self.assertEqual(result.status, 'assessed')
+        self.assertEqual(classifier.assess.call_count, len(cases))
