@@ -97,6 +97,7 @@ class Frame(Record):
     selection_reason: str | None = None
     quality: Quality | None = None
     quality_metadata: dict[str, Any] | None = None
+    relevance_metadata: dict[str, Any] | None = None
 
 
 

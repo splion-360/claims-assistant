@@ -10,19 +10,25 @@ from library_claim.capture.selection import compare_evidence
 from library_claim.capture.tracking.tracker import FrameTracker, TrackingResult
 from library_claim.storage.live_capture import LiveCaptureStore
 from live_demo.camera_quality import logger
+from live_demo.camera_relevance import CameraRelevance
 
 
 class CameraTracking:
     """Own tracking, sampled quality, and retained evidence for one camera activation."""
 
-    def __init__(self, store: LiveCaptureStore | None = None):
+    def __init__(self, store: LiveCaptureStore | None = None,
+                 relevance: CameraRelevance | None = None):
         """Initialize bounded stream state and optional persistence.
 
         Args:
             store: Persistent destination for selected frames from this stream.
+            relevance: Optional local classifier used for diagnostics only.
         """
         self.tracker = FrameTracker()
         self.store = store
+        self.relevance = relevance
+        self.latest_relevance = None
+        self.relevance_frame_id = None
         self.last_log_at = float('-inf')
         self.last_quality_at = float('-inf')
         self.latest_quality = None
@@ -77,9 +83,15 @@ class CameraTracking:
                 reason = 'quality_baseline'
             elif decision.action == 'analyze_candidate':
                 reason = decision.reason
+        # Unverified views still need semantic inspection; a plain wall may not track.
+        self.latest_relevance, self.relevance_frame_id = None, None
+        if self.relevance is not None and quality is not None and (reason is not None or result.status == 'uncertain'):
+            self.latest_relevance = self.relevance.assess(image, quality)
+            self.relevance_frame_id = frame_id
         if self.store is not None and reason is not None:
             try:
-                self.saved_path = self.store.save(jpeg, result, captured_at, image.shape[1], image.shape[0], reason, quality)
+                self.saved_path = self.store.save(jpeg, result, captured_at, image.shape[1], image.shape[0], reason, quality,
+                                                  relevance=self.latest_relevance.model_dump(mode='json') if self.latest_relevance else None)
             except Exception:
                 # Reacquire after a failed save; future mappings must not cite lost evidence.
                 self.tracker = FrameTracker()
@@ -104,6 +116,12 @@ class CameraTracking:
             result: Completed tracking result.
             timestamp: Monotonic capture arrival time.
         """
+        if self.latest_relevance is not None and self.relevance_frame_id == result.frame_id:
+            assessment = self.latest_relevance
+            scores = ' '.join(f'{key}={value:.3f}' for key, value in assessment.scores.items())
+            logger.info('Camera relevance: %s | status=%s | %s | %.1f ms | reason=%s | frame=%s',
+                        assessment.label, assessment.status, scores or 'scores=N/A',
+                        assessment.elapsed_ms, assessment.reason, result.frame_id)
         if self.saved_path is not None:
             logger.info('Evidence saved: %s | frame=%s | reason=%s',
                         self.saved_path, result.frame_id, self.saved_reason)

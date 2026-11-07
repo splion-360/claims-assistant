@@ -25,7 +25,8 @@ class LiveCaptureStore:
 
     def save(self, jpeg: bytes, result: TrackingResult, captured_at: datetime,
              width: int, height: int, reason: str,
-             quality: QualityAssessment | None = None) -> Path:
+             quality: QualityAssessment | None = None,
+             *, relevance: dict | None = None) -> Path:
         """Save an image and its mapping with traceable metadata.
 
         Args:
@@ -36,6 +37,7 @@ class LiveCaptureStore:
             height: Decoded source height in pixels.
             reason: Selection reason for retaining the view.
             quality: Assessment of this exact frame, if measured.
+            relevance: Local classification diagnostics from this exact frame.
 
         Returns:
             Absolute path of the saved image.
@@ -75,7 +77,7 @@ class LiveCaptureStore:
             key = files.save(jpeg, 'image/jpeg')
             frame = Frame(id=result.frame_id, sweep_id=self.sweep_id, captured_at=captured_at,
                           evidence_key=key, width_px=width, height_px=height,
-                          selection_reason=reason, quality=quality.signals if quality else None,
+                          selection_reason=reason, relevance_metadata=relevance, quality=quality.signals if quality else None,
                           quality_metadata=quality.model_dump(mode='json', exclude={'signals'}) if quality else None)
             records.append(frame)
             if association is not None:

@@ -72,6 +72,7 @@ from provider import MODEL, VISION_MODEL, complete, structured, has_api_key, Inf
 import speech
 from live_demo.camera_quality import log_scores, logger as quality_logger
 from live_demo.camera_tracking import CameraTracking
+from live_demo.camera_relevance import CameraRelevance
 from library_claim.storage.live_capture import LiveCaptureStore
 from live_tools import SYSTEM_INSTRUCTION, TOOL_NAMES, tool_headline
 
@@ -705,7 +706,7 @@ async def live_voice(websocket: WebSocket) -> None:
     text_task = camera_task = speech_task = workflow_task = None
     tracking_task = None
     capture_store = LiveCaptureStore(CAPTURE_DATA_DIR, session.session_id)
-    tracking_stream = CameraTracking(capture_store)
+    tracking_stream = CameraTracking(capture_store, relevance=CameraRelevance())
     voice_on = False
     spoken_turn_id = None
     audio_queue = asyncio.Queue(maxsize=25)
@@ -959,7 +960,7 @@ async def live_voice(websocket: WebSocket) -> None:
                     if not isinstance(enabled, bool):
                         raise ValueError("Camera state must be true or false")
                     if set_camera_mode(session, enabled):
-                        tracking_stream = CameraTracking(capture_store)
+                        tracking_stream = CameraTracking(capture_store, relevance=CameraRelevance())
                 elif kind == "text":
                     text = message.get("text", "")
                     if not isinstance(text, str) or not text.strip() or len(text) > 8000:

@@ -11,13 +11,14 @@ from live_demo import server as s
 
 
 class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
-    async def drive(self, receive, *, workflow=None, reply=None):
+    async def drive(self, receive, *, workflow=None, reply=None, relevance=None):
         """Exercise live transport with isolated evidence storage.
 
         Args:
             receive: Async function supplying simulated browser messages.
             workflow: Optional background workflow implementation.
             reply: Optional conversation implementation.
+            relevance: Optional local relevance test double.
 
         Returns:
             The session and emitted transport messages.
@@ -38,7 +39,8 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             async def close(self, **kwargs): pass
             async def send_json(self, payload): sent.append(payload)
             async def receive_text(self): return json.dumps(await receive(session, sent))
-        with patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name)), \
+        with patch.object(s, 'CameraRelevance', return_value=relevance), \
+             patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name)), \
              patch.object(s, '_has_api_key', return_value=True), \
              patch.object(s, 'run_claim_workflow', side_effect=workflow or AsyncMock(return_value=s.build_initial_workflow_state())), \
              patch.object(s, 'complete', side_effect=reply or AsyncMock(return_value='What happened?')):

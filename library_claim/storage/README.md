@@ -81,3 +81,8 @@ reload old descriptors. The stored frames remain inspectable through the
 repository or a SQLite viewer. Automatic retention cleanup is not implemented.
 Captured frames selected by a worker already in progress may finish saving after
 camera shutdown; they remain historical evidence, not current guidance.
+
+When local relevance is enabled, retained frames also include optional
+`relevance_metadata` from that exact capture. It records model revision, method,
+cosine scores, label, status, and elapsed time. These are diagnostic classifications,
+not accepted book identities or calibrated confidence values.

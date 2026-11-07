@@ -2,11 +2,12 @@
 import asyncio
 import base64
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import cv2
 
 from library_claim.domain.models import Frame
+from library_claim.capture.relevance.classifier import decide
 from library_claim.storage.repository import Repository
 from live_demo import server
 import test_live_turns
@@ -19,6 +20,7 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_tracking_reports_while_remote_capture_is_pending(self):
         """Produce a local reference before a blocked remote request completes."""
         _, encoded = cv2.imencode('.jpg', textured_view())
+        relevance = Mock(assess=Mock(return_value=decide(dict(books=.4, other_objects=.2, empty_background=.1), 12)))
         ready = asyncio.Event()
         records = []
         count = 0
@@ -61,10 +63,11 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
             with Repository(server.CAPTURE_DATA_DIR / 'claims.sqlite3') as repository:
                 saved = repository.get(Frame, session.last_frame_id)
                 self.assertEqual(saved.sweep_id, session.session_id)
+                self.assertEqual(saved.relevance_metadata['label'], 'books')
                 self.assertTrue((server.CAPTURE_DATA_DIR / 'frames' / saved.evidence_key).exists())
             return {'type': 'close'}
 
         with patch.object(server.CameraTracking, 'log', side_effect=log), \
              patch.object(server, '_pin_evidence_photo', side_effect=blocked):
-            await test_live_turns.LiveTurnTests.drive(self, receive)
+            await test_live_turns.LiveTurnTests.drive(self, receive, relevance=relevance)
         self.assertEqual(records[0].status, 'reference_created')

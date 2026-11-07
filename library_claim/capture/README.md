@@ -84,3 +84,10 @@ Logs exclude images and credentials.
 The existing session setup still requires the configured Crusoe API key.
 
 Tracking now receives up to five camera frames per second; see [tracking](tracking/README.md) for its independent cadence and limitations.
+
+## Local relevance diagnostics
+
+The live backend can label sampled candidate views using a pretrained local
+CLIP model. See [setup, score semantics, and evaluation](relevance/README.md).
+It logs books, other objects, empty background, or uncertain, and stores the
+assessment with selected frames. This pilot does not yet gate remote inference.
