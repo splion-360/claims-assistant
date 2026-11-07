@@ -239,12 +239,14 @@ function renderBookInventory() {
   const books = state.book_inventory || [];
   const inventoryEl = document.querySelector("#bookInventory");
   inventoryEl.hidden = books.length === 0;
-  inventoryEl.innerHTML = `<h3>Books observed: ${books.length} provisional copies</h3>
+  const unresolved = books.filter(book => book.status === "unresolved").length;
+  inventoryEl.innerHTML = `<h3>Books observed: ${books.length - unresolved} provisional copies</h3>
+    ${unresolved ? `<p>${unresolved} unresolved observation record(s), excluded from the copy count.</p>` : ""}
     <p>Visual readings only. Possible duplicates and unreadable details need review.</p>
     <ul>${books.map(book => `<li><strong>${escapeHtml(book.title || "Unidentified book")}</strong>
       — ${escapeHtml(book.author || "Author unreadable")}
       · ${escapeHtml(book.publisher || "Publisher unreadable")}
-      <small>${Number(book.observation_count)} observation(s)${book.review_reasons?.length ? " · Needs review" : ""}</small></li>`).join("")}</ul>`;
+      <small>${book.status === "unresolved" ? "Association unresolved · " : ""}${Number(book.observation_count)} observation(s)${book.review_reasons?.length ? " · Needs review" : ""}</small></li>`).join("")}</ul>`;
 }
 
 function renderPinboard() {

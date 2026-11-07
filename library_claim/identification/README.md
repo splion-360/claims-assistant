@@ -14,6 +14,19 @@ books, titles, editions, prices, or metric measurements. Model output is still
 fallible: validation establishes schema correctness, not ground-truth detection.
 The configured model and its normal structured-output/token limits are reused.
 
+## Agreed assumption and next association design
+
+For this prototype, assume a user owns one physical copy of each particular book.
+Books and stacks may occupy different shelves or room locations. Different books
+with similar titles remain distinct. If multiple copies are visible together,
+preserve that direct evidence rather than collapsing them under this assumption.
+Separately located identical copies may be undercounted under this simplification.
+
+Association combines verified geometry, compatible title/author
+readings, and visual appearance of book crops. Text similarity alone must not
+merge records. Partial readings can support a clearer later reading; ambiguous
+associations remain unresolved. The matching rules are described below.
+
 ## Persistence and association
 
 Every accepted automatic inference frame has a saved original JPEG and a `Frame`
@@ -25,25 +38,42 @@ saved frame returns the previous result, including legitimate zero-book results.
 No SQL migration is necessary: new observation fields are optional JSON payload
 fields, so previous evidence remains readable.
 
-Association uses normalized boxes projected through saved frame-to-reference
-homographies. Only a common verified coordinate basis, or identical JPEG evidence,
-permits matching. The best match must have IoU at least 0.5 and exceed the next
-physical-book candidate by at least 0.15. Two new detections competing for one old
-book are not merged. Conflicting non-null title readings also prevent merging.
-Same titles alone never merge physical copies. These bounds and the maximum
-mapping-chain length are in the `identification` section of `config.yml`.
+Association first checks normalized boxes in a verified shared coordinate basis
+(or identical JPEG evidence). IoU must reach 0.5. Case/punctuation normalization,
+ordered contiguous partial-title matching, and normalized Levenshtein similarity
+replace exact-string disagreement. Missing readings are unknown; contradictory
+titles or authors block matching. Short partial strings do not establish textual
+compatibility. These are heuristic gates, not calibrated probabilities.
 
-When identity cannot be established, a new provisional book record is created;
-if earlier observations exist, it receives a possible-duplicate review issue.
-The UI explicitly labels copy counts as provisional, because unresolved matches
-can overcount. Geometry assumes a stable scene/approximately planar support;
-moving a book, changing depth, or replacing a book at the same location can defeat
-that assumption. These heuristics have not met the assignment's count pass bar.
+Without shared geometry, compatible title readings plus a same-view crop match
+are required. Bounded SIFT features, a descriptor ratio test, unique destination
+matches, and RANSAC verify correspondences. At least 10 inliers, 65% inlier fraction,
+and 12% crop-area support on both sides are required. Missing/failed crop matching
+leaves identity unsupported; it does not prove two books are different. SIFT
+features are cached within a single analysis call. No new model or training is used.
 
-Observed text remains visual evidence, not an accepted catalogue identity.
-`Book.identification_status` stays unidentified. The inventory displays a reading
-only when its non-null observations agree (ignoring case). It does not fabricate
-missing values or report calibrated identification confidence.
+The best eligible match must exceed the runner-up by 0.15. Two detections cannot
+consume the same existing ID. Ambiguous competing matches remain unresolved. For co-visible exact-title copies,
+the strongest match reuses the existing ID and the additional detections create
+separate provisional copies; ties use detection order. This preserves observed
+multiplicity without asserting which identical copy was previously seen. Separate
+detections on a first sighting also create separate provisional copies.
+An unresolved observation is persisted under a provisional Book record with
+`association_method=unresolved`, shown separately in the UI and excluded from its
+copy count. Raw database Book row count is therefore not a physical inventory count.
+Unresolved records are not used as established matching targets. Automatic later
+reconciliation of these records is deferred; their source evidence is retained.
+
+Compatible fuller title/author/publisher readings can update display text without
+erasing original readings. Fuzzy disagreements prefer the most frequently observed
+normalized reading (earliest on a tie), not automatically the longest spelling.
+All thresholds live in `identification` in `config.yml`.
+
+Geometry assumes stationary books and approximately planar support. Replacing a
+book at the same location, repeated designs, and tiny/blurred spines can defeat
+these heuristics. Counts remain provisional. Existing saved records are not
+rewritten or deduplicated by this change; validate using a new intake. No live
+accuracy or assignment count-pass-bar claim is made.
 
 ## Book-region quality
 

@@ -62,6 +62,18 @@ identification:
   association_min_iou: 0.5
   association_min_margin: 0.15
   association_max_hops: 16
+  text_min_characters: 6
+  text_edit_similarity: 0.9
+  visual_min_crop_size: 8
+  visual_max_dimension: 480
+  visual_max_features: 500
+  visual_ratio: 0.7
+  visual_min_matches: 10
+  visual_min_inlier_fraction: 0.65
+  visual_min_support: 0.12
+  visual_reprojection_px: 3.0
+  visual_ransac_iterations: 500
+  visual_ransac_confidence: 0.99
 quality:
   max_dimension: 640
   dark_cutoff: 16

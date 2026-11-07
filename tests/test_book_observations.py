@@ -137,6 +137,66 @@ class BookObservationTests(unittest.TestCase):
         self.assertEqual(len(result['inventory']), 3)
         self.assertTrue(result['inventory'][-1]['review_reasons'])
 
+    def test_additional_covisible_same_title_copy_increases_quantity_once(self):
+        """Reuse one earlier copy and retain the other simultaneously visible copy."""
+        self.persist(books=[detection(.2, .5, 'Same title')])
+        self.save_frame('two_now', np.eye(3).tolist())
+        result = self.persist('two_now', books=[detection(.2, .49, 'Same title'), detection(.21, .5, 'Same title')])
+        self.assertEqual(len(result['inventory']), 2)
+        self.assertEqual(sorted(b['observation_count'] for b in result['inventory']), [1, 2])
+        self.assertTrue(all(b['status'] == 'provisional' for b in result['inventory']))
+
+    def test_partial_title_updates_existing_identity_and_display(self):
+        """Retain the copy ID while a later view supplies a fuller literal title."""
+        first = self.persist(books=[detection(title='Good People')])
+        self.save_frame('clearer', np.eye(3).tolist())
+        result = self.persist('clearer', books=[detection(title='The Good People')])
+        self.assertEqual(len(result['inventory']), 1)
+        self.assertEqual(result['inventory'][0]['id'], first['inventory'][0]['id'])
+        self.assertEqual(result['inventory'][0]['title'], 'The Good People')
+        self.assertEqual(result['inventory'][0]['observation_count'], 2)
+
+    def test_crop_features_recover_a_book_without_shared_frame_geometry(self):
+        """Recover a repeated textured crop after tracking establishes another root."""
+        self.persist(books=[detection(title='The Good People')])
+        image = textured_view()
+        image[:20] = 0
+        _, encoded = cv2.imencode('.jpg', image)
+        jpeg = encoded.tobytes()
+        self.save_frame('new_root', jpeg=jpeg)
+        result = self.persist('new_root', books=[detection(title='Good People')], jpeg=jpeg)
+        self.assertEqual(len(result['inventory']), 1)
+        with Repository(self.store.database) as repo:
+            rows = repo.list_for_sweep(BookObservation, 'sweep')
+            self.assertEqual(rows[-1].association_method, 'appearance_and_compatible_readings')
+
+    def test_similar_titles_and_different_crops_remain_unresolved(self):
+        """Do not treat compatible titles as proof of identity or count uncertainty."""
+        self.persist(books=[detection(title='Good People')])
+        _, encoded = cv2.imencode('.jpg', np.full_like(textured_view(), 120))
+        jpeg = encoded.tobytes()
+        self.save_frame('different', jpeg=jpeg)
+        result = self.persist('different', books=[detection(title='The Good People')], jpeg=jpeg)
+        self.assertEqual(len(result['inventory']), 2)
+        self.assertEqual(result['inventory'][-1]['status'], 'unresolved')
+        self.assertEqual(result['inventory'][0]['observation_count'], 1)
+
+    def test_geometry_keeps_similar_titles_at_distinct_positions_separate(self):
+        """Preserve two visible books even when one title contains the other."""
+        books = [detection(.1, .3, 'Good People'), detection(.6, .8, 'The Good People')]
+        self.persist(books=books)
+        self.save_frame('both_again', np.eye(3).tolist())
+        result = self.persist('both_again', books=books)
+        self.assertEqual(len(result['inventory']), 2)
+        self.assertEqual([b['observation_count'] for b in result['inventory']], [2, 2])
+
+    def test_author_conflict_blocks_same_title_geometric_match(self):
+        """Avoid merging different authors merely because their titles agree."""
+        self.persist(books=[detection(title='Good People').model_copy(update={'author': 'Alice Smith'})])
+        self.save_frame('other_author', np.eye(3).tolist())
+        result = self.persist('other_author', books=[detection(title='Good People').model_copy(update={'author': 'Robert Jones'})])
+        self.assertEqual(len(result['inventory']), 2)
+
     def test_invalid_boxes_duplicate_entries_and_mismatched_bytes_are_rejected(self):
         """Reject malformed model coordinates and a source-image identity mismatch."""
         with self.assertRaises(ValidationError):

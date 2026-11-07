@@ -64,6 +64,18 @@ class IdentificationConfig(Settings):
     association_min_iou: Unit
     association_min_margin: Unit
     association_max_hops: PositiveInt
+    text_min_characters: PositiveInt
+    text_edit_similarity: Unit
+    visual_min_crop_size: PositiveInt
+    visual_max_dimension: PositiveInt
+    visual_max_features: PositiveInt
+    visual_ratio: Unit
+    visual_min_matches: PositiveInt
+    visual_min_inlier_fraction: Unit
+    visual_min_support: Unit
+    visual_reprojection_px: PositiveFloat
+    visual_ransac_iterations: PositiveInt
+    visual_ransac_confidence: Unit
 
 
 class QualityConfig(Settings):

@@ -57,4 +57,13 @@ test('book inventory escapes readings and preserves unidentified copies',async()
  e.run('state.book_inventory=[];renderBookInventory()');
  assert.equal(e.run('document.querySelector("#bookInventory").hidden'),true);
 });
+
+test('unresolved association records are excluded from book copy count', async()=>{
+ const e=env();e.run('state.book_inventory=[{title:"Good People",status:"provisional",observation_count:2},{title:"The Good People",status:"unresolved",observation_count:1}];renderBookInventory()');
+ const html=e.run('document.querySelector("#bookInventory").innerHTML');
+ assert.ok(html.includes('1 provisional copies'));
+ assert.ok(html.includes('1 unresolved observation record(s)'));
+ assert.ok(html.includes('Association unresolved'));
+});
+
 (async()=>{for(const [name,fn]of tests){await fn();console.log('PASS '+name)}console.log(`${tests.length} client regression tests passed`)})().catch(e=>{console.error(e);process.exitCode=1});

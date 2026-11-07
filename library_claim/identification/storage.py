@@ -11,6 +11,8 @@ from library_claim.capture.tracking.geometry import transform
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.domain.models import Book, BookObservation, Frame, FrameAssociation, ProcessingJob, Quality, ReviewIssue
 from library_claim.storage.repository import Repository
+from library_claim.storage.evidence import EvidenceStore
+from .matching import crop_features, visual_match, text_relation, preferred_reading
 from .models import BookFrameAnalysis
 
 
@@ -72,52 +74,106 @@ def overlap(first: np.ndarray, second: np.ndarray) -> float:
 
 
 def association_choices(frame: Frame, analysis: BookFrameAnalysis, frames: dict,
-                        observations: list[BookObservation], associations: dict) -> list[str | None]:
-    """Choose only unique geometric matches, preserving separate copies of one title.
+                        observations: list[BookObservation], associations: dict,
+                        image: np.ndarray, evidence: EvidenceStore) -> tuple[list[str | None], list[str]]:
+    """Apply geometry/text gates and use crop matching only without shared geometry.
 
     Args:
         frame: Current saved source frame.
         analysis: Model's per-book detections.
-        frames: Saved frames in this sweep indexed by ID.
-        observations: Previously stored book observations.
-        associations: Saved frame mappings indexed by source frame.
+        frames: Saved frames indexed by ID.
+        observations: Previous observations in the sweep.
+        associations: Saved mappings indexed by source frame.
+        image: Current decoded source image.
+        evidence: Original JPEG storage.
 
     Returns:
-        Existing physical-book ID per detection, or None for unverified identity.
+        Existing book IDs and association methods, including unresolved decisions.
     """
-    choices = []
-    for detection in analysis.books:
-        scores = {}
-        for old in observations:
+    choices, methods, selected_scores = [], [], []
+    features = {}
+    established = [old for old in observations if old.association_method != 'unresolved']
+    for index, detection in enumerate(analysis.books):
+        scores, routes = {}, {}
+        possible = False
+        for old in established:
+            title = text_relation(old.title, detection.title)
+            author = text_relation(old.author, detection.author)
+            if title == 'conflicting' or author == 'conflicting':
+                continue
+            compatible_title = title in ('exact', 'partial', 'fuzzy')
+            if 'uncertain_book' in detection.issues or 'uncertain_book' in old.visual_issues:
+                continue
             try:
-                # Identical JPEG evidence is the only fallback when geometry is absent.
+                shared = False
                 if frames[old.frame_id].evidence_key == frame.evidence_key:
                     current_poly, old_poly = polygon(detection.bbox), polygon(old.bbox)
+                    shared = True
                 else:
                     root, matrix = reference_geometry(frame.id, associations)
                     old_root, old_matrix = reference_geometry(old.frame_id, associations)
-                    if root != old_root:
+                    if root == old_root:
+                        current_poly = transform(polygon(detection.bbox), matrix)
+                        old_poly = transform(polygon(old.bbox), old_matrix)
+                        shared = True
+                if shared:
+                    score = overlap(current_poly, old_poly)
+                    possible |= score > 0
+                    if score < CONFIG.identification.association_min_iou:
                         continue
-                    current_poly = transform(polygon(detection.bbox), matrix)
-                    old_poly = transform(polygon(old.bbox), old_matrix)
-                score = overlap(current_poly, old_poly)
-                scores[old.book_id] = max(scores.get(old.book_id, 0), score)
-            except (ValueError, cv2.error):
+                    possible = True
+                    method = 'geometry_and_compatible_readings'
+                else:
+                    possible |= compatible_title
+                    # Compare like views; a spine/cover change is not a visual contradiction.
+                    if not compatible_title or detection.view != old.view:
+                        continue
+                    current_key, old_key = ('current', index), ('old', old.id)
+                    if current_key not in features:
+                        features[current_key] = crop_features(image, detection.bbox)
+                    if old_key not in features:
+                        data = evidence.read(frames[old.frame_id].evidence_key)
+                        previous = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                        if previous is None:
+                            continue
+                        features[old_key] = crop_features(previous, old.bbox)
+                    score = visual_match(features[current_key], features[old_key])
+                    if score is None:
+                        continue
+                    method = 'appearance_and_compatible_readings'
+                # A contradictory reading elsewhere in the track blocks automatic reuse.
+                if any(other.book_id == old.book_id and
+                       (text_relation(other.title, detection.title) == 'conflicting' or
+                        text_relation(other.author, detection.author) == 'conflicting') for other in established):
+                    continue
+                if score > scores.get(old.book_id, -1):
+                    scores[old.book_id], routes[old.book_id] = score, method
+            except (ValueError, OSError, cv2.error):
                 continue
         ranked = sorted(scores, key=scores.get, reverse=True)
         selected = None
+        method = 'unresolved' if possible else 'new_provisional'
         if ranked:
             best = ranked[0]
             runner_up = scores[ranked[1]] if len(ranked) > 1 else 0
-            conflicting = any(old.book_id == best and old.title and detection.title
-                              and old.title.casefold() != detection.title.casefold() for old in observations)
-            if (scores[best] >= CONFIG.identification.association_min_iou
-                    and scores[best] - runner_up >= CONFIG.identification.association_min_margin
-                    and not conflicting and 'uncertain_book' not in detection.issues):
-                selected = best
+            if scores[best] - runner_up >= CONFIG.identification.association_min_margin:
+                selected, method = best, routes[best]
         choices.append(selected)
-    # Competing detections cannot both consume the same physical copy.
-    return [choice if choice is not None and choices.count(choice) == 1 else None for choice in choices]
+        methods.append(method)
+        selected_scores.append(scores.get(selected, 0))
+    # Co-visible exact-title copies establish multiplicity even with similar designs.
+    for choice in set(choices) - {None}:
+        competitors = [index for index, value in enumerate(choices) if value == choice]
+        if len(competitors) < 2:
+            continue
+        same_title = all(text_relation(analysis.books[competitors[0]].title, analysis.books[index].title) == 'exact'
+                         for index in competitors)
+        winner = max(competitors, key=lambda index: selected_scores[index]) if same_title else None
+        for index in competitors:
+            if index != winner:
+                choices[index] = None
+                methods[index] = 'new_provisional' if same_title else 'unresolved'
+    return choices, methods
 
 
 def inventory(repo: Repository, sweep_id: str) -> list[dict]:
@@ -137,9 +193,9 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
         evidence = [row for row in observations if row.book_id == book.id]
         readings = {}
         for field in ('title', 'author', 'publisher'):
-            values = {getattr(row, field).casefold(): getattr(row, field) for row in evidence if getattr(row, field)}
-            readings[field] = next(iter(values.values())) if len(values) == 1 else None
-        result.append({'id': book.id, **readings, 'status': 'provisional',
+            readings[field] = preferred_reading([getattr(row, field) for row in evidence if getattr(row, field)])
+        status = 'unresolved' if evidence and all(row.association_method == 'unresolved' for row in evidence) else 'provisional'
+        result.append({'id': book.id, **readings, 'status': status,
                        'observation_count': len(evidence),
                        'frame_ids': list(dict.fromkeys(row.frame_id for row in evidence)),
                        'review_reasons': list(dict.fromkeys(issue.reason for issue in issues
@@ -185,10 +241,11 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
         frames = {row.id: row for row in repo.list_for_sweep(Frame, sweep_id)}
         observations = repo.list_for_sweep(BookObservation, sweep_id)
         associations = {row.frame_id: row for row in repo.list_for_sweep(FrameAssociation, sweep_id)}
-        choices = association_choices(frame, analysis, frames, observations, associations)
+        choices, methods = association_choices(frame, analysis, frames, observations, associations,
+                                                image, EvidenceStore(database.parent / 'frames'))
         records = []
         assessor = QualityAssessor() if analysis.books else None
-        for detection, matched in zip(analysis.books, choices):
+        for detection, matched, method in zip(analysis.books, choices, methods):
             book_id = matched
             reasons = list(detection.issues)
             if book_id is None:
@@ -212,7 +269,7 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
                                           bbox=detection.bbox, view=detection.view, visible_text=detection.visible_text,
                                           title=detection.title, author=detection.author, publisher=detection.publisher,
                                           quality=signals, quality_metadata=metadata, visual_issues=detection.issues,
-                                          association_method='verified_geometry_or_identical_image' if matched else 'new_provisional',
+                                          association_method=method,
                                           source_model=model, unresolved_fields=unresolved)
             records.append(observation)
             for reason in reasons:
