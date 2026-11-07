@@ -48,4 +48,5 @@ class EdgeAuditTests(unittest.TestCase):
         output = grouped_scores(similarities)
         boundary = len(PROMPTS['books'])
         np.testing.assert_array_equal(output[:, 0], similarities[:, :boundary].max(axis=1))
-        self.assertEqual(output.shape, (2, 1))
+        self.assertEqual(output.shape, (2, 2))
+        np.testing.assert_array_equal(output[:, 1], similarities[:, boundary:].max(axis=1))

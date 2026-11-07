@@ -11,6 +11,7 @@ from library_claim.capture.tracking.tracker import FrameTracker, TrackingResult
 from library_claim.storage.live_capture import LiveCaptureStore
 from live_demo.camera_quality import logger
 from live_demo.camera_logging import CameraSummary
+from live_demo.camera_filter import CameraFilter
 from live_demo.camera_relevance import CameraRelevance
 from library_claim.config import CONFIG
 
@@ -24,7 +25,7 @@ class CameraTracking:
 
         Args:
             store: Persistent destination for selected frames from this stream.
-            relevance: Optional local classifier used for diagnostics only.
+            relevance: Optional local classifier used for remote inference admission.
         """
         self.tracker = FrameTracker()
         self.store = store
@@ -32,6 +33,8 @@ class CameraTracking:
         self.latest_relevance = None
         self.relevance_frame_id = None
         self.summary = CameraSummary()
+        self.remote_filter = CameraFilter()
+        self.summary.remote_filter = self.remote_filter
         self.last_quality_at = float('-inf')
         self.latest_quality = None
         self.quality_frame_id = None

@@ -43,7 +43,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_book_only_target_abstains_below_threshold(self):
         """Keep low similarity uncertain without a competing background target."""
-        self.assertEqual(set(CONFIG.relevance.prompts.model_dump()), {'books'})
+        self.assertEqual(set(CONFIG.relevance.prompts.model_dump()), {'books', 'empty_background'})
         self.assertEqual(decide({'books': .1}, 1).label, 'uncertain')
         with self.assertRaises(ValidationError):
             RelevanceAssessment(label='empty_background', reason='retired')

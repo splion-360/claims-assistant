@@ -31,13 +31,16 @@ Model IDs now come from YAML. The previous `CRUSOE_MODEL`, `CRUSOE_VISION_MODEL`
 read. `.env` retains API credentials and the optional `CRUSOE_BASE_URL` endpoint.
 No credentials are exposed through the health response or config file.
 
-The relevance classifier scores only positive book prompts. It uses the maximum
+The relevance classifier scores positive book prompts plus descriptive empty-background
+prompts for diagnostics. It uses the maximum
 cosine similarity across prompts and crops, with one `relevance.min_similarity`
-threshold. There are no empty-background prompts or margin settings. Below the
+threshold. Background scores never veto a passing book score; there is no margin setting. Below the
 threshold the result is `uncertain`; quality-blocked/unavailable results also
 remain uncertain with an explicit status. Scores are not probabilities. Editing
 prompts or the threshold does not require retraining, but can change false-positive
-rates. Classification remains diagnostic only.
+rates. Only assessed `books` candidates authorize automatic Crusoe image reasoning.
+`capture.remote_interval_s` and `capture.frame_max_age_s` bound dispatch and pending
+frame lifetime; inference retains one pending candidate and one in-flight job.
 
 For a different local model, use a compatible CLIP ONNX export. Update its ID,
 revision, artifact paths/hashes, cache directory, and matching preprocessing and

@@ -44,11 +44,12 @@ class RelevanceTests(unittest.TestCase):
         self.assertEqual(decide({'books': threshold}, 10).label, 'books')
         self.assertEqual(decide({'books': threshold - .0001}, 10).label, 'uncertain')
         self.assertEqual(decide({'books': .9}, 10).reason, 'book_threshold_met')
+        self.assertEqual(decide({'books': threshold, 'empty_background': .99}, 1).label, 'books')
 
     def test_invalid_scores_are_not_claimed_as_classifications(self):
         """Reject missing, obsolete, nonfinite, and out-of-range scores."""
         for scores in ({}, {'books': float('nan')}, {'books': 1.1},
-                       {'books': .4, 'empty_background': .1}):
+                       {'books': .4, 'other_objects': .1}):
             with self.assertRaises(ValueError):
                 decide(scores, 1)
 
@@ -138,7 +139,7 @@ class RelevanceTests(unittest.TestCase):
         classifier._vision = Mock()
         classifier._vision.run.side_effect = [[np.eye(3, dtype=np.float32)[i:i + 1]] for i in range(3)]
         # Give only the right crop a qualifying book signal.
-        pairs = np.array([[.1], [.23], [.35]], dtype=np.float32)
+        pairs = np.array([[.1, .9], [.23, .9], [.35, .99]], dtype=np.float32)
         classifier._text = np.concatenate([
             np.repeat(pairs[:, i:i + 1], len(prompts), axis=1)
             for i, prompts in enumerate(PROMPTS.values())

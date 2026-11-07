@@ -81,3 +81,14 @@ weights. It overwrites `results.json`; preserve that artifact before a new
 comparison. Images and SQLite rows are unchanged, and no image was sent to a
 remote inference service. Historical evaluation tools use current configuration
 on rerun; older reports require their recorded configuration/commit to reproduce.
+
+## Subsequent background diagnostics and remote admission
+
+Ten descriptive empty-background prompts were added after this experiment for
+logging only, preserving the book threshold at 0.24. A replay of all 152 labelled
+images confirmed identical book decisions and scores within 1e-6. The current
+pipeline gates automatic Crusoe camera calls on same-frame quality/relevance and
+retains existing rate/freshness constraints. Exact replay output is retained at
+`.claim-data/book-only-experiment/background-filter-verification.json`. This is
+local replay plus mocked-provider integration verification, not a live paid API
+load test. The comparison table above remains applicable to book admission.

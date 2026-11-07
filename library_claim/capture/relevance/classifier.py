@@ -53,7 +53,7 @@ def decide(scores: dict[str, float], elapsed_ms: float) -> RelevanceAssessment:
     Raises:
         ValueError: Scores are missing, nonfinite, or outside cosine bounds.
     """
-    if set(scores) != set(PROMPTS) or any(not np.isfinite(v) or not -1 <= v <= 1 for v in scores.values()):
+    if 'books' not in scores or not set(scores) <= set(PROMPTS) or any(not np.isfinite(v) or not -1 <= v <= 1 for v in scores.values()):
         raise ValueError('Expected one finite cosine score per relevance class')
     passed = scores['books'] >= MIN_SIMILARITY
     return RelevanceAssessment(label='books' if passed else 'uncertain', scores=scores,
@@ -135,7 +135,7 @@ def select_crop(scores: np.ndarray) -> int:
     """Select the crop with the highest book similarity.
 
     Args:
-        scores: One row per crop and one book-score column.
+        scores: One row per crop, with book scores first and optional diagnostic columns.
 
     Returns:
         Index of the highest-scoring crop, with ties resolved to the first.
@@ -150,7 +150,7 @@ def grouped_scores(similarities: np.ndarray) -> np.ndarray:
         similarities: One row per crop and one column per configured prompt.
 
     Returns:
-        Maximum book-prompt similarity for each crop.
+        Maximum prompt similarity for each configured group and crop.
     """
     offset, columns = 0, []
     for prompts in PROMPTS.values():

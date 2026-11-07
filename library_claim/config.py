@@ -24,8 +24,9 @@ class Artifact(Settings):
 
 
 class Prompts(Settings):
-    """Define the positive book descriptions used for similarity scoring."""
+    """Define book descriptions and diagnostic empty-background descriptions."""
     books: Annotated[list[Text], Field(min_length=1)]
+    empty_background: Annotated[list[Text], Field(min_length=1)]
 
 
 class Artifacts(Settings):

@@ -3,7 +3,7 @@ relevance:
   model_id: Xenova/clip-vit-base-patch32
   revision: 6b7c523703ae26e39be4b03774966f8571c7f523
   model_dir: .cache/book-relevance
-  method: clip-book-only-overlap-v4
+  method: clip-book-filter-background-diagnostics-v5
   crop_count: 3
   min_similarity: 0.24
   prompts:
@@ -24,6 +24,18 @@ relevance:
       - a photo of books lying flat
       - a photo of books standing upright
       - a photo of a person holding a book
+    # Diagnostic scores only: background never vetoes a qualifying book.
+    empty_background:
+      - a photo of a plain wall with no objects in front of it
+      - a photo of a bare wall and an empty floor
+      - a photo of an empty bookshelf with bare shelves
+      - a photo of an empty shelf with nothing resting on it
+      - a photo of a bare tabletop with no objects on its surface
+      - a photo of an empty desk surface
+      - a photo of a plain ceiling and the upper walls of a room
+      - a photo of an empty corner where two walls meet the floor
+      - a photo of a bare floor with no objects on it
+      - a photo of a window and surrounding wall with an empty windowsill
   # These preprocessing/tokenizer values must match the selected model.
   image_size: 224
   image_mean: [0.48145466, 0.4578275, 0.40821073]

@@ -107,21 +107,29 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(m['type']=='error' and 'voice' in m['message'] for m in sent))
 
     async def test_failed_camera_analysis_can_retry_the_same_frame(self):
+        import cv2
+        from unittest.mock import Mock
+        from test_tracking import textured_view
+        from library_claim.capture.relevance.classifier import decide
+
+        _, image = cv2.imencode('.jpg', textured_view())
+        jpeg = image.tobytes()
+        relevance = Mock(assess=Mock(return_value=decide({'books': .4}, 1)))
         count=0
         async def receive(session,sent):
             nonlocal count
             count+=1
-            if count==1:return {'type':'video','data':base64.b64encode(b'\xff\xd8\xffTEST').decode()}
+            if count==1:return {'type':'video','data':base64.b64encode(jpeg).decode()}
             if count==2:
                 while not any(m['type']=='error' for m in sent):await asyncio.sleep(.001)
                 clock[0]+=9
-                return {'type':'video','data':base64.b64encode(b'\xff\xd8\xffTEST').decode()}
+                return {'type':'video','data':base64.b64encode(jpeg).decode()}
             while len([m for m in sent if m['type']=='error'])<2:await asyncio.sleep(.001)
             return {'type':'close'}
         clock=[100.0]
         # Override only server timing; do not change the asyncio event loop clock.
         with patch.object(s,'time',NS(monotonic=lambda:clock[0])),patch.object(s,'_pin_evidence_photo',side_effect=s.InferenceError('Temporary failure')) as capture:
-            await self.drive(receive)
+            await self.drive(receive, relevance=relevance)
         self.assertEqual(capture.call_count,2)
 
     async def test_spoken_turn_dispatches_once_and_returns_audio(self):

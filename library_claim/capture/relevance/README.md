@@ -3,8 +3,8 @@
 The live backend uses pretrained CLIP ViT-B/32 with an INT8 image encoder and FP32 text encoder from
 `Xenova/clip-vit-base-patch32`, pinned to revision
 `6b7c523703ae26e39be4b03774966f8571c7f523`. No training or fine-tuning is performed.
-This is a diagnostic pilot: labels do not gate Crusoe, trigger speech, change
-capture states, identify physical books, or alter evidence retention.
+Local relevance now gates automatic Crusoe camera inference. Only assessed book
+candidates proceed. Capture states and local evidence retention remain unchanged.
 
 ## Setup and use
 
@@ -35,12 +35,33 @@ prompt set guarantees coverage of every configuration.
 
 The frame score is the maximum similarity over all configured book prompts and
 all crops. A score at or above `relevance.min_similarity` (currently 0.24) produces
-`books`; a lower score produces `uncertain`. There is no background prompt or
-margin requirement. Uncertain means insufficient book evidence, not proof that
+`books`; a lower score produces `uncertain`. Ten empty-background descriptions score bare walls, shelves, tables, ceilings,
+floors, corners, and windowsills for diagnostics. They do not veto books or
+participate in the threshold decision; there is no margin requirement. Uncertain means insufficient book evidence, not proof that
 no books exist. The threshold is a provisional choice on a small development
 sample; see the [book-only experiment](../../../docs/evaluations/relevance-book-only.md).
 
 ## Execution and persistence
+
+Automatic inference starts after local tracking, sampled quality, and relevance
+complete. A candidate must have same-frame `status=assessed` and `label=books`.
+Below-threshold, quality-blocked, unavailable, and unassessed frames never authorize
+remote inference. The full JPEG that passed is frozen with its frame ID, capture
+time, and camera activation; later arrivals cannot substitute different bytes.
+
+One pending approved frame is retained while the remote slot is busy or rate
+limited; newer eligible evidence replaces it. Subsequent tracking completions
+check that pending frame against the configured age limit (12 seconds), existing
+remote interval (8 seconds), photo capacity, and camera activation. There is no
+unbounded queue. A failed request may retry within freshness/rate limits; successful
+identical bytes are not resent. Stopping/restarting the camera invalidates old
+candidates, and results from a previous activation are not pinned.
+
+The Rich summary shows the latest filter reason and activation totals for
+submitted requests and rejected assessed frames. Unassessed/duplicate frames are
+not included in the rejected count. Background similarity is explicitly labelled
+diagnostic. A pending approved frame may still be sent while a newer below-threshold
+frame is skipped; this always sends the original approved image.
 
 - Tracking and quality assessment run first on the existing background worker.
 - Only a frame with a fresh quality assessment is considered, at most once per
@@ -109,8 +130,7 @@ this version is not ready to drive automatic routing.
 
 Next validation needs labelled book close-ups, shelves, books near frame edges,
 empty walls/shelves, non-book objects, and mixed scenes. Measure book recall,
-false negatives, abstentions, and latency before changing prompts/thresholds or
-enabling routing. Retain uncertain outcomes for review rather than treating them
+false negatives, abstentions, and latency before further changing prompts/thresholds. Retain uncertain outcomes for review rather than treating them
 as no-books. No training is required for that evaluation.
 
 ## Sources

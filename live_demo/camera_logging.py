@@ -20,6 +20,7 @@ class CameraSummary:
         """Initialize an independent summary for one camera activation."""
         self.last_print_at = float('-inf')
         self.saved_count = 0
+        self.remote_filter = None
         self.relevance = None
         self.relevance_at = None
         self.console = Console(width=96, color_system=None, highlight=False)
@@ -65,11 +66,17 @@ class CameraSummary:
             if assessment.scores:
                 table.add_row('Similarity', f'Books {assessment.scores["books"]:.3f}',
                               f'Threshold {assessment.min_similarity:.3f} (not probability)')
+                if 'empty_background' in assessment.scores:
+                    table.add_row('Empty background', f'{assessment.scores["empty_background"]:.3f}', 'Diagnostic only; no book veto')
                 if assessment.selected_crop is not None:
                     table.add_row('Crop', f'{assessment.selected_crop + 1}/{len(assessment.crop_boxes)}',
                                   f'Selected view · {assessment.elapsed_ms:.0f} ms total')
         else:
             table.add_row('Last relevance', 'Not assessed', '')
+        if self.remote_filter is not None:
+            gate = self.remote_filter
+            table.add_row('Crusoe filter', gate.reason.replace('_', ' '),
+                          f'Submitted {gate.submitted} · Rejected {gate.rejected} (activation totals)')
         table.add_row('Evidence saved', str(self.saved_count), 'Since previous summary')
         # Render through the existing logger so Uvicorn levels and handlers still apply.
         with self.console.capture() as output:
