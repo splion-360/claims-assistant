@@ -71,7 +71,8 @@ class FrozenCaptureTests(unittest.IsolatedAsyncioTestCase):
                                        last_frame=b'new', last_frame_id='new', last_frame_at=time.monotonic())
         candidate = CameraCandidate(b'approved', 'approved', time.monotonic(), 1)
         observation = server.FrameObservation(observation='Book', supports_claimant_description=False)
-        with patch.object(server, 'structured', new=AsyncMock(return_value=observation)) as provider:
+        with patch.object(server, 'structured', new=AsyncMock(return_value=observation)) as provider, \
+             patch.object(server, 'save_book_analysis', return_value={'inventory': [], 'detected_count': 0}):
             result = await server._pin_evidence_photo(session, {}, candidate=candidate)
         self.assertTrue(result['pinned'])
         content = provider.call_args.args[1]

@@ -7,6 +7,7 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 | Section | Controls |
 | --- | --- |
 | `relevance` | Local model/revision, artifact hashes, prompts, similarity threshold, preprocessing, live crop count, CPU threads |
+| `identification` | Maximum detections per frame, geometric book-association IoU/margin, mapping-chain bound |
 | `quality` | Assessment resolution, brightness cutoffs, BRISQUE assets/ranking scale, relevance quality gates |
 | `tracking` | SIFT, FLANN, keyframe budget, Lucas–Kanade, RANSAC and geometric verification |
 | `selection` | New coverage, detail gain, BRISQUE improvement, sharpness improvement |

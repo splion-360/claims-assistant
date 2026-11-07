@@ -72,8 +72,9 @@ The directory is ignored by Git and is not exposed as a public static route.
 New tracking reference views are retained. At the existing one-second quality
 cadence, associated views can be retained for additional coverage, closer detail,
 or measured quality improvements. If a reference was captured between quality
-samples, a later scored view can establish its quality baseline. Intermediate,
-unchanged and unverified views are not saved by this selector. References can
+samples, a later scored view can establish its quality baseline. Intermediate unchanged views are not saved by this selector. Unverified views
+that pass the book filter are now retained as `book_candidate` frames so every
+remote book observation has a durable source. References can
 contain non-book objects until the relevance classifier is integrated.
 
 Camera toggles and backend restarts do not delete saved evidence. Tracking still
@@ -87,3 +88,7 @@ When local relevance is enabled, retained frames also include optional
 `relevance_metadata` from that exact capture. It records model revision, method,
 cosine scores, label, status, and elapsed time. These are diagnostic classifications,
 not accepted book identities or calibrated confidence values.
+
+Structured extraction now appends book observations and provisional physical-copy
+associations; see [visual book observations](../identification/README.md). Observed
+readings are not promoted to accepted catalogue identities.

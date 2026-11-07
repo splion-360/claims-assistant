@@ -93,6 +93,10 @@ class CameraTracking:
         if self.relevance is not None and quality is not None and (reason is not None or result.status == 'uncertain'):
             self.latest_relevance = self.relevance.assess(image, quality)
             self.relevance_frame_id = frame_id
+        # Every remote candidate needs a durable source even when tracking is uncertain.
+        if (reason is None and self.latest_relevance is not None
+                and self.latest_relevance.status == 'assessed' and self.latest_relevance.label == 'books'):
+            reason = 'book_candidate'
         if self.store is not None and reason is not None:
             try:
                 self.saved_path = self.store.save(jpeg, result, captured_at, image.shape[1], image.shape[0], reason, quality,

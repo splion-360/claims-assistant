@@ -108,6 +108,11 @@ class BookObservation(Record):
     frame_id: Identifier
     bbox: Box
     polygon: Annotated[list[tuple[Score, Score]], Field(min_length=4, max_length=4)] | None = None
+    view: Literal['spine', 'cover', 'pages', 'partial'] | None = None
+    visible_text: str | None = None
+    visual_issues: list[str] = Field(default_factory=list)
+    quality_metadata: dict[str, Any] | None = None
+    association_method: str | None = None
     association_confidence: Score | None = None
     quality: Quality = Field(default_factory=Quality)
     title: str | None = None

@@ -235,13 +235,27 @@ function renderNotes() {
     .join("");
 }
 
+function renderBookInventory() {
+  const books = state.book_inventory || [];
+  const inventoryEl = document.querySelector("#bookInventory");
+  inventoryEl.hidden = books.length === 0;
+  inventoryEl.innerHTML = `<h3>Books observed: ${books.length} provisional copies</h3>
+    <p>Visual readings only. Possible duplicates and unreadable details need review.</p>
+    <ul>${books.map(book => `<li><strong>${escapeHtml(book.title || "Unidentified book")}</strong>
+      — ${escapeHtml(book.author || "Author unreadable")}
+      · ${escapeHtml(book.publisher || "Publisher unreadable")}
+      <small>${Number(book.observation_count)} observation(s)${book.review_reasons?.length ? " · Needs review" : ""}</small></li>`).join("")}</ul>`;
+}
+
 function renderPinboard() {
+  renderBookInventory();
   const photos = state.evidence_photos || [];
   const cards = photos.map(
     (photo, index) => `
       <figure class="polaroid" style="--tilt: ${index % 2 ? 2 : -2.5}deg" data-key="${escapeHtml(photo.id)}">
         <img src="${photo.data_url}" alt="Camera frame pinned as evidence" />
         <figcaption>${escapeHtml(photo.caption)}</figcaption>
+        ${(photo.books || []).map(book => `<span class="tag">${escapeHtml(book.title || "Unidentified book")} · ${escapeHtml(book.view)}${book.issues.length ? " · " + escapeHtml(book.issues.join(", ")) : ""}</span>`).join("")}
         <span class="tag ${photo.confirmed ? "" : "unconfirmed"}">${photo.claimant_description ? `Claimant says: ${escapeHtml(photo.claimant_description)} · ` : ""}${photo.confirmed ? "Supported by this image" : "Claim not confirmed by this image"}</span>
         <span class="tag">Seen on camera ${escapeHtml(photo.captured_at || "")} · ${escapeHtml(photo.evidence_type || "evidence")}</span>
       </figure>`

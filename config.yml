@@ -57,6 +57,11 @@ relevance:
     tokenizer:
       remote: tokenizer.json
       sha256: f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd
+identification:
+  max_books_per_frame: 80
+  association_min_iou: 0.5
+  association_min_margin: 0.15
+  association_max_hops: 16
 quality:
   max_dimension: 640
   dark_cutoff: 16

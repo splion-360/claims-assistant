@@ -977,3 +977,9 @@ h1 {
   .team-feed { max-height: 160px; overflow: auto; }
   .notebook { min-height: 600px; padding-right: 20px; }
 }
+
+.book-inventory { margin: 1rem 0; padding: 1rem; border: 1px solid #c9bea5; border-radius: 6px; }
+.book-inventory h3 { margin: 0 0 .5rem; }
+.book-inventory p, .book-inventory small { font-size: .85rem; }
+.book-inventory li { margin-bottom: .6rem; }
+.book-inventory small { display: block; }

@@ -46,4 +46,15 @@ test('camera settings come from backend and socket backpressure skips frames',as
  assert.equal(e.sockets.at(-1).sent.at(-1).type,'video');
  e.run('cameraStream=null;disconnectLive()');
 });
+test('book inventory escapes readings and preserves unidentified copies',async()=>{
+ const e=env();e.run('state.book_inventory=[{id:"book",title:"<script>bad</script>",author:null,publisher:null,observation_count:2,review_reasons:["Possible duplicate"]}];renderBookInventory()');
+ const html=e.run('document.querySelector("#bookInventory").innerHTML');
+ assert.ok(html.includes('&lt;script&gt;bad&lt;/script&gt;'));
+ assert.ok(!html.includes('<script>'));
+ assert.ok(html.includes('1 provisional copies'));
+ assert.ok(html.includes('Author unreadable'));
+ assert.ok(html.includes('Needs review'));
+ e.run('state.book_inventory=[];renderBookInventory()');
+ assert.equal(e.run('document.querySelector("#bookInventory").hidden'),true);
+});
 (async()=>{for(const [name,fn]of tests){await fn();console.log('PASS '+name)}console.log(`${tests.length} client regression tests passed`)})().catch(e=>{console.error(e);process.exitCode=1});

@@ -58,6 +58,14 @@ class RelevanceConfig(Settings):
     artifacts: Artifacts
 
 
+class IdentificationConfig(Settings):
+    """Bound visual extraction and conservative physical-copy association."""
+    max_books_per_frame: PositiveInt
+    association_min_iou: Unit
+    association_min_margin: Unit
+    association_max_hops: PositiveInt
+
+
 class QualityConfig(Settings):
     """Configure measurement and conservative relevance admission thresholds."""
     max_dimension: Annotated[int, Field(ge=32)]
@@ -198,6 +206,7 @@ class AppConfig(Settings):
     """Collect the independently owned experiment setting groups."""
     experiments: ExperimentConfig
     relevance: RelevanceConfig
+    identification: IdentificationConfig
     quality: QualityConfig
     tracking: TrackingConfig
     selection: SelectionConfig
