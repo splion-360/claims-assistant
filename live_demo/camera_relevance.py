@@ -4,6 +4,7 @@ from time import perf_counter
 import numpy as np
 
 from library_claim.capture.quality import QualityAssessment
+from library_claim.config import CONFIG
 from library_claim.capture.relevance.classifier import RelevanceAssessment, shared_classifier
 
 
@@ -26,9 +27,9 @@ class CameraRelevance:
         """
         signals = quality.signals
         # These broad thresholds reject unusable captures, not subtle OCR defects.
-        if (signals.dark_fraction or 0) > .95 or (signals.bright_fraction or 0) > .95:
+        if (signals.dark_fraction or 0) > CONFIG.quality.max_extreme_fraction or (signals.bright_fraction or 0) > CONFIG.quality.max_extreme_fraction:
             return RelevanceAssessment(label='uncertain', status='quality_blocked', reason='extreme_exposure')
-        if signals.sharpness is not None and signals.sharpness < 10:
+        if signals.sharpness is not None and signals.sharpness < CONFIG.quality.min_sharpness:
             return RelevanceAssessment(label='uncertain', status='quality_blocked', reason='insufficient_texture_or_sharpness')
         if self._failure is None:
             try:

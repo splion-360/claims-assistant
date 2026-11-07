@@ -154,7 +154,8 @@ class FrameAssociation(Record):
     reference_frame_id: Identifier
     matrix: tuple[tuple[Finite, Finite, Finite], tuple[Finite, Finite, Finite], tuple[Finite, Finite, Finite]]
     method: Literal['optical_flow', 'sift_ransac']
-    matched_points: Annotated[int, Field(ge=12)]
+    # Four correspondences are the planar minimum; config controls admission above it.
+    matched_points: Annotated[int, Field(ge=4)]
     reprojection_error_px: Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
     @model_validator(mode='after')

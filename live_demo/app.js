@@ -24,8 +24,7 @@ const DEFAULT_API_ORIGIN = "http://127.0.0.1:4177";
 const API_ORIGIN = window.location.protocol === "file:" ? DEFAULT_API_ORIGIN : window.location.origin;
 const WS_ORIGIN = API_ORIGIN.replace(/^http/, "ws");
 // Tracking receives intermediate views; quality and remote inference keep separate cadences.
-const FRAME_INTERVAL_MS = 200;
-const FRAME_WIDTH = 1024;
+let cameraConfig = null;
 
 if (window.location.protocol === "file:") {
   window.location.replace(`${API_ORIGIN}/index.html`);
@@ -402,6 +401,7 @@ async function createSession(resume = false) {
     setState(payload.state);
     const health = await api("/api/health");
     modelLabel.textContent = health.live_model;
+    cameraConfig = health.camera;
     micButton.disabled = !health.voice_enabled;
     micButton.title = health.voice_enabled ? "Start or stop voice" : "Set DEEPGRAM_API_KEY and restart to enable voice";
     setStatus(payload.has_api_key ? "Ready" : "API key required", payload.has_api_key ? "" : "danger");
@@ -513,7 +513,9 @@ async function startCamera() {
   try {
     cameraPending = true;
     await connectLive();
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" } });
+    cameraConfig = cameraConfig || (await api("/api/health")).camera;
+    if (!cameraConfig) throw new Error("Camera configuration is unavailable.");
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: cameraConfig.ideal_width }, height: { ideal: cameraConfig.ideal_height }, facingMode: "environment" } });
     if (epoch !== generation || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) { stream.getTracks().forEach(track => track.stop()); return; }
     cameraStream = stream;
     stream.getVideoTracks().forEach(track => track.addEventListener("ended", stopCamera, { once: true }));
@@ -522,7 +524,7 @@ async function startCamera() {
     cameraStage.hidden = false;
     cameraButton.classList.add("active");
     cameraButton.querySelector(".round-label").textContent = "Stop camera";
-    frameTimer = window.setInterval(sendFrame, FRAME_INTERVAL_MS);
+    frameTimer = window.setInterval(sendFrame, cameraConfig.frame_interval_ms);
     setStatus("Camera on, agent can see", "");
   } catch (error) {
     const denied = error.name === "NotAllowedError" || /denied|permission/i.test(error.message);
@@ -550,12 +552,12 @@ function stopCamera() {
 function sendFrame() {
   if (!cameraStream || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
   if (!cameraPreview.videoWidth || liveSocket.bufferedAmount > 512000) return;
-  const scale = FRAME_WIDTH / cameraPreview.videoWidth;
-  frameCanvas.width = FRAME_WIDTH;
+  const scale = cameraConfig.frame_width / cameraPreview.videoWidth;
+  frameCanvas.width = cameraConfig.frame_width;
   frameCanvas.height = Math.round(cameraPreview.videoHeight * scale);
   const ctx = frameCanvas.getContext("2d");
   ctx.drawImage(cameraPreview, 0, 0, frameCanvas.width, frameCanvas.height);
-  const dataUrl = frameCanvas.toDataURL("image/jpeg", 0.8);
+  const dataUrl = frameCanvas.toDataURL("image/jpeg", cameraConfig.jpeg_quality);
   liveSocket.send(JSON.stringify({ type: "video", data: dataUrl.split(",")[1] }));
 }
 

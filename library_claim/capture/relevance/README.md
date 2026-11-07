@@ -24,17 +24,22 @@ not a fabricated negative result. After a failure, retry by restarting the camer
 The backend prints lines of this form (illustrative values):
 
 ```text
-Camera relevance: books | status=assessed | books=0.340 other_objects=0.230 empty_background=0.190 | 35.0 ms | reason=separated_match | frame=...
+Camera relevance: books | status=assessed | books=0.340 empty_background=0.190 | 35.0 ms | reason=separated_match | frame=...
 ```
+
+All model choices, prompts, thresholds, and preprocessing values come from
+[`config.yml`](../../../config.yml). Restart the backend after edits.
 
 Scores are cosine similarities, **not confidence percentages**. A label is
 `uncertain` when the best score is below 0.22 or its lead is below 0.025. These
-thresholds and the fixed prompts are provisional, versioned heuristics; they
+thresholds and the configured prompts are provisional, versioned heuristics; they
 have not been calibrated on a representative book dataset.
 
-The three scored classes are `books`, `other_objects`, and `empty_background`.
-Other objects includes people in the camera view. Mixed scenes can still receive
-an uncertain or incorrect label; a single scene label cannot prove book absence.
+The only scored targets are `books` and `empty_background`. There is no
+catch-all object prompt. A frame matching neither target clearly remains
+`uncertain`; the classifier does not force unrelated objects into one of the
+two targets. Mixed scenes can still receive an incorrect label, so a scene
+label cannot prove book absence.
 
 ## Execution and persistence
 
@@ -48,7 +53,7 @@ an uncertain or incorrect label; a single scene label cannot prove book absence.
   can mean a flat wall rather than blur, so no movement instruction is inferred.
 - Verified duplicate views skip classification. Unverified repeats may still be
   sampled because tracking cannot establish their identity.
-- The text encoder runs once at process initialization to encode the fixed
+- The text encoder runs once at lazy process initialization to encode the configured
   prompts. Its session is then released; image inference reuses a shared CPU
   session with two intra-op threads. Live elapsed time includes lazy load on the
   first successful call; later calls measure preprocessing and inference.
@@ -56,7 +61,7 @@ an uncertain or incorrect label; a single scene label cannot prove book absence.
   while it is busy are dropped rather than accumulated. First-load delay can
   cause a tracking gap and subsequent reacquisition.
 - `Frame.relevance_metadata` stores exact-frame scores, label, method, model
-  revision, thresholds, status, and elapsed time when that frame is saved.
+  revision, thresholds, configuration digest, status, and elapsed time when that frame is saved.
   Unverified unsaved views are logged only. Old rows remain readable with a
   null relevance field. Labels never delete reference evidence.
 
@@ -64,7 +69,7 @@ Full-frame square padding preserves edge objects that CLIP's default center crop
 could remove. RGB conversion, bicubic resize, and CLIP channel normalization are
 applied before 224-pixel image inference. This padding differs from the original
 preprocessor and requires evaluation. Small or occluded books can still be lost
-at that resolution. Class scores are maxima over each class's four text prompts.
+at that resolution. Class scores are maxima over each target's configured text prompts.
 
 ## Evaluation checkpoint
 
@@ -79,15 +84,15 @@ per-image scores and latency; images remain private and ignored by Git. This
 command evaluates all supplied images directly, without the live quality or
 novelty gates, to make model behavior inspectable.
 
-On 2026-11-06, the 63 existing JPEGs produced:
+After removing the catch-all prompts on 2026-11-06, the same 63 existing JPEGs
+produced the following results. The prior three-target evaluation is superseded.
 
 | Measurement | Result |
 | --- | --- |
-| Model load and prompt encoding | 733 ms |
-| Per-image latency, median | 34.0 ms |
-| Per-image latency, 95th percentile | 34.7 ms |
-| Other objects | 6 |
-| Uncertain | 57 |
+| Model load and prompt encoding | 633 ms |
+| Per-image latency, median | 34.5 ms |
+| Per-image latency, 95th percentile | 39.7 ms |
+| Uncertain | 63 |
 | Books / empty background | 0 / 0 |
 
 These are measurements on this development machine, not latency guarantees.

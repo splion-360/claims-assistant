@@ -73,12 +73,13 @@ import speech
 from live_demo.camera_quality import log_scores, logger as quality_logger
 from live_demo.camera_tracking import CameraTracking
 from live_demo.camera_relevance import CameraRelevance
+from library_claim.config import CONFIG
 from library_claim.storage.live_capture import LiveCaptureStore
 from live_tools import SYSTEM_INSTRUCTION, TOOL_NAMES, tool_headline
 
 LIVE_MODEL_ID = MODEL
 logger = logging.getLogger(__name__)
-FRAME_MAX_AGE_SECONDS = 12.0
+FRAME_MAX_AGE_SECONDS = CONFIG.capture.frame_max_age_s
 CAPTURE_DATA_DIR = APP_DIR / ".claim-data"
 
 
@@ -498,6 +499,7 @@ def health() -> dict[str, Any]:
         "live_model": LIVE_MODEL_ID,
         "tools": TOOL_NAMES,
         "voice_enabled": speech.enabled(),
+        "camera": CONFIG.capture.browser.model_dump(),
     }
 
 
@@ -803,7 +805,7 @@ async def live_voice(websocket: WebSocket) -> None:
             messages = [{"role": "system", "content": SYSTEM_INSTRUCTION + "\nLatest background packet (may lag the current conversation): " + json.dumps(workflow) + "\nCamera observations: " + json.dumps(session.camera_notes)}]
             messages.extend({"role": "user" if t["speaker"] == "Claimant" else "assistant", "content": t["text"] + (" [Spoken playback was interrupted.]" if t.get("interrupted") else "")}
                             for t in session.transcript if t["speaker"] in {"Claimant", "Agent"})
-            reply = await complete(messages, max_tokens=512)
+            reply = await complete(messages, max_tokens=CONFIG.inference.conversation_max_tokens)
             if epoch != text_epoch or session.deleted:
                 return
             turn_id = uuid.uuid4().hex
@@ -1013,7 +1015,7 @@ async def live_voice(websocket: WebSocket) -> None:
                         tracking_task = track(track_camera(data, session.last_frame_id,
                                                            session.camera_mode_revision, tracking_stream, now))
                     # One vision job at a time; no frame queue or repeated identical captures.
-                    if (camera_task is None or camera_task.done()) and now - last_capture_at >= 8 and data != last_capture_frame and len(session.evidence_photos) < MAX_PHOTOS:
+                    if (camera_task is None or camera_task.done()) and now - last_capture_at >= CONFIG.capture.remote_interval_s and data != last_capture_frame and len(session.evidence_photos) < MAX_PHOTOS:
                         last_capture_at = now
                         camera_task = track(capture())
             except (ValueError, TypeError) as exc:

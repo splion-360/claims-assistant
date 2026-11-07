@@ -12,11 +12,9 @@ import numpy as np
 
 from .classifier import BookRelevanceClassifier, MODEL_DIR, MODEL_ID, REVISION
 
-ARTIFACTS = {
-    'onnx/vision_model_quantized.onnx': '583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299',
-    'onnx/text_model_quantized.onnx': '73baab855d406190da9faa498cfedf65f15cf309f4cc7385b7b032e6d08e5c3a',
-    'tokenizer.json': 'f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd',
-}
+from library_claim.config import CONFIG
+
+ARTIFACTS = {value['remote']: value['sha256'] for value in CONFIG.relevance.artifacts.model_dump().values()}
 
 
 def setup(directory: Path) -> None:
@@ -31,7 +29,7 @@ def setup(directory: Path) -> None:
         OSError: Model files cannot be written.
     """
     directory.mkdir(parents=True, exist_ok=True)
-    with httpx.Client(follow_redirects=True, timeout=120) as client:
+    with httpx.Client(follow_redirects=True, timeout=CONFIG.relevance.download_timeout_s) as client:
         for remote, expected in ARTIFACTS.items():
             target = directory / Path(remote).name
             if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() == expected:

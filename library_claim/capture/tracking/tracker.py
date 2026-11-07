@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict
 
 from .geometry import corners, normalized_mapping, transform, verify
 from .keyframes import Keyframes
+from library_claim.config import CONFIG
+
+SETTINGS = CONFIG.tracking
 
 
 class TrackingResult(BaseModel):
@@ -43,7 +46,7 @@ class TrackingResult(BaseModel):
 class FrameTracker:
     """Maintain short-term continuity and bounded session-local reference views."""
 
-    def __init__(self, *, capacity: int = 24, reanchor_every: int = 10):
+    def __init__(self, *, capacity: int = SETTINGS.capacity, reanchor_every: int = SETTINGS.reanchor_every):
         """Configure keyframe memory and periodic recovery verification.
 
         Args:
@@ -64,6 +67,18 @@ class FrameTracker:
         self.steps = 0
         self.timestamp = None
 
+    @staticmethod
+    def _flow_options() -> dict:
+        """Build matching forward and backward Lucas-Kanade parameters.
+
+        Returns:
+            OpenCV keyword arguments from the shared tracking configuration.
+        """
+        return dict(winSize=(SETTINGS.lk_window, SETTINGS.lk_window), maxLevel=SETTINGS.lk_max_level,
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                              SETTINGS.lk_iterations, SETTINGS.lk_epsilon),
+                    minEigThreshold=SETTINGS.lk_min_eigen_threshold)
+
     def _flow(self, gray: np.ndarray) -> tuple | None:
         """Follow corners bidirectionally and verify their planar arrangement.
 
@@ -73,16 +88,16 @@ class FrameTracker:
         Returns:
             Current-to-previous mapping and diagnostics, or None on failure.
         """
-        if self.previous is None or self.points is None or len(self.points) < 12:
+        if self.previous is None or self.points is None or len(self.points) < SETTINGS.min_matches:
             return None
-        forward, status, _ = cv2.calcOpticalFlowPyrLK(self.previous, gray, self.points, None)
+        forward, status, _ = cv2.calcOpticalFlowPyrLK(self.previous, gray, self.points, None, **self._flow_options())
         if forward is None:
             return None
-        backward, back_status, _ = cv2.calcOpticalFlowPyrLK(gray, self.previous, forward, None)
+        backward, back_status, _ = cv2.calcOpticalFlowPyrLK(gray, self.previous, forward, None, **self._flow_options())
         if backward is None:
             return None
         good = status.ravel().astype(bool) & back_status.ravel().astype(bool)
-        good &= np.linalg.norm(backward - self.points, axis=2).ravel() < 1
+        good &= np.linalg.norm(backward - self.points, axis=2).ravel() < SETTINGS.forward_backward_error_px
         good &= np.isfinite(forward).all(axis=(1, 2))
         current = forward.reshape(-1, 2)
         good &= (current[:, 0] >= 0) & (current[:, 0] < gray.shape[1])
@@ -112,12 +127,12 @@ class FrameTracker:
         if min(image.shape[:2]) < 32 or (image.ndim == 3 and image.shape[2] != 3):
             raise ValueError('Image is too small or has unsupported channels')
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
-        scale = min(1, 640 / max(gray.shape))
+        scale = min(1, SETTINGS.max_dimension / max(gray.shape))
         if scale < 1:
             gray = cv2.resize(gray, (round(gray.shape[1] * scale), round(gray.shape[0] * scale)))
         if min(gray.shape) < 32:
             raise ValueError('Image aspect ratio is unsupported')
-        gap = self.timestamp is None or timestamp - self.timestamp > 1.0
+        gap = self.timestamp is None or timestamp - self.timestamp > SETTINGS.max_gap_s
         self.timestamp = timestamp
         status, count, error = 'uncertain', 0, None
         matrix = None
@@ -142,7 +157,7 @@ class FrameTracker:
             if len(verified) == 1:
                 self.reference, (matrix, count, error) = verified[0]
                 status = 'recovered'
-            elif not verified and descriptors is not None and len(points) >= 12:
+            elif not verified and descriptors is not None and len(points) >= SETTINGS.min_matches:
                 self.reference = self.keyframes.add(frame_id, gray, points, descriptors)
                 matrix, status = np.eye(3), 'reference_created'
             # Multiple verified references remain ambiguous rather than picking an identity.
@@ -158,7 +173,7 @@ class FrameTracker:
                     raise ValueError('Invalid mapped view')
                 area, _ = cv2.intersectConvexConvex(polygon, reference_corners)
                 overlap = float(np.clip(area / cv2.contourArea(polygon), 0, 1))
-                if overlap < .2:
+                if overlap < SETTINGS.min_reference_overlap:
                     raise ValueError('Insufficient reference overlap')
                 mapping, reference_id = normalized.tolist(), self.reference.frame_id
             except (ValueError, cv2.error):
@@ -166,7 +181,8 @@ class FrameTracker:
         self.mapping = matrix
         self.previous = gray
         # Replenish local corners instead of letting the tracked set shrink forever.
-        self.points = cv2.goodFeaturesToTrack(gray, maxCorners=250, qualityLevel=.01, minDistance=8)
+        self.points = cv2.goodFeaturesToTrack(gray, maxCorners=SETTINGS.max_corners, qualityLevel=SETTINGS.corner_quality,
+                                              minDistance=SETTINGS.corner_min_distance_px)
         return TrackingResult(frame_id=frame_id, status=status, reference_frame_id=reference_id,
                               current_to_reference=mapping, reference_overlap=overlap,
                               matched_points=count, reprojection_error_px=error,

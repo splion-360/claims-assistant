@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from library_claim.domain.models import ProcessingJob, Sweep
+from library_claim.config import CONFIG
 from library_claim.storage.repository import Repository
 
 Runner = Callable[[ProcessingJob], Awaitable[dict[str, Any]]]
@@ -17,8 +18,8 @@ class Scheduler:
     """Own a fixed worker pool for one sweep in a single application process."""
 
     def __init__(self, database: str | Path, sweep_id: str, runner: Runner,
-                 *, concurrency: int = 1, pending_limit: int = 8,
-                 timeout_s: float = 30):
+                 *, concurrency: int = CONFIG.scheduler.concurrency, pending_limit: int = CONFIG.scheduler.pending_limit,
+                 timeout_s: float = CONFIG.scheduler.timeout_s):
         """Configure bounded execution without starting background tasks.
 
         Args:

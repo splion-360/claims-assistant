@@ -89,5 +89,12 @@ Tracking now receives up to five camera frames per second; see [tracking](tracki
 
 The live backend can label sampled candidate views using a pretrained local
 CLIP model. See [setup, score semantics, and evaluation](relevance/README.md).
-It logs books, other objects, empty background, or uncertain, and stores the
+It logs books, empty background, or uncertain, and stores the
 assessment with selected frames. This pilot does not yet gate remote inference.
+
+## Experiment settings
+
+Edit the root [`config.yml`](../../config.yml) for quality, tracking, geometry,
+selection, relevance, scheduling, camera cadence, and model generation settings.
+The shared loader validates the file at startup; modules import those settings.
+See [configuration usage](../../docs/configuration.md) for reload and model setup.

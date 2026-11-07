@@ -1,0 +1,117 @@
+# Restart the backend after editing. Credentials belong in .env.
+relevance:
+  model_id: Xenova/clip-vit-base-patch32
+  revision: 6b7c523703ae26e39be4b03774966f8571c7f523
+  model_dir: .cache/book-relevance
+  method: clip-int8-full-frame-v2
+  min_similarity: 0.22
+  min_margin: 0.025
+  prompts:
+    books:
+      - a photo of a book
+      - a photo of books on a bookshelf
+      - a photo of a stack of books
+      - a photo of book spines
+    empty_background:
+      - a photo of a blank wall
+      - a photo of an empty shelf
+      - a photo of a bare floor
+      - a photo of a ceiling
+  # These preprocessing/tokenizer values must match the selected model.
+  image_size: 224
+  image_mean: [0.48145466, 0.4578275, 0.40821073]
+  image_std: [0.26862954, 0.26130258, 0.27577711]
+  padding_rgb: [123, 117, 104]
+  token_length: 77
+  pad_id: 49407
+  pad_token: '<|endoftext|>'
+  intra_op_threads: 2
+  inter_op_threads: 1
+  download_timeout_s: 120
+  artifacts:
+    vision:
+      remote: onnx/vision_model_quantized.onnx
+      sha256: 583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299
+    text:
+      remote: onnx/text_model_quantized.onnx
+      sha256: 73baab855d406190da9faa498cfedf65f15cf309f4cc7385b7b032e6d08e5c3a
+    tokenizer:
+      remote: tokenizer.json
+      sha256: f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd
+quality:
+  max_dimension: 640
+  dark_cutoff: 16
+  bright_cutoff: 239
+  brisque_model: library_claim/capture/assets/brisque_model_live.yml
+  brisque_range: library_claim/capture/assets/brisque_range_live.yml
+  method: opencv-quality-v1/brisque-live-4.10.0
+  brisque_ranking_scale: 100
+  max_extreme_fraction: 0.95
+  min_sharpness: 10
+tracking:
+  max_dimension: 640
+  capacity: 24
+  reanchor_every: 10
+  max_gap_s: 1.0
+  min_reference_overlap: 0.2
+  sift_features: 400
+  flann_trees: 4
+  flann_checks: 64
+  descriptor_ratio: 0.7
+  candidate_limit: 3
+  min_matches: 12
+  reprojection_threshold_px: 3.0
+  ransac_iterations: 500
+  ransac_confidence: 0.99
+  min_inlier_fraction: 0.65
+  min_support_area: 0.08
+  min_projected_area_ratio: 0.15
+  max_projected_area_ratio: 6.0
+  forward_backward_error_px: 1.0
+  max_corners: 250
+  corner_quality: 0.01
+  corner_min_distance_px: 8
+  # Explicit OpenCV Lucas-Kanade defaults.
+  lk_window: 21
+  lk_max_level: 3
+  lk_iterations: 30
+  lk_epsilon: 0.01
+  lk_min_eigen_threshold: 0.0001
+selection:
+  new_coverage_fraction: 0.15
+  detail_gain: 1.25
+  brisque_improvement: 5
+  sharpness_gain: 1.25
+  sharpness_floor: 1
+capture:
+  quality_interval_s: 1.0
+  tracking_log_interval_s: 1.0
+  remote_interval_s: 8.0
+  frame_max_age_s: 12.0
+  # Only this subsection is sent to the browser.
+  browser:
+    frame_interval_ms: 200
+    frame_width: 1024
+    ideal_width: 1280
+    ideal_height: 720
+    jpeg_quality: 0.8
+scheduler:
+  concurrency: 1
+  pending_limit: 8
+  timeout_s: 30
+inference:
+  model: Qwen/Qwen3.8-27B
+  vision_model: Qwen/Qwen3.8-27B
+  max_tokens: 4096
+  conversation_max_tokens: 512
+  temperature: 0
+  qwen_enable_thinking: false
+  timeout_s: 60
+  connect_timeout_s: 10
+speech:
+  stt_model: flux-general-en
+  tts_model: aura-2-thalia-en
+  tts_chunk_chars: 1800
+  timeout_s: 30
+  connect_timeout_s: 10
+  close_timeout_s: 2

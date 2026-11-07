@@ -7,6 +7,8 @@ from urllib.parse import urlencode
 import httpx
 from websockets.asyncio.client import connect
 
+from library_claim.config import CONFIG
+
 
 class SpeechError(RuntimeError):
     """Safe speech failure suitable for displaying to the user."""
@@ -23,24 +25,42 @@ def headers() -> dict[str, str]:
 
 
 def listen():
-    query = urlencode({'model': os.getenv('DEEPGRAM_STT_MODEL', 'flux-general-en'),
+    """Configure a Deepgram stream using the selected speech recognition model.
+
+    Returns:
+        A websocket connection context manager for mono PCM16 at 16 kHz.
+
+    Raises:
+        SpeechError: The API credential is missing.
+    """
+    query = urlencode({'model': CONFIG.speech.stt_model,
                        'encoding': 'linear16', 'sample_rate': 16000})
     return connect('wss://api.deepgram.com/v2/listen?' + query,
-                   additional_headers=headers(), open_timeout=10, close_timeout=2,
+                   additional_headers=headers(), open_timeout=CONFIG.speech.connect_timeout_s, close_timeout=CONFIG.speech.close_timeout_s,
                    max_size=1_000_000)
 
 
 async def synthesize(text: str):
-    """Yield raw mono PCM16 at 24 kHz, keeping each chunk sample-aligned."""
-    params = {'model': os.getenv('DEEPGRAM_TTS_MODEL', 'aura-2-thalia-en'),
+    """Synthesize speech using configured model, request size, and timeouts.
+
+    Args:
+        text: Full response to synthesize in sequential provider requests.
+
+    Yields:
+        Sample-aligned chunks of raw mono PCM16 at 24 kHz.
+
+    Raises:
+        SpeechError: Credentials, transport, or returned audio are invalid.
+    """
+    params = {'model': CONFIG.speech.tts_model,
               'encoding': 'linear16', 'sample_rate': 24000, 'container': 'none'}
     # Aura REST requests have a character limit; preserve all text across chunks.
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10)) as client:
-        for start in range(0, len(text), 1800):
+    async with httpx.AsyncClient(timeout=httpx.Timeout(CONFIG.speech.timeout_s, connect=CONFIG.speech.connect_timeout_s)) as client:
+        for start in range(0, len(text), CONFIG.speech.tts_chunk_chars):
             try:
                 async with client.stream('POST', 'https://api.deepgram.com/v1/speak',
                                          headers=headers(), params=params,
-                                         json={'text': text[start:start + 1800]}) as response:
+                                         json={'text': text[start:start + CONFIG.speech.tts_chunk_chars]}) as response:
                     if response.status_code != 200:
                         raise SpeechError(f'Deepgram speech failed (HTTP {response.status_code}). Text is still available.')
                     pending = b''

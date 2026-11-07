@@ -5,6 +5,10 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from library_claim.config import CONFIG
+
+SETTINGS = CONFIG.tracking
+
 
 @dataclass
 class Keyframe:
@@ -19,7 +23,7 @@ class Keyframe:
 class Keyframes:
     """Own a bounded reference collection and FLANN nearest-neighbor index."""
 
-    def __init__(self, capacity: int = 24):
+    def __init__(self, capacity: int = SETTINGS.capacity):
         """Configure the reference budget.
 
         Args:
@@ -32,7 +36,7 @@ class Keyframes:
             raise ValueError('Keyframe capacity must be positive')
         self.capacity = capacity
         self.views: list[Keyframe] = []
-        self.sift = cv2.SIFT_create(nfeatures=400)
+        self.sift = cv2.SIFT_create(nfeatures=SETTINGS.sift_features)
         self.matcher = None
 
     def describe(self, gray: np.ndarray) -> tuple[np.ndarray, np.ndarray | None]:
@@ -63,7 +67,7 @@ class Keyframes:
         view = Keyframe(frame_id, gray.copy(), points.copy(), descriptors.copy())
         self.views.append(view)
         self.views = self.views[-self.capacity:]
-        self.matcher = cv2.FlannBasedMatcher(dict(algorithm=1, trees=4), dict(checks=64))
+        self.matcher = cv2.FlannBasedMatcher(dict(algorithm=1, trees=SETTINGS.flann_trees), dict(checks=SETTINGS.flann_checks))
         self.matcher.add([item.descriptors for item in self.views])
         self.matcher.train()
         return view
@@ -75,14 +79,14 @@ class Keyframes:
             descriptors: Current image's SIFT descriptors.
 
         Returns:
-            At most three candidate views with unique supporting matches.
+            At most the configured number of candidate views with unique supporting matches.
         """
         if descriptors is None or self.matcher is None:
             return []
         groups = defaultdict(list)
         matches = self.matcher.knnMatch(descriptors, k=2)
         for pair in matches:
-            if len(pair) == 2 and pair[0].distance < .7 * pair[1].distance:
+            if len(pair) == 2 and pair[0].distance < SETTINGS.descriptor_ratio * pair[1].distance:
                 groups[pair[0].imgIdx].append(pair[0])
         ranked = []
         for index, matches in groups.items():
@@ -90,6 +94,6 @@ class Keyframes:
             unique = {}
             for match in sorted(matches, key=lambda item: item.distance):
                 unique.setdefault(match.trainIdx, match)
-            if len(unique) >= 12:
+            if len(unique) >= SETTINGS.min_matches:
                 ranked.append((self.views[index], list(unique.values())))
-        return sorted(ranked, key=lambda item: len(item[1]), reverse=True)[:3]
+        return sorted(ranked, key=lambda item: len(item[1]), reverse=True)[:SETTINGS.candidate_limit]

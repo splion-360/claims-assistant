@@ -8,20 +8,16 @@ import numpy as np
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
-MODEL_ID = 'Xenova/clip-vit-base-patch32'
-REVISION = '6b7c523703ae26e39be4b03774966f8571c7f523'
-MODEL_DIR = Path(__file__).resolve().parents[3] / '.cache' / 'book-relevance'
-PROMPTS = {
-    'books': ('a photo of a book', 'a photo of books on a bookshelf',
-              'a photo of a stack of books', 'a photo of book spines'),
-    'other_objects': ('a photo of a person in a room', 'a photo of a mug',
-                      'a photo of furniture', 'a photo of household objects'),
-    'empty_background': ('a photo of a blank wall', 'a photo of an empty shelf',
-                          'a photo of a bare floor', 'a photo of a ceiling'),
-}
-MIN_SIMILARITY = .22
-MIN_MARGIN = .025
-METHOD = 'clip-int8-full-frame-v1'
+from library_claim.config import CONFIG, CONFIG_DIGEST, ROOT
+
+SETTINGS = CONFIG.relevance
+MODEL_ID = SETTINGS.model_id
+REVISION = SETTINGS.revision
+MODEL_DIR = ROOT / SETTINGS.model_dir
+PROMPTS = SETTINGS.prompts.model_dump()
+MIN_SIMILARITY = SETTINGS.min_similarity
+MIN_MARGIN = SETTINGS.min_margin
+METHOD = SETTINGS.method
 _SHARED = None
 _LOAD_LOCK = Lock()
 
@@ -30,7 +26,7 @@ class RelevanceAssessment(BaseModel):
     """Report relative cosine scores and an explicitly provisional decision."""
 
     model_config = ConfigDict(extra='forbid', frozen=True)
-    label: Literal['books', 'other_objects', 'empty_background', 'uncertain']
+    label: Literal['books', 'empty_background', 'uncertain']
     status: Literal['assessed', 'quality_blocked', 'unavailable'] = 'assessed'
     scores: dict[str, float] = Field(default_factory=dict)
     margin: float | None = None
@@ -39,6 +35,7 @@ class RelevanceAssessment(BaseModel):
     model: str = MODEL_ID
     revision: str = REVISION
     method: str = METHOD
+    config_digest: str = CONFIG_DIGEST
     min_similarity: float = MIN_SIMILARITY
     min_margin: float = MIN_MARGIN
 
@@ -77,7 +74,7 @@ def prepare_image(bgr: np.ndarray) -> np.ndarray:
         bgr: Nonempty uint8 OpenCV image with three BGR channels.
 
     Returns:
-        Float32 RGB tensor of shape (1, 3, 224, 224).
+        Float32 RGB tensor at the configured square model resolution.
 
     Raises:
         ValueError: The input does not satisfy the decoded-image contract.
@@ -85,13 +82,14 @@ def prepare_image(bgr: np.ndarray) -> np.ndarray:
     if bgr.dtype != np.uint8 or bgr.ndim != 3 or bgr.shape[2] != 3 or min(bgr.shape[:2]) < 1:
         raise ValueError('Expected nonempty uint8 BGR image')
     rgb = Image.fromarray(bgr[:, :, ::-1])
-    rgb.thumbnail((224, 224), Image.Resampling.BICUBIC)
+    size = SETTINGS.image_size
+    rgb.thumbnail((size, size), Image.Resampling.BICUBIC)
     # Center cropping can discard books near the camera edges; keep the full view.
-    square = Image.new('RGB', (224, 224), (123, 117, 104))
-    square.paste(rgb, ((224 - rgb.width) // 2, (224 - rgb.height) // 2))
+    square = Image.new('RGB', (size, size), SETTINGS.padding_rgb)
+    square.paste(rgb, ((size - rgb.width) // 2, (size - rgb.height) // 2))
     pixels = np.asarray(square, dtype=np.float32) / 255
-    mean = np.array([.48145466, .4578275, .40821073], dtype=np.float32)
-    std = np.array([.26862954, .26130258, .27577711], dtype=np.float32)
+    mean = np.array(SETTINGS.image_mean, dtype=np.float32)
+    std = np.array(SETTINGS.image_std, dtype=np.float32)
     return np.ascontiguousarray(((pixels - mean) / std).transpose(2, 0, 1)[None])
 
 
@@ -111,19 +109,20 @@ class BookRelevanceClassifier:
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
-        for name in ('vision_model_quantized.onnx', 'text_model_quantized.onnx', 'tokenizer.json'):
+        files = {key: Path(value['remote']).name for key, value in SETTINGS.artifacts.model_dump().items()}
+        for name in files.values():
             if not (directory / name).is_file():
                 raise FileNotFoundError('Run python -m library_claim.capture.relevance setup')
         options = ort.SessionOptions()
-        options.intra_op_num_threads = 2
-        options.inter_op_num_threads = 1
-        self._vision = ort.InferenceSession(str(directory / 'vision_model_quantized.onnx'),
+        options.intra_op_num_threads = SETTINGS.intra_op_threads
+        options.inter_op_num_threads = SETTINGS.inter_op_threads
+        self._vision = ort.InferenceSession(str(directory / files['vision']),
                                            sess_options=options, providers=['CPUExecutionProvider'])
-        text = ort.InferenceSession(str(directory / 'text_model_quantized.onnx'),
+        text = ort.InferenceSession(str(directory / files['text']),
                                     sess_options=options, providers=['CPUExecutionProvider'])
-        tokenizer = Tokenizer.from_file(str(directory / 'tokenizer.json'))
-        tokenizer.enable_truncation(max_length=77)
-        tokenizer.enable_padding(length=77, pad_id=49407, pad_token='<|endoftext|>')
+        tokenizer = Tokenizer.from_file(str(directory / files['tokenizer']))
+        tokenizer.enable_truncation(max_length=SETTINGS.token_length)
+        tokenizer.enable_padding(length=SETTINGS.token_length, pad_id=SETTINGS.pad_id, pad_token=SETTINGS.pad_token)
         prompts = [prompt for group in PROMPTS.values() for prompt in group]
         tokens = np.array([e.ids for e in tokenizer.encode_batch(prompts)], dtype=np.int64)
         vectors = text.run(['text_embeds'], {'input_ids': tokens})[0]

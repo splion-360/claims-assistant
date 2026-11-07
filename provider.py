@@ -11,9 +11,11 @@ import httpx
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
+from library_claim.config import CONFIG
+
 load_dotenv(Path(__file__).with_name('.env'))
-MODEL = os.getenv('CRUSOE_MODEL', 'Qwen/Qwen3.8-27B')
-VISION_MODEL = os.getenv('CRUSOE_VISION_MODEL', MODEL)
+MODEL = CONFIG.inference.model
+VISION_MODEL = CONFIG.inference.vision_model
 BASE_URL = os.getenv('CRUSOE_BASE_URL', 'https://api.inference.crusoecloud.com/v1').rstrip('/')
 logger = logging.getLogger(__name__)
 T = TypeVar('T', bound=BaseModel)
@@ -46,21 +48,35 @@ def has_api_key() -> bool:
 
 
 async def complete(messages: list[dict], *, schema: type[BaseModel] | None = None,
-                   model: str | None = None, max_tokens: int = 4096) -> str:
+                   model: str | None = None, max_tokens: int = CONFIG.inference.max_tokens) -> str:
+    """Request a completion using centrally configured generation defaults.
+
+    Args:
+        messages: Provider-compatible conversation messages.
+        schema: Optional structured response contract.
+        model: Optional per-call override of the configured text model.
+        max_tokens: Output token budget, defaulting to config.yml.
+
+    Returns:
+        The nonempty model response text.
+
+    Raises:
+        InferenceError: Credentials, transport, or the response are invalid.
+    """
     if not has_api_key():
         raise InferenceError('Set CRUSOE_API_KEY in .env and restart the server.')
     selected_model = model or MODEL
     payload = {'model': selected_model, 'messages': messages,
-               'max_tokens': max_tokens, 'temperature': 0}
+               'max_tokens': max_tokens, 'temperature': CONFIG.inference.temperature}
     # The default Qwen model supports this switch; other models keep their defaults.
     if selected_model.startswith('Qwen/'):
-        payload['chat_template_kwargs'] = {'enable_thinking': False}
+        payload['chat_template_kwargs'] = {'enable_thinking': CONFIG.inference.qwen_enable_thinking}
     if schema:
         payload['response_format'] = {'type': 'json_schema', 'json_schema': {
             'name': schema.__name__, 'schema': strict_schema(schema), 'strict': True}}
     started = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(CONFIG.inference.timeout_s, connect=CONFIG.inference.connect_timeout_s)) as client:
             response = await client.post(BASE_URL + '/chat/completions',
                 headers={'Authorization': 'Bearer ' + os.environ['CRUSOE_API_KEY']}, json=payload)
         if response.status_code != 200:

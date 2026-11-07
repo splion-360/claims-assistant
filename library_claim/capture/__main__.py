@@ -5,6 +5,7 @@ from pathlib import Path
 import cv2
 
 from .quality import QualityAssessor
+from library_claim.config import CONFIG
 
 
 def main() -> None:
@@ -12,7 +13,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('image', type=Path, help='JPEG or PNG image to assess')
     parser.add_argument('--previous', type=Path, help='Previous image for temporal change')
-    parser.add_argument('--max-dimension', type=int, default=640)
+    parser.add_argument('--max-dimension', type=int, default=CONFIG.quality.max_dimension)
     args = parser.parse_args()
 
     # Decode both inputs consistently so channel order matches OpenCV's contract.

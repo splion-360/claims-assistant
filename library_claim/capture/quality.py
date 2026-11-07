@@ -1,6 +1,5 @@
 """Measure image quality using OpenCV diagnostics and pretrained BRISQUE."""
 import math
-from pathlib import Path
 from time import perf_counter
 from typing import Annotated
 
@@ -9,8 +8,9 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from library_claim.domain.models import Box, Quality, Score
+from library_claim.config import CONFIG, CONFIG_DIGEST, ROOT
 
-ASSETS = Path(__file__).with_name('assets')
+SETTINGS = CONFIG.quality
 
 
 class QualityAssessment(BaseModel):
@@ -27,14 +27,15 @@ class QualityAssessment(BaseModel):
     dark_cutoff: int
     bright_cutoff: int
     opencv_version: str
-    method: str = 'opencv-quality-v1/brisque-live-4.10.0'
+    method: str = SETTINGS.method
+    config_digest: str = CONFIG_DIGEST
 
 
 class QualityAssessor:
     """Reuse a pretrained BRISQUE model for synchronous image assessment."""
 
-    def __init__(self, *, max_dimension: int = 640, dark_cutoff: int = 16,
-                 bright_cutoff: int = 239):
+    def __init__(self, *, max_dimension: int = SETTINGS.max_dimension, dark_cutoff: int = SETTINGS.dark_cutoff,
+                 bright_cutoff: int = SETTINGS.bright_cutoff):
         """Load the bundled model and configure reproducible preprocessing.
 
         Args:
@@ -55,8 +56,8 @@ class QualityAssessor:
         self.bright_cutoff = bright_cutoff
         try:
             self._brisque = cv2.quality.QualityBRISQUE_create(
-                str(ASSETS / 'brisque_model_live.yml'),
-                str(ASSETS / 'brisque_range_live.yml'),
+                str(ROOT / SETTINGS.brisque_model),
+                str(ROOT / SETTINGS.brisque_range),
             )
         except (cv2.error, AttributeError) as error:
             raise RuntimeError('Could not load bundled BRISQUE model; install the contrib dependencies') from error
@@ -159,7 +160,7 @@ class QualityAssessor:
             brisque=raw_score,
         )
         # Preserve raw scores: the bounded score is a ranking aid, not confidence.
-        ranking = None if raw_score is None else float(np.clip(1 - raw_score / 100, 0, 1))
+        ranking = None if raw_score is None else float(np.clip(1 - raw_score / SETTINGS.brisque_ranking_scale, 0, 1))
         return QualityAssessment(
             signals=signals, brisque_quality_score=ranking,
             assessed_width_px=gray.shape[1], assessed_height_px=gray.shape[0],

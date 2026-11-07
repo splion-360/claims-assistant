@@ -2,6 +2,10 @@
 import cv2
 import numpy as np
 
+from library_claim.config import CONFIG
+
+SETTINGS = CONFIG.tracking
+
 
 def transform(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     """Project points through a homography while rejecting its horizon.
@@ -58,25 +62,26 @@ def verify(source: np.ndarray, destination: np.ndarray, source_shape: tuple,
     """
     source = np.asarray(source, dtype=np.float32).reshape(-1, 2)
     destination = np.asarray(destination, dtype=np.float32).reshape(-1, 2)
-    if len(source) < 12 or len(source) != len(destination):
+    if len(source) < SETTINGS.min_matches or len(source) != len(destination):
         return None
     matrix, mask = cv2.findHomography(source, destination, cv2.RANSAC if robust else 0,
-                                      3.0, maxIters=500, confidence=.99)
+                                      SETTINGS.reprojection_threshold_px, maxIters=SETTINGS.ransac_iterations,
+                                      confidence=SETTINGS.ransac_confidence)
     if matrix is None:
         return None
     try:
         errors = np.linalg.norm(transform(source, matrix) - destination, axis=1)
-        good = (errors <= 3) & mask.ravel().astype(bool)
-        if good.sum() < 12 or good.mean() < .65:
+        good = (errors <= SETTINGS.reprojection_threshold_px) & mask.ravel().astype(bool)
+        if good.sum() < SETTINGS.min_matches or good.mean() < SETTINGS.min_inlier_fraction:
             return None
         # Matches confined to one repeated label cannot establish the whole view.
         for points, shape in ((source[good], source_shape), (destination[good], destination_shape)):
             area = cv2.contourArea(cv2.convexHull(points))
-            if area / (shape[0] * shape[1]) < .08:
+            if area / (shape[0] * shape[1]) < SETTINGS.min_support_area:
                 return None
         polygon = transform(corners(source_shape), matrix).astype(np.float32)
         ratio = cv2.contourArea(polygon, oriented=True) / (source_shape[0] * source_shape[1])
-        if not cv2.isContourConvex(polygon) or not .15 < ratio < 6:
+        if not cv2.isContourConvex(polygon) or not SETTINGS.min_projected_area_ratio < ratio < SETTINGS.max_projected_area_ratio:
             return None
     except (ValueError, cv2.error):
         return None

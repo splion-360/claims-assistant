@@ -6,7 +6,7 @@ function env(){
  const el=()=>({textContent:'',className:'',hidden:false,style:{},dataset:{},classList:{add(){},remove(){}},querySelector(){return el()},querySelectorAll(){return[]},addEventListener(){},focus(){},showModal(){},close(){},getTracks(){return[]}});
  class WS{static OPEN=1;constructor(url){this.url=url;this.readyState=0;sockets.push(this);setImmediate(()=>{if(this.closed)return;this.readyState=1;this.onmessage?.({data:JSON.stringify({type:'ready',session_id:new URL(url).searchParams.get('session_id')})})})}send(x){this.sent??=[];this.sent.push(JSON.parse(x))}close(){this.closed=true;this.readyState=3;this.onclose?.()}}
  class Audio{constructor(){this.currentTime=10;this.destination={}}async resume(){}createBuffer(c,n,r){return {duration:n/r,getChannelData(){return new Float32Array(n)}}}createBufferSource(){const x={stopped:false,connect(){},start(at){this.startAt=at},stop(){this.stopped=true}};sources.push(x);return x}}
- const ctx=vm.createContext({console,crypto,document:{querySelector(k){if(!elements.has(k))elements.set(k,el());return elements.get(k)}},window:{location:{protocol:'http:',origin:'http://127.0.0.1:4188'},AudioContext:Audio,addEventListener(){},setInterval(){return 1},clearInterval(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},navigator:{},WebSocket:WS,AudioContext:Audio,fetch:async url=>({ok:true,json:async()=>url.endsWith('/health')?{}:{session_id:'session-'+(++counter),has_api_key:true,state:{session_id:'session-'+counter,transcript:[],tool_activity:[]}}}),setTimeout,clearTimeout,atob:s=>Buffer.from(s,'base64').toString('binary'),btoa:s=>Buffer.from(s,'binary').toString('base64')});
+ const ctx=vm.createContext({console,crypto,document:{querySelector(k){if(!elements.has(k))elements.set(k,el());return elements.get(k)}},window:{location:{protocol:'http:',origin:'http://127.0.0.1:4188'},AudioContext:Audio,addEventListener(){},setInterval(){return 1},clearInterval(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},navigator:{},WebSocket:WS,AudioContext:Audio,fetch:async url=>({ok:true,json:async()=>url.endsWith('/health')?{camera:{frame_interval_ms:350,frame_width:800,ideal_width:960,ideal_height:540,jpeg_quality:0.65}}:{session_id:'session-'+(++counter),has_api_key:true,state:{session_id:'session-'+counter,transcript:[],tool_activity:[]}}}),setTimeout,clearTimeout,atob:s=>Buffer.from(s,'base64').toString('binary'),btoa:s=>Buffer.from(s,'binary').toString('base64')});
  vm.runInContext(src,ctx);vm.runInContext('state={...emptyState};sessionId="initial";',ctx);return {ctx,sockets,sources,elements,run:x=>vm.runInContext(x,ctx)};
 }
 const tests=[];const test=(name,fn)=>tests.push([name,fn]);
@@ -33,11 +33,17 @@ test('denied camera does not announce camera on',async()=>{
  const e=env();e.run('navigator.mediaDevices={getUserMedia:async()=>{throw new Error("Permission denied")}}');
  await e.run('startCamera()');assert.equal(e.sockets[0].sent,undefined);assert.equal(e.run('cameraStream'),null);e.run('disconnectLive()');
 });
-test('tracking cadence is five fps and socket backpressure skips frames',async()=>{
+test('camera settings come from backend and socket backpressure skips frames',async()=>{
  const e=env();await e.run('connectLive()');
- assert.equal(e.run('FRAME_INTERVAL_MS'),200);
+ await e.run('createSession(true)');await e.run('connectLive()');
+ assert.equal(e.run('cameraConfig.frame_interval_ms'),350);
+ assert.equal(e.run('cameraConfig.frame_width'),800);
  e.run('cameraStream={};liveSocket.bufferedAmount=600000;cameraPreview.videoWidth=640;sendFrame()');
- assert.equal(e.sockets[0].sent,undefined);
+ assert.equal(e.sockets.at(-1).sent,undefined);
+ e.run('liveSocket.bufferedAmount=0;cameraPreview.videoHeight=480;frameCanvas.getContext=()=>({drawImage(){}});let jpegSettings;frameCanvas.toDataURL=(type,quality)=>{jpegSettings={type,quality};return "data:image/jpeg;base64,AA=="};sendFrame()');
+ assert.equal(e.run('frameCanvas.width'),800);assert.equal(e.run('frameCanvas.height'),600);
+ assert.equal(e.run('jpegSettings.quality'),0.65);
+ assert.equal(e.sockets.at(-1).sent.at(-1).type,'video');
  e.run('cameraStream=null;disconnectLive()');
 });
 (async()=>{for(const [name,fn]of tests){await fn();console.log('PASS '+name)}console.log(`${tests.length} client regression tests passed`)})().catch(e=>{console.error(e);process.exitCode=1});

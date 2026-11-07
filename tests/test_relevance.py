@@ -37,17 +37,17 @@ class RelevanceTests(unittest.TestCase):
     """Exercise classifier decisions without downloads or pretrained weights."""
 
     def test_strong_matches_and_uncertainty(self):
-        """Keep all three classes distinct and abstain on weak or ambiguous matches."""
-        for label in ('books', 'other_objects', 'empty_background'):
-            scores = dict(books=.2, other_objects=.2, empty_background=.2)
+        """Keep both target classes distinct and abstain on weak or ambiguous matches."""
+        for label in ('books', 'empty_background'):
+            scores = dict(books=.2, empty_background=.2)
             scores[label] = .35
             self.assertEqual(decide(scores, 10).label, label)
-        self.assertEqual(decide(dict(books=.31, other_objects=.30, empty_background=.1), 1).label, 'uncertain')
-        self.assertEqual(decide(dict(books=.18, other_objects=.1, empty_background=.1), 1).reason, 'weak_match')
+        self.assertEqual(decide(dict(books=.31, empty_background=.30), 1).label, 'uncertain')
+        self.assertEqual(decide(dict(books=.18, empty_background=.1), 1).reason, 'weak_match')
 
     def test_invalid_scores_are_not_claimed_as_classifications(self):
         """Reject missing and nonfinite model scores."""
-        for scores in ({}, dict(books=float('nan'), other_objects=.1, empty_background=.2)):
+        for scores in ({}, dict(books=float('nan'), empty_background=.2)):
             with self.assertRaises(ValueError):
                 decide(scores, 1)
 
@@ -88,7 +88,7 @@ class RelevanceTests(unittest.TestCase):
 
     def test_saved_candidate_is_scored_once_and_logs_its_own_id(self):
         """Persist exact-frame diagnostics and skip repeated tracked views."""
-        result = decide(dict(books=.4, other_objects=.2, empty_background=.1), 12)
+        result = decide(dict(books=.4, empty_background=.1), 12)
         service = Mock(assess=Mock(return_value=result))
         with tempfile.TemporaryDirectory() as directory:
             store = LiveCaptureStore(Path(directory), 'sweep')

@@ -6,7 +6,11 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict
 
 from .quality import QualityAssessment
+from library_claim.config import CONFIG
+
 from .tracking.tracker import TrackingResult
+
+SETTINGS = CONFIG.selection
 
 
 class EvidenceDecision(BaseModel):
@@ -49,7 +53,7 @@ def compare_evidence(current: TrackingResult, quality: QualityAssessment,
         new_fraction = 1 - min(1, intersection / area)
     except (ValueError, cv2.error, ZeroDivisionError):
         return EvidenceDecision(action='review_association', reason='invalid_footprint')
-    if new_fraction > .15:
+    if new_fraction > SETTINGS.new_coverage_fraction:
         return EvidenceDecision(action='analyze_candidate', reason='additional_coverage_candidate')
     if unresolved and previous_quality is not None:
         # A closer view covers less reference area with comparable analysis pixels.
@@ -61,10 +65,10 @@ def compare_evidence(current: TrackingResult, quality: QualityAssessment,
             previous_quality.method, previous_quality.assessed_width_px,
             previous_quality.assessed_height_px, previous_quality.dark_cutoff, previous_quality.bright_cutoff)
         a, b = quality.signals, previous_quality.signals
-        if detail_gain > 1.25:
+        if detail_gain > SETTINGS.detail_gain:
             return EvidenceDecision(action='analyze_candidate', reason='more_pixel_detail_candidate')
-        if same_settings and a.brisque is not None and b.brisque is not None and b.brisque - a.brisque > 5:
+        if same_settings and a.brisque is not None and b.brisque is not None and b.brisque - a.brisque > SETTINGS.brisque_improvement:
             return EvidenceDecision(action='analyze_candidate', reason='better_perceptual_quality_candidate')
-        if same_settings and a.sharpness is not None and b.sharpness is not None and a.sharpness > max(1, b.sharpness * 1.25):
+        if same_settings and a.sharpness is not None and b.sharpness is not None and a.sharpness > max(SETTINGS.sharpness_floor, b.sharpness * SETTINGS.sharpness_gain):
             return EvidenceDecision(action='analyze_candidate', reason='sharper_view_candidate')
     return EvidenceDecision(action='skip', reason='no_measured_evidence_gain')

@@ -11,6 +11,7 @@ from library_claim.capture.tracking.tracker import FrameTracker, TrackingResult
 from library_claim.storage.live_capture import LiveCaptureStore
 from live_demo.camera_quality import logger
 from live_demo.camera_relevance import CameraRelevance
+from library_claim.config import CONFIG
 
 
 class CameraTracking:
@@ -63,7 +64,7 @@ class CameraTracking:
         result = self.tracker.update(image, frame_id, timestamp)
         self.saved_path, self.saved_reason = None, None
         quality = None
-        if timestamp - self.last_quality_at >= 1:
+        if timestamp - self.last_quality_at >= CONFIG.capture.quality_interval_s:
             if self._assessor is None:
                 self._assessor = QualityAssessor()
             previous = self._previous_quality_image
@@ -125,7 +126,7 @@ class CameraTracking:
         if self.saved_path is not None:
             logger.info('Evidence saved: %s | frame=%s | reason=%s',
                         self.saved_path, result.frame_id, self.saved_reason)
-        if timestamp - self.last_log_at < 1:
+        if timestamp - self.last_log_at < CONFIG.capture.tracking_log_interval_s:
             return
         self.last_log_at = timestamp
         # A new reference maps to itself; that is not a recovered-view match.
