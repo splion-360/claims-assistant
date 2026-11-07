@@ -111,3 +111,9 @@ as no-books. No training is required for that evaluation.
 - [Pinned ONNX export](https://huggingface.co/Xenova/clip-vit-base-patch32/tree/6b7c523703ae26e39be4b03774966f8571c7f523)
 - [Original preprocessing configuration](https://huggingface.co/Xenova/clip-vit-base-patch32/blob/6b7c523703ae26e39be4b03774966f8571c7f523/preprocessor_config.json)
 - [ONNX Runtime Python API](https://onnxruntime.ai/docs/api/python/api_summary.html)
+
+## Labelled diagnostic follow-up
+
+A controlled book/no-book comparison now exists: see the
+[2026-11-06 audit](../../../docs/evaluations/relevance-audit.md). It isolates
+preprocessing, text precision, and image precision without changing live settings.
