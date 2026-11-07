@@ -14,6 +14,7 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 | `scheduler` | Default worker count, pending budget and timeout |
 | `inference` | Crusoe text/vision models, token budgets, temperature, Qwen thinking and request timeouts |
 | `speech` | Deepgram STT/TTS models, speech request chunk length and timeouts |
+| `experiments` | Offline comparison settings, including overlapping crop count |
 
 For quieter console output, change `capture.summary_log_interval_s` (default 5
 seconds). It controls the combined Rich table only; scoring, tracking, and image

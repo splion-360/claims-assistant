@@ -186,8 +186,14 @@ class SpeechConfig(Settings):
     close_timeout_s: PositiveFloat
 
 
+class ExperimentConfig(Settings):
+    """Configure offline comparisons independently of live classifier behavior."""
+    edge_crop_count: Annotated[int, Field(ge=2)]
+
+
 class AppConfig(Settings):
     """Collect the independently owned experiment setting groups."""
+    experiments: ExperimentConfig
     relevance: RelevanceConfig
     quality: QualityConfig
     tracking: TrackingConfig

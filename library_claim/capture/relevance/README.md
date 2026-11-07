@@ -117,3 +117,6 @@ as no-books. No training is required for that evaluation.
 A controlled book/no-book comparison now exists: see the
 [2026-11-06 audit](../../../docs/evaluations/relevance-audit.md). It isolates
 preprocessing, text precision, and image precision without changing live settings.
+
+The [overlapping-crop follow-up](../../../docs/evaluations/relevance-edge-experiment.md)
+compares edge coverage and latency offline; it does not enable multi-crop live inference.
