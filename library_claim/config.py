@@ -60,6 +60,7 @@ class RelevanceConfig(Settings):
 
 class IdentificationConfig(Settings):
     """Bound visual extraction and conservative physical-copy association."""
+    recapture_max_attempts: PositiveInt
     max_books_per_frame: PositiveInt
     association_min_iou: Unit
     association_min_margin: Unit

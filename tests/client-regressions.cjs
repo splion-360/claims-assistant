@@ -19,7 +19,7 @@ test('short answers are distinct; repeated final ID is idempotent',()=>{const e=
 test('finished and failed tools clear writing indicator',()=>{const e=env();for(const phase of ['done','error','cancelled']){e.run(`state={...emptyState,tool_activity:[{id:"1",name:"sync_claim_packet",phase:"${phase}"}]};setWriting(true);renderTeam()`);assert.equal(e.run('writing'),false);}});
 test('workflow errors release busy state',async()=>{const e=env();await e.run('connectLive()');e.run('processing=true;render()');e.sockets[0].onmessage({data:JSON.stringify({type:'error',session_id:'initial',message:'Workflow failed'})});assert.equal(e.run('writing'),false);e.run('disconnectLive()');});
 test('available documents remain unchecked and are labeled',()=>{const e=env();e.run('state={...emptyState,documents:[{item:"Photo",status:"available",already_provided:false}]};renderNeeded()');assert(e.elements.get('#neededList').innerHTML.includes('Photo — available'));assert(!e.elements.get('#neededList').innerHTML.includes('class="done"'));});
-test('unconfirmed camera capture is labeled even without a description',()=>{const e=env();e.run('state={...emptyState,evidence_photos:[{id:"p",caption:"Wall",data_url:"data:image/jpeg;base64,AA==",confirmed:false}]};renderPinboard()');assert(e.elements.get('#pinboard').innerHTML.includes('Claim not confirmed by this image'));});
+test('unconfirmed camera capture is labeled even without a description',()=>{const e=env();e.run('state={...emptyState,evidence_photos:[{id:"p",caption:"Wall",data_url:"data:image/jpeg;base64,AA==",confirmed:false}]};renderPinboard()');assert(e.elements.get('#pinboard').innerHTML.includes('Visual evidence; details in Books'));});
 test('camera activation and stop send explicit mode changes',async()=>{
  const e=env();e.run('let tracksStopped=0;let deviceEnded;const videoTrack={stop(){tracksStopped++},addEventListener(name,fn){if(name==="ended")deviceEnded=fn}};navigator.mediaDevices={getUserMedia:async()=>({getTracks:()=>[videoTrack],getVideoTracks:()=>[videoTrack]})}');
  await e.run('startCamera()');assert.deepEqual(e.sockets[0].sent,[{type:'camera_state',enabled:true}]);
@@ -51,19 +51,30 @@ test('book inventory escapes readings and preserves unidentified copies',async()
  const html=e.run('document.querySelector("#bookInventory").innerHTML');
  assert.ok(html.includes('&lt;script&gt;bad&lt;/script&gt;'));
  assert.ok(!html.includes('<script>'));
- assert.ok(html.includes('1 provisional copies'));
+ assert.ok(e.run('document.querySelector("#openBooks").textContent').includes('1 need review'));
  assert.ok(html.includes('Author unreadable'));
  assert.ok(html.includes('Needs review'));
  e.run('state.book_inventory=[];renderBookInventory()');
- assert.equal(e.run('document.querySelector("#bookInventory").hidden'),true);
+ assert.ok(e.run('document.querySelector("#bookInventory").innerHTML').includes('No books need review'));
 });
 
-test('unresolved association records are excluded from book copy count', async()=>{
- const e=env();e.run('state.book_inventory=[{title:"Good People",status:"provisional",observation_count:2},{title:"The Good People",status:"unresolved",observation_count:1}];renderBookInventory()');
+test('book summary separates review work from identified readings', async()=>{
+ const e=env();e.run('state.book_inventory=[{id:"a",title:"Good People",status:"provisional",needs_review:false,observation_count:2},{id:"b",title:"The Good People",status:"unresolved",needs_review:true,observation_count:1}];renderBookInventory()');
+ assert.equal(e.run('document.querySelector("#openBooks").textContent'), 'Books · 1 identified · 1 need review');
  const html=e.run('document.querySelector("#bookInventory").innerHTML');
- assert.ok(html.includes('1 provisional copies'));
- assert.ok(html.includes('1 unresolved observation record(s)'));
  assert.ok(html.includes('Association unresolved'));
+ assert.ok(!html.includes('data-book-id="a"'));
+ e.run('bookTab="identified";renderBookInventory()');
+ assert.ok(e.run('document.querySelector("#bookInventory").innerHTML').includes('data-book-id="a"'));
+});
+test('library sweep notes hide legacy injury and policy fields',()=>{
+ const e=env();e.run('state={...emptyState,library_sweep:true,fields:{injuries:{value:"Old injury",status:"urgent"}},capture_instruction:"Hold still"};renderNotes();renderNeeded()');
+ assert.ok(!e.run('document.querySelector("#notes").innerHTML').includes('Old injury'));
+ assert.ok(e.run('document.querySelector("#notes").innerHTML').includes('Hold still'));
+});
+test('main pinboard does not repeat book readings',()=>{
+ const e=env();e.run('state={...emptyState,evidence_photos:[{id:"p",caption:"Capture saved",data_url:"",books:[{title:"Secret title",view:"spine",issues:[]}]}]};renderPinboard()');
+ assert.ok(!e.run('document.querySelector("#pinboard").innerHTML').includes('Secret title'));
 });
 
 (async()=>{for(const [name,fn]of tests){await fn();console.log('PASS '+name)}console.log(`${tests.length} client regression tests passed`)})().catch(e=>{console.error(e);process.exitCode=1});

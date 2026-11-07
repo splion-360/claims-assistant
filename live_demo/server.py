@@ -78,6 +78,14 @@ if str(DEMO_DIR) not in sys.path:
 from live_tools import SYSTEM_INSTRUCTION, TOOL_NAMES, tool_headline
 
 import speech
+from library_claim.storage.repository import Repository
+from library_claim.storage.evidence import EvidenceStore
+from library_claim.domain.models import BookObservation, Frame
+from library_claim.identification.review import review_books
+from library_claim.orchestration.state_machine import SweepController
+from live_demo.book_guidance import capture_instruction
+import cv2
+import numpy as np
 from live_demo.camera_quality import log_scores
 from live_demo.camera_quality import logger as quality_logger
 from live_demo.camera_tracking import CameraTracking
@@ -129,6 +137,12 @@ class IntakeSession:
     evidence_photos: list[dict[str, Any]] = field(default_factory=list)
     camera_notes: list[str] = field(default_factory=list)
     book_inventory: list[dict[str, Any]] = field(default_factory=list)
+    library_sweep: bool = False
+    sweep_phase: str = "Sweeping"
+    capture_instruction: str = "Sweep slowly across the shelves."
+    capture_target: str | None = None
+    capture_attempts: int = 0
+    prompted_books: set[str] = field(default_factory=set)
     last_frame: bytes | None = None
     last_frame_at: float = 0.0
     last_frame_id: str = ""
@@ -555,9 +569,15 @@ def _state_from_workflow(
     session.classification = workflow["claim_classification"]
     events = _events(session, validation, coverage, fraud_gate)
     session.route = fraud_gate["final_routing_decision"]
-    return _ui_state(
-        session, validation, coverage, checklist, fraud_gate, packet, events
-    )
+    state = _ui_state(session, validation, coverage, checklist, fraud_gate, packet, events)
+    if session.library_sweep:
+        state.update(library_sweep=True, fields={}, missing_blockers=[], documents=[],
+                     sweep_phase=session.sweep_phase, capture_instruction=session.capture_instruction,
+                     packet_markdown="# Library sweep evidence\n\nVisual readings require review.\n\n" +
+                     "\n".join(f"- {book.get('title') or 'Unidentified book'} ({book['observation_count']} observations)"
+                               for book in session.book_inventory) + "\n\n" +
+                     "\n".join(f"Evidence: evidence/{photo['id']}.jpg" for photo in session.evidence_photos))
+    return state
 
 
 def _attach_policy_from_claim(session: IntakeSession, workflow: dict[str, Any]) -> None:
@@ -608,6 +628,91 @@ async def _process_claim(
         packet = workflow["claim_intake_packet"]
         append_turn(session, "Agent", packet["claimant_next_message"])
     return _state_from_workflow(session, workflow)
+
+
+class BookReviewRequest(BaseModel):
+    """Identify the pair of book records being reviewed."""
+    source_id: str = Field(min_length=1, max_length=100)
+    target_id: str = Field(min_length=1, max_length=100)
+    action: str = Field(pattern="^(same|separate)$")
+
+
+@app.post("/api/sessions/{session_id}/books/review")
+async def review_book_records(session_id: str, body: BookReviewRequest, request: Request):
+    """Record an owner-confirmed identity decision and refresh the drawer.
+
+    Args:
+        session_id: Owning live session.
+        body: Source, target and decision.
+        request: Request carrying the owner cookie.
+
+    Returns:
+        Updated UI state.
+
+    Raises:
+        HTTPException: The session or decision is invalid.
+    """
+    session = owned_session(session_id, request.cookies.get("intake_owner"))
+    if not {body.source_id, body.target_id}.issubset({book['id'] for book in session.book_inventory}):
+        raise HTTPException(400, "Select two current book records")
+    try:
+        async with session.workflow_lock:
+            session.book_inventory = await asyncio.to_thread(review_books, CAPTURE_DATA_DIR / 'claims.sqlite3',
+                                                            session_id, body.source_id, body.target_id, body.action)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"state": _current_ui_state(session)}
+
+
+@app.get("/api/sessions/{session_id}/books/evidence/{observation_id}")
+def book_evidence(session_id: str, observation_id: str, request: Request):
+    """Serve an authorized observation crop without exposing filesystem paths.
+
+    Args:
+        session_id: Owning live session.
+        observation_id: Immutable observation ID.
+        request: Request carrying the owner cookie.
+
+    Returns:
+        JPEG crop of the original observed book.
+
+    Raises:
+        HTTPException: Evidence is missing or belongs to another session.
+    """
+    session = owned_session(session_id, request.cookies.get("intake_owner"))
+    allowed = {row['id'] for book in session.book_inventory for row in book.get('observations', [])}
+    if observation_id not in allowed:
+        raise HTTPException(404, "Book evidence not found")
+    try:
+        with Repository(CAPTURE_DATA_DIR / 'claims.sqlite3') as repo:
+            observation = repo.get(BookObservation, observation_id)
+            frame = repo.get(Frame, observation.frame_id)
+            if observation.sweep_id != session_id or frame.sweep_id != session_id:
+                raise KeyError(observation_id)
+            data = EvidenceStore(CAPTURE_DATA_DIR / 'frames').read(frame.evidence_key)
+        image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        h, w = image.shape[:2]
+        box = observation.bbox
+        crop = image[int(box.y_min*h):int(np.ceil(box.y_max*h)), int(box.x_min*w):int(np.ceil(box.x_max*w))]
+        ok, encoded = cv2.imencode('.jpg', crop)
+        if not ok:
+            raise ValueError('Invalid crop')
+        return Response(encoded.tobytes(), media_type='image/jpeg')
+    except (KeyError, ValueError, OSError, cv2.error, AttributeError):
+        raise HTTPException(404, "Book evidence not found")
+
+
+def transition_capture(session: IntakeSession, state: str, target: str | None = None) -> None:
+    """Persist one transition in the locked sweep cycle.
+
+    Args:
+        session: Live sweep session.
+        state: Next locked state.
+        target: Book selected when approaching.
+    """
+    with Repository(CAPTURE_DATA_DIR / 'claims.sqlite3') as repo:
+        SweepController(repo, session.session_id).transition(state, target_id=target)
+    session.sweep_phase = state
 
 
 @app.get("/api/health")
@@ -714,11 +819,11 @@ async def create_session(request: Request, response: Response) -> SessionRespons
         raise HTTPException(
             429, "Too many intakes. Close or reset an existing intake first."
         )
-    session = IntakeSession(session_id=uuid.uuid4().hex, owner=owner)
+    session = IntakeSession(session_id=uuid.uuid4().hex, owner=owner, library_sweep=True)
     append_turn(
         session,
         "Agent",
-        "I can start the claim while we talk. First, are you and everyone else in a safe place?",
+        "Start the camera and sweep slowly across the shelves. I will ask for a closer view only when it helps identify a book.",
     )
     sessions[session.session_id] = session
     session.last_workflow = build_initial_workflow_state()
@@ -841,11 +946,21 @@ async def _pin_evidence_photo(
         return {"pinned": False, "message": "Evidence limit reached."}
     book_result = None
     if candidate is not None:
-        book_result = await asyncio.to_thread(
-            save_book_analysis, CAPTURE_DATA_DIR / 'claims.sqlite3', session.session_id,
-            frame_id, BookFrameAnalysis(books=observation.books, complete=observation.complete), frame, VISION_MODEL,
-        )
-        if session.deleted or not session.camera_enabled or candidate.revision != session.camera_mode_revision:
+        async with session.workflow_lock:
+            book_result = await asyncio.to_thread(
+                save_book_analysis,
+                CAPTURE_DATA_DIR / "claims.sqlite3",
+                session.session_id,
+                frame_id,
+                BookFrameAnalysis(books=observation.books, complete=observation.complete),
+                frame,
+                VISION_MODEL,
+            )
+        if (
+            session.deleted
+            or not session.camera_enabled
+            or candidate.revision != session.camera_mode_revision
+        ):
             return {"pinned": False, "message": "Camera activation changed."}
         session.book_inventory = book_result['inventory']
     caption = observation.observation
@@ -953,6 +1068,7 @@ async def live_voice(websocket: WebSocket) -> None:
             "text",
             "video",
             "camera_state",
+            "book_capture",
             "voice_state",
             "audio",
             "playback_done",
@@ -1000,12 +1116,20 @@ async def live_voice(websocket: WebSocket) -> None:
             ):
                 assessment = stream.latest_relevance if stream.relevance_frame_id == frame_id else None
                 gate = stream.remote_filter
-                gate.offer(CameraCandidate(data, frame_id, timestamp, revision), assessment)
-                candidate = gate.take(time.monotonic(), revision,
-                                      busy=camera_task is not None and not camera_task.done(),
-                                      at_limit=len(session.evidence_photos) >= MAX_PHOTOS)
-                quality_logger.debug('camera_filter frame=%s reason=%s', frame_id, gate.reason)
+                gate.offer(
+                    CameraCandidate(data, frame_id, timestamp, revision), assessment
+                )
+                candidate = gate.take(
+                    time.monotonic(),
+                    revision,
+                    busy=(camera_task is not None and not camera_task.done()) or session.sweep_phase in {"Approaching", "Resuming"},
+                    at_limit=len(session.evidence_photos) >= MAX_PHOTOS,
+                )
+                quality_logger.debug(
+                    "camera_filter frame=%s reason=%s", frame_id, gate.reason
+                )
                 if candidate is not None:
+                    stream.requested_capture = False
                     camera_task = track(capture(candidate, gate))
                 stream.log(result, timestamp)
                 if stream.quality_frame_id == frame_id:
@@ -1053,6 +1177,9 @@ async def live_voice(websocket: WebSocket) -> None:
                 await send({"type": "processing", "active": busy > 0})
 
     async def update():
+        if session.library_sweep:
+            await send({"type": "state", "state": _current_ui_state(session)})
+            return session.last_workflow
         workflow = await activity(
             "sync_claim_packet", lambda: _run_workflow_cached(session)
         )
@@ -1078,7 +1205,7 @@ async def live_voice(websocket: WebSocket) -> None:
                     "role": "system",
                     "content": SYSTEM_INSTRUCTION
                     + "\nLatest background packet (may lag the current conversation): "
-                    + json.dumps(workflow)
+                    + json.dumps({"books": [{key: book.get(key) for key in ("id", "title", "author", "needs_review")} for book in session.book_inventory], "phase": session.sweep_phase, "instruction": session.capture_instruction} if session.library_sweep else workflow)
                     + "\nCamera observations: "
                     + json.dumps(session.camera_notes),
                 }
@@ -1253,6 +1380,57 @@ async def live_voice(websocket: WebSocket) -> None:
             audio_queue.get_nowait()
         await send({"type": "voice_state", "enabled": False})
 
+    async def speak_guidance(text, epoch, turn_id):
+        """Stream guidance without blocking camera controls or interruption messages.
+
+        Args:
+            text: Brief capture instruction.
+            epoch: Playback generation to invalidate on interruption.
+            turn_id: Transcript entry associated with the audio.
+        """
+        try:
+            if epoch != text_epoch or not voice_on:
+                return
+            await send({"type": "audio_start", "epoch": epoch, "turn_id": turn_id})
+            async for chunk in speech.synthesize(text):
+                if epoch != text_epoch or not voice_on:
+                    return
+                await send({"type": "audio", "data": base64.b64encode(chunk).decode(), "epoch": epoch})
+            if epoch == text_epoch and voice_on:
+                await send({"type": "audio_end", "epoch": epoch})
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            await report_error(error)
+
+    async def guide(text):
+        """Publish guidance and schedule speech only when voice is enabled.
+
+        Args:
+            text: Evidence-focused instruction.
+        """
+        nonlocal spoken_turn_id
+        session.capture_instruction = text
+        turn_id = uuid.uuid4().hex
+        append_turn(session, "Agent", text, turn_id)
+        await send({"type": "transcript", "speaker": "Agent", "text": text, "id": turn_id, "final": True})
+        await send({"type": "state", "state": _current_ui_state(session)})
+        if voice_on:
+            spoken_turn_id = turn_id
+            track(speak_guidance(text, text_epoch, turn_id))
+
+    async def request_capture(book):
+        """Start an explicit approach to the selected book.
+
+        Args:
+            book: Current canonical inventory card.
+        """
+        await asyncio.to_thread(transition_capture, session, "Approaching", book['id'])
+        session.capture_target = book['id']
+        session.capture_attempts = 0
+        session.prompted_books.add(book['id'])
+        await guide(capture_instruction(book))
+
     async def capture(candidate, gate):
         """Send only approved bytes and retain failed candidates for bounded retry.
 
@@ -1269,6 +1447,21 @@ async def live_voice(websocket: WebSocket) -> None:
             if success:
                 await send({"type": "state", "state": _current_ui_state(session)})
                 await update()
+                if session.library_sweep and session.sweep_phase == "Capturing":
+                    session.capture_attempts += 1
+                    target = next((book for book in session.book_inventory if book['id'] == session.capture_target), None)
+                    fresh = target and candidate.frame_id in target['frame_ids']
+                    tracking_stream.requested_capture = True
+                    if (fresh and not target['needs_review']) or session.capture_attempts >= CONFIG.identification.recapture_max_attempts:
+                        tracking_stream.requested_capture = False
+                        await asyncio.to_thread(transition_capture, session, "Resuming")
+                        await guide("Book reading updated. Return to your sweep position and tap Resume sweep." if fresh and not target['needs_review'] else
+                                    "This book still needs review. Return to your sweep position and tap Resume sweep; the evidence is saved.")
+                elif (session.library_sweep and session.sweep_phase == "Sweeping"
+                      and (text_task is None or text_task.done()) and spoken_turn_id is None):
+                    book = next((book for book in session.book_inventory if book['needs_review'] and book['id'] not in session.prompted_books), None)
+                    if book:
+                        await request_capture(book)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1326,7 +1519,35 @@ async def live_voice(websocket: WebSocket) -> None:
                     if not isinstance(enabled, bool):
                         raise ValueError("Camera state must be true or false")
                     if set_camera_mode(session, enabled):
-                        tracking_stream = CameraTracking(capture_store, relevance=CameraRelevance())
+                        tracking_stream = CameraTracking(
+                            capture_store, relevance=CameraRelevance()
+                        )
+                        tracking_stream.requested_capture = session.sweep_phase == "Capturing"
+                elif kind == "book_capture":
+                    if camera_task is not None and not camera_task.done():
+                        raise ValueError("Wait for the current capture to finish")
+                    action = message.get("action")
+                    await interrupt()
+                    if action == "ready" and session.sweep_phase == "Approaching":
+                        tracking_stream.remote_filter.pending = None
+                        tracking_stream.requested_capture = True
+                        await asyncio.to_thread(transition_capture, session, "Capturing")
+                        await guide("Hold the book and its neighbours in view while I inspect the next suitable frame.")
+                    elif action == "resume" and session.sweep_phase != "Sweeping":
+                        tracking_stream.requested_capture = False
+                        tracking_stream.remote_filter.pending = None
+                        while session.sweep_phase != "Sweeping":
+                            next_state = {"Approaching":"Capturing", "Capturing":"Resuming", "Resuming":"Sweeping"}[session.sweep_phase]
+                            await asyncio.to_thread(transition_capture, session, next_state)
+                        session.capture_target = None
+                        await guide("Resume your sweep from where you left off.")
+                    elif not action and session.sweep_phase == "Sweeping":
+                        book = next((book for book in session.book_inventory if book['id'] == message.get('book_id')), None)
+                        if book is None:
+                            raise ValueError("Select a current book")
+                        await request_capture(book)
+                    else:
+                        raise ValueError("Finish or resume the current capture first")
                 elif kind == "text":
                     text = message.get("text", "")
                     if (

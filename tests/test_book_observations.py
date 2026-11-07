@@ -197,6 +197,61 @@ class BookObservationTests(unittest.TestCase):
         result = self.persist('other_author', books=[detection(title='Good People').model_copy(update={'author': 'Robert Jones'})])
         self.assertEqual(len(result['inventory']), 2)
 
+    def test_manual_merge_preserves_observations_and_rejects_covisibility(self):
+        """Merge separate sightings audibly while keeping simultaneous copies distinct."""
+        from library_claim.identification.review import review_books
+        self.persist(books=[detection(title='First reading')])
+        self.save_frame('second')
+        result = self.persist('second', books=[detection(title='Different reading')])
+        ids = [row['id'] for row in result['inventory']]
+        result = review_books(self.store.database, 'sweep', ids[1], ids[0], 'same')
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['observation_count'], 2)
+        with Repository(self.store.database) as repo:
+            self.assertEqual(len(repo.list_for_sweep(BookObservation, 'sweep')), 2)
+            self.assertEqual(repo.connection.execute('SELECT origin FROM book_reviews').fetchone()[0], 'user')
+        self.save_frame('both')
+        result = self.persist('both', books=[detection(.1,.3,'Alpha'), detection(.6,.8,'Beta')])
+        current = [book for book in result['inventory'] if 'both' in book['frame_ids']]
+        with self.assertRaises(ValueError):
+            review_books(self.store.database, 'sweep', current[0]['id'], current[1]['id'], 'same')
+
+    def test_separate_decision_prevents_later_merge(self):
+        """Respect a user's physical-identity decision on future review attempts."""
+        from library_claim.identification.review import review_books
+        self.persist(books=[detection(title='First')])
+        self.save_frame('other')
+        result = self.persist('other', books=[detection(title='Different')])
+        a, b = [book['id'] for book in result['inventory']]
+        review_books(self.store.database, 'sweep', a, b, 'separate')
+        with self.assertRaises(ValueError):
+            review_books(self.store.database, 'sweep', a, b, 'same')
+        with self.assertRaises(ValueError):
+            review_books(self.store.database, 'another-sweep', a, b, 'same')
+
+    def test_clear_capture_reconciles_earlier_fragment(self):
+        """Use later geometric evidence to combine an earlier unsupported sighting."""
+        from library_claim.identification.review import identities
+        from library_claim.domain.models import FrameAssociation
+        self.persist(books=[detection(title='Good People')])
+        image = np.full_like(textured_view(), 120)
+        _, encoded = cv2.imencode('.jpg', image)
+        jpeg = encoded.tobytes()
+        self.save_frame('unmapped_fragment', jpeg=jpeg)
+        self.persist('unmapped_fragment', books=[detection(title='The Good People')], jpeg=jpeg)
+        # A later verified bridge makes the historical fragment comparable.
+        with Repository(self.store.database) as repo:
+            repo.add(FrameAssociation(sweep_id='sweep', frame_id='unmapped_fragment', reference_frame_id='reference',
+                                      matrix=np.eye(3).tolist(), method='sift_ransac', matched_points=30, reprojection_error_px=0))
+        self.save_frame('clear', np.eye(3).tolist())
+        result = self.persist('clear', books=[detection(title='The Good People')])
+        self.assertEqual(len(result['inventory']), 1)
+        self.assertEqual(result['inventory'][0]['observation_count'], 3)
+        with Repository(self.store.database) as repo:
+            roots, _ = identities(repo, 'sweep')
+            self.assertEqual(len(set(roots.values())), 1)
+            self.assertEqual(repo.connection.execute('SELECT origin FROM book_reviews').fetchone()[0], 'automatic')
+
     def test_invalid_boxes_duplicate_entries_and_mismatched_bytes_are_rejected(self):
         """Reject malformed model coordinates and a source-image identity mismatch."""
         with self.assertRaises(ValidationError):

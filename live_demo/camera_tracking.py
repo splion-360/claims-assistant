@@ -30,6 +30,7 @@ class CameraTracking:
         self.tracker = FrameTracker()
         self.store = store
         self.relevance = relevance
+        self.requested_capture = False
         self.latest_relevance = None
         self.relevance_frame_id = None
         self.summary = CameraSummary()
@@ -88,6 +89,9 @@ class CameraTracking:
                 reason = 'quality_baseline'
             elif decision.action == 'analyze_candidate':
                 reason = decision.reason
+        # An explicit recapture may revisit a known view, but still must pass local gates.
+        if self.requested_capture and quality is not None:
+            reason = reason or 'requested_capture'
         # Unverified views still need semantic inspection; a plain wall may not track.
         self.latest_relevance, self.relevance_frame_id = None, None
         if self.relevance is not None and quality is not None and (reason is not None or result.status == 'uncertain'):

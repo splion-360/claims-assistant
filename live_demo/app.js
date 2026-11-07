@@ -89,7 +89,7 @@ const emptyState = {
   camera_notes: [],
   policy: null,
   handoff: {},
-  packet_markdown: "# Adjuster handoff\n\nNo packet yet.",
+  packet_markdown: "# Library sweep evidence\n\nNo evidence yet.",
 };
 
 function escapeHtml(value) {
@@ -160,6 +160,7 @@ function renderTranscript() {
 }
 
 function buildNotes() {
+  if (state.library_sweep) return [{key:"sweep", cls:"aside", text:state.capture_instruction || "Sweep slowly across the shelves. Open Books to review readings."}];
   const f = state.fields || {};
   const notes = [];
   const name = isFilled(f.claimant) ? f.claimant.value : "";
@@ -215,7 +216,7 @@ function buildNotes() {
     }
   }
   if (!notes.length) {
-    notes.push({ key: "empty", cls: "aside", text: "Waiting for the claimant. Talk, type below, or show the camera." });
+    notes.push({ key: "empty", cls: "aside", text: "Sweep slowly across the shelves. Open Books to review readings." });
   }
   return notes;
 }
@@ -235,18 +236,82 @@ function renderNotes() {
     .join("");
 }
 
+let bookTab = "review";
+let selectedBookId = null;
+let reviewBusy = false;
+
+function bookNeedsReview(book) {
+  return book.needs_review ?? (book.status === "unresolved" || !book.title || Boolean(book.review_reasons?.length));
+}
+
+function observationUrl(observation) {
+  return `${API_ORIGIN}/api/sessions/${encodeURIComponent(sessionId)}/books/evidence/${encodeURIComponent(observation.id)}`;
+}
+
+function bestObservation(book) {
+  return [...(book.observations || [])].sort((a,b) => (b.sharpness || 0) - (a.sharpness || 0))[0];
+}
+
 function renderBookInventory() {
   const books = state.book_inventory || [];
+  const reviewCount = books.filter(bookNeedsReview).length;
+  document.querySelector("#openBooks").textContent = `Books · ${books.length - reviewCount} identified · ${reviewCount} need review`;
+  document.querySelector("#reviewTab").setAttribute?.("aria-pressed", String(bookTab === "review"));
+  document.querySelector("#identifiedTab").setAttribute?.("aria-pressed", String(bookTab === "identified"));
+  const visible = books.filter(book => bookNeedsReview(book) === (bookTab === "review"));
   const inventoryEl = document.querySelector("#bookInventory");
-  inventoryEl.hidden = books.length === 0;
-  const unresolved = books.filter(book => book.status === "unresolved").length;
-  inventoryEl.innerHTML = `<h3>Books observed: ${books.length - unresolved} provisional copies</h3>
-    ${unresolved ? `<p>${unresolved} unresolved observation record(s), excluded from the copy count.</p>` : ""}
-    <p>Visual readings only. Possible duplicates and unreadable details need review.</p>
-    <ul>${books.map(book => `<li><strong>${escapeHtml(book.title || "Unidentified book")}</strong>
-      — ${escapeHtml(book.author || "Author unreadable")}
-      · ${escapeHtml(book.publisher || "Publisher unreadable")}
-      <small>${book.status === "unresolved" ? "Association unresolved · " : ""}${Number(book.observation_count)} observation(s)${book.review_reasons?.length ? " · Needs review" : ""}</small></li>`).join("")}</ul>`;
+  inventoryEl.hidden = false;
+  inventoryEl.innerHTML = visible.length ? visible.map(book => {
+    const image = bestObservation(book);
+    return `<button class="book-card" data-book-id="${escapeHtml(book.id)}" type="button">
+      ${image ? `<img src="${observationUrl(image)}" alt="Best available book crop" loading="lazy">` : ""}
+      <span><strong>${escapeHtml(book.title || "Unidentified book")}</strong><br>${escapeHtml(book.author || "Author unreadable")}<br>
+      <small>${Number(book.observation_count)} observation(s) · ${book.status === "unresolved" ? "Association unresolved" : bookNeedsReview(book) ? "Needs review" : "Visual reading"}</small></span></button>`;
+  }).join("") : `<p class="empty">${bookTab === "review" ? "No books need review yet." : "No identified books yet."}</p>`;
+  renderBookDetail();
+  document.querySelector("#captureInstruction").textContent = state.capture_instruction || "Sweep slowly across the shelves.";
+  document.querySelector("#captureReady").hidden = state.sweep_phase !== "Approaching";
+  document.querySelector("#resumeSweep").hidden = !state.sweep_phase || state.sweep_phase === "Sweeping";
+}
+
+function renderBookDetail() {
+  const books = state.book_inventory || [];
+  const book = books.find(item => item.id === selectedBookId);
+  const detail = document.querySelector("#bookDetail");
+  if (!book) { selectedBookId = null; detail.innerHTML = ""; return; }
+  const best = bestObservation(book);
+  const reasons = book.status === "unresolved" ? "Association to an existing book is unresolved." :
+    !book.title ? "Title is unreadable." : book.candidates?.length ? "This may be another view of an existing book." :
+    best?.issues?.length ? best.issues.join(", ") : "Visible title recorded. Author or publisher may still be unknown.";
+  const others = books.filter(item => item.id !== book.id && !(item.frame_ids || []).some(id => (book.frame_ids || []).includes(id)));
+  detail.innerHTML = `<h3>${escapeHtml(book.title || "Unidentified book")}</h3>
+    ${best ? `<img class="book-best" src="${observationUrl(best)}" alt="Best available crop of the selected book">` : ""}
+    <p>${escapeHtml(reasons)}</p><p>${escapeHtml(book.author || "Author unreadable")} · ${escapeHtml(book.publisher || "Publisher unreadable")}</p>
+    <button type="button" data-book-action="capture" ${reviewBusy ? "disabled" : ""}>Capture clearer view</button>
+    ${others.length ? `<label>Compare with <select id="compareBook">${others.map(other => `<option value="${escapeHtml(other.id)}">${escapeHtml(other.title || "Unidentified book")} · ${escapeHtml(other.id.slice(0,6))}</option>`).join("")}</select></label>
+    <button type="button" data-book-action="same" ${reviewBusy ? "disabled" : ""}>Same book</button><button type="button" data-book-action="separate" ${reviewBusy ? "disabled" : ""}>Separate books</button>` : ""}
+    <h4>Previous observations</h4><div class="book-history">${(book.observations || []).map(row => `<figure><img src="${observationUrl(row)}" alt="Previous book observation" loading="lazy"><figcaption>${escapeHtml(row.title || "Title unreadable")}</figcaption></figure>`).join("")}</div>`;
+}
+
+async function reviewBook(action) {
+  if (reviewBusy || !selectedBookId) return;
+  const status = document.querySelector("#bookActionStatus");
+  reviewBusy = true;
+  try {
+    if (action === "capture") {
+      await connectLive();
+      liveSocket.send(JSON.stringify({type:"book_capture", book_id:selectedBookId}));
+      document.querySelector("#booksDialog").close();
+      document.querySelector("#openBooks").focus();
+    } else {
+      const target = document.querySelector("#compareBook").value;
+      const result = await api(`/api/sessions/${sessionId}/books/review`, {method:"POST", body:JSON.stringify({source_id:selectedBookId,target_id:target,action})});
+      selectedBookId = action === "same" ? target : selectedBookId;
+      applyServerState(result.state);
+      status.textContent = action === "same" ? "Observations combined. Original evidence retained." : "Books marked as separate.";
+    }
+  } catch (error) { status.textContent = error.message; }
+  finally { reviewBusy = false; renderBookDetail(); }
 }
 
 function renderPinboard() {
@@ -257,8 +322,8 @@ function renderPinboard() {
       <figure class="polaroid" style="--tilt: ${index % 2 ? 2 : -2.5}deg" data-key="${escapeHtml(photo.id)}">
         <img src="${photo.data_url}" alt="Camera frame pinned as evidence" />
         <figcaption>${escapeHtml(photo.caption)}</figcaption>
-        ${(photo.books || []).map(book => `<span class="tag">${escapeHtml(book.title || "Unidentified book")} · ${escapeHtml(book.view)}${book.issues.length ? " · " + escapeHtml(book.issues.join(", ")) : ""}</span>`).join("")}
-        <span class="tag ${photo.confirmed ? "" : "unconfirmed"}">${photo.claimant_description ? `Claimant says: ${escapeHtml(photo.claimant_description)} · ` : ""}${photo.confirmed ? "Supported by this image" : "Claim not confirmed by this image"}</span>
+
+        <span class="tag ${photo.confirmed ? "" : "unconfirmed"}">${photo.claimant_description ? `Claimant says: ${escapeHtml(photo.claimant_description)} · ` : ""}${photo.confirmed ? "Supported by this image" : "Visual evidence; details in Books"}</span>
         <span class="tag">Seen on camera ${escapeHtml(photo.captured_at || "")} · ${escapeHtml(photo.evidence_type || "evidence")}</span>
       </figure>`
   );
@@ -269,6 +334,7 @@ function renderPinboard() {
 }
 
 function renderStamp() {
+  if (state.library_sweep) { stampEl.hidden = true; return; }
   const route = state.route;
   const [label, tone] = routeLabels[route] || [route, "warning"];
   stampEl.hidden = !claimantHasSpoken() || writing;
@@ -283,6 +349,12 @@ function renderStamp() {
 }
 
 function renderNeeded() {
+  if (state.library_sweep) {
+    const count = (state.book_inventory || []).filter(bookNeedsReview).length;
+    neededListEl.innerHTML = `<li>${count ? `${count} book record(s) need review. Open Books.` : "Continue the sweep; review books when needed."}</li>`;
+    readinessEl.textContent = "Sweep in progress";
+    return;
+  }
   const items = [];
   for (const blocker of state.missing_blockers || []) {
     items.push({ text: shortBlocker(blocker).replace(/\?$/, ""), cls: "blocker" });
@@ -314,7 +386,7 @@ function renderTeam() {
           return `<li><span class="team-dot ${phase}"></span><span><span class="team-name">${escapeHtml(teamLabels[item.name] || item.name)}</span> · ${escapeHtml(headline)}</span><span class="team-meta ${item.scheduling === "INTERRUPT" ? "interrupt" : ""}">${escapeHtml(meta)}</span></li>`;
         })
         .join("")
-    : `<li class="empty">Policy desk, claim writer, and evidence will show up here as the agent calls them.</li>`;
+    : `<li class="empty">Camera observations and review activity appear here.</li>`;
   setWriting(processing || (state.tool_activity || []).some((item) => item.phase === "running"));
 }
 
@@ -402,7 +474,9 @@ async function createSession(resume = false) {
   setStatus("Connecting", "neutral");
   sessionId = null;
   setState(emptyState);
-  pageDate.textContent = `Claim intake notes · ${new Date().toLocaleDateString([], { month: "short", day: "numeric" })}`;
+  selectedBookId = null;
+  document.querySelector("#booksDialog").close();
+  pageDate.textContent = `Library sweep · ${new Date().toLocaleDateString([], { month: "short", day: "numeric" })}`;
   try {
     let payload;
     if (resume && previous) {
@@ -416,7 +490,7 @@ async function createSession(resume = false) {
     sessionStorage.setItem("intakeSession", sessionId);
     setState(payload.state);
     const health = await api("/api/health");
-    modelLabel.textContent = health.live_model;
+    modelLabel.textContent = "Library sweep assistant";
     cameraConfig = health.camera;
     micButton.disabled = !health.voice_enabled;
     micButton.title = health.voice_enabled ? "Start or stop voice" : "Set DEEPGRAM_API_KEY and restart to enable voice";
@@ -451,7 +525,7 @@ function connectLive() {
         setStatus("Live", "");
         resolve();
       } else if (message.type === "session") {
-        modelLabel.textContent = message.model;
+        modelLabel.textContent = "Library sweep assistant";
       } else if (message.type === "voice_state") {
         voice?.setReady(message.enabled);
         if (!message.enabled) {
@@ -600,5 +674,13 @@ textForm.addEventListener("submit", (event) => {
 });
 document.querySelector("#openPacket").addEventListener("click", () => packetDialog.showModal());
 document.querySelector("#closePacket").addEventListener("click", () => packetDialog.close());
+
+document.querySelector("#openBooks").addEventListener("click", () => { renderBookInventory(); document.querySelector("#booksDialog").showModal(); });
+document.querySelector("#closeBooks").addEventListener("click", () => { document.querySelector("#booksDialog").close(); document.querySelector("#openBooks").focus(); });
+document.querySelector("#reviewTab").addEventListener("click", () => { bookTab = "review"; selectedBookId = null; renderBookInventory(); });
+document.querySelector("#identifiedTab").addEventListener("click", () => { bookTab = "identified"; selectedBookId = null; renderBookInventory(); });
+document.querySelector("#bookInventory").addEventListener("click", event => { const button = event.target.closest("[data-book-id]"); if (button) { selectedBookId = button.dataset.bookId; renderBookDetail(); } });
+document.querySelector("#bookDetail").addEventListener("click", event => { const button = event.target.closest("[data-book-action]"); if (button) void reviewBook(button.dataset.bookAction); });
+for (const [id, action] of [["#captureReady", "ready"], ["#resumeSweep", "resume"]]) document.querySelector(id).addEventListener("click", async () => { await connectLive(); if (action === "ready" && !cameraStream) await startCamera(); if (action !== "ready" || cameraStream) liveSocket.send(JSON.stringify({type:"book_capture", action})); });
 
 createSession(true);

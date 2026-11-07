@@ -37,7 +37,7 @@ def text_relation(first: str | None, second: str | None) -> str:
     if a == b:
         return 'exact'
     # Contiguous ordered words tolerate missing leading/trailing title portions.
-    if f' {a} ' in f' {b} ' or f' {b} ' in f' {a} ':
+    if f' {a} ' in f' {b} ' or f' {b} ' in f' {a} ' or a.startswith(b) or b.startswith(a):
         return 'partial' if min(len(a), len(b)) >= SETTINGS.text_min_characters else 'unknown'
     previous = list(range(len(b) + 1))
     for i, left in enumerate(a, 1):

@@ -14,6 +14,7 @@ from library_claim.storage.repository import Repository
 from library_claim.storage.evidence import EvidenceStore
 from .matching import crop_features, visual_match, text_relation, preferred_reading
 from .models import BookFrameAnalysis
+from .review import identities, reconcile
 
 
 def polygon(box) -> np.ndarray:
@@ -189,17 +190,34 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
     observations = repo.list_for_sweep(BookObservation, sweep_id)
     issues = repo.list_for_sweep(ReviewIssue, sweep_id)
     result = []
+    roots, separate = identities(repo, sweep_id)
     for book in repo.list_for_sweep(Book, sweep_id):
-        evidence = [row for row in observations if row.book_id == book.id]
+        if roots[book.id] != book.id:
+            continue
+        evidence = [row for row in observations if roots[row.book_id] == book.id]
         readings = {}
         for field in ('title', 'author', 'publisher'):
             readings[field] = preferred_reading([getattr(row, field) for row in evidence if getattr(row, field)])
         status = 'unresolved' if evidence and all(row.association_method == 'unresolved' for row in evidence) else 'provisional'
-        result.append({'id': book.id, **readings, 'status': status,
+        if any(book.id in pair for pair in separate) or len({row.book_id for row in evidence}) > 1:
+            status = 'provisional'
+        latest = evidence[-1] if evidence else None
+        needs_review = status == 'unresolved' or not readings['title'] or bool(latest and latest.visual_issues)
+        result.append({'needs_review': needs_review, 'id': book.id, **readings, 'status': status,
                        'observation_count': len(evidence),
                        'frame_ids': list(dict.fromkeys(row.frame_id for row in evidence)),
+                       'observations': [{'id': row.id, 'frame_id': row.frame_id, 'bbox': row.bbox.model_dump(),
+                                         'title': row.title, 'issues': row.visual_issues,
+                                         'sharpness': row.quality.sharpness} for row in evidence],
                        'review_reasons': list(dict.fromkeys(issue.reason for issue in issues
                                                            if issue.book_id == book.id and issue.status == 'open'))})
+    for book in result:
+        book['candidates'] = [other['id'] for other in result if other['id'] != book['id']
+                              and not set(book['frame_ids']) & set(other['frame_ids'])
+                              and frozenset((book['id'], other['id'])) not in separate
+                              and text_relation(book['title'], other['title']) in ('exact', 'partial', 'fuzzy')]
+        if book['candidates']:
+            book['needs_review'] = True
     return result
 
 
@@ -241,7 +259,9 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
         frames = {row.id: row for row in repo.list_for_sweep(Frame, sweep_id)}
         observations = repo.list_for_sweep(BookObservation, sweep_id)
         associations = {row.frame_id: row for row in repo.list_for_sweep(FrameAssociation, sweep_id)}
-        choices, methods = association_choices(frame, analysis, frames, observations, associations,
+        roots, _ = identities(repo, sweep_id)
+        associated = [row.model_copy(update={'book_id': roots[row.book_id]}) for row in observations]
+        choices, methods = association_choices(frame, analysis, frames, associated, associations,
                                                 image, EvidenceStore(database.parent / 'frames'))
         records = []
         assessor = QualityAssessor() if analysis.books else None
@@ -280,4 +300,5 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
                                      status='succeeded', created_at=datetime.now(timezone.utc), model=model,
                                      configuration_version=CONFIG_DIGEST, result=result))
         repo.add_many(records)
+        reconcile(repo, sweep_id, frame, image, database)
         return {**result, 'inventory': inventory(repo, sweep_id)}

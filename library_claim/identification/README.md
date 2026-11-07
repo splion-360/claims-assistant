@@ -61,8 +61,12 @@ detections on a first sighting also create separate provisional copies.
 An unresolved observation is persisted under a provisional Book record with
 `association_method=unresolved`, shown separately in the UI and excluded from its
 copy count. Raw database Book row count is therefore not a physical inventory count.
-Unresolved records are not used as established matching targets. Automatic later
-reconciliation of these records is deferred; their source evidence is retained.
+Unresolved records are not used as established matching targets during initial
+association. After a clearer titled observation arrives, reconciliation revisits
+earlier fragments (including unresolved records) using the same geometry or
+appearance gates. Co-visible records and explicit Separate books decisions veto
+merges. Decisions are appended to `book_reviews`; source observations are immutable.
+Canonical IDs are resolved when constructing inventory or matching later captures.
 
 Compatible fuller title/author/publisher readings can update display text without
 erasing original readings. Fuzzy disagreements prefer the most frequently observed
@@ -71,8 +75,8 @@ All thresholds live in `identification` in `config.yml`.
 
 Geometry assumes stationary books and approximately planar support. Replacing a
 book at the same location, repeated designs, and tiny/blurred spines can defeat
-these heuristics. Counts remain provisional. Existing saved records are not
-rewritten or deduplicated by this change; validate using a new intake. No live
+these heuristics. Counts remain provisional. Source records are not rewritten. Reconciliation and manual review update their
+canonical grouping; new live intakes use the library-sweep conversation. No live
 accuracy or assignment count-pass-bar claim is made.
 
 ## Book-region quality
@@ -108,3 +112,27 @@ Restart the backend and refresh the browser. Show a stationary shelf with readab
 spines, then an overlapping view; inspect the inventory and observation counts.
 Check `.claim-data/claims.sqlite3` for `books`, `observations`, `review_issues`, and
 `jobs`, with original images in `.claim-data/frames/`.
+
+## Review drawer and guided capture
+
+The main page retains the camera, notebook, and transcript. A compact Books button
+opens Needs review and Identified views. Identified means a supported visual title,
+not catalogue verification. Cards expose source crops through owner-checked routes;
+selecting a card shows readings, observation history, and comparison controls.
+Same book appends a merge decision; Separate books prevents subsequent automatic
+merges between those groups. All original images and observations remain stored.
+The SQLite schema upgrades automatically to version 3 for this decision ledger.
+
+Capture clearer view closes the drawer and enters Approaching. Ready to capture
+enters Capturing; an explicit request allows reconsideration of an already tracked
+view but preserves quality, book relevance, cadence, and duplicate-byte gates.
+After a useful associated result, or the configured `recapture_max_attempts`, the
+agent enters Resuming. Resume sweep returns to Sweeping. Resume also permits the
+user to abandon a capture; intermediate locked transitions are preserved. The
+agent can request one intervention per book ID during a live session, while manual
+recapture remains available. Missing qualifying frames do not consume attempts;
+the user can resume at any time. Speech uses existing Deepgram output when enabled.
+
+New browser sessions bypass the legacy insurance background workflow and use
+library guidance. Legacy insurance routines remain available for their existing
+tests; the downloaded library summary is evidence, not the final assignment packet.

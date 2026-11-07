@@ -14,6 +14,7 @@ class BookMatchingTests(unittest.TestCase):
         """Accept supported variants while retaining distinct title words."""
         self.assertEqual(text_relation('The Good People!', 'the good people'), 'exact')
         self.assertEqual(text_relation('Good People', 'The Good People'), 'partial')
+        self.assertEqual(text_relation('THE GOOD PEOP', 'The Good People'), 'partial')
         self.assertEqual(text_relation('The Good Peop1e', 'The Good People'), 'fuzzy')
         self.assertEqual(text_relation('Good People', 'Bad People'), 'conflicting')
         self.assertEqual(text_relation(None, 'Good People'), 'unknown')

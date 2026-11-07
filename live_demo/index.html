@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Insurance Claim Live Agent Team</title>
+    <title>Library sweep</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600&family=Patrick+Hand&family=Inter:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=three-column-4" />
+    <link rel="stylesheet" href="./styles.css?v=book-review-1" />
   </head>
   <body>
     <div class="desk">
@@ -18,11 +18,11 @@
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"></span>
           <div>
-            <h1>Insurance Claim Live Agent Team</h1>
-            <p id="modelLabel" class="brand-sub">Connecting to Crusoe</p>
+            <h1>Library sweep</h1>
+            <p id="modelLabel" class="brand-sub">Connecting to sweep assistant</p>
           </div>
         </div>
-        <button id="openPacket" class="ghost-button" type="button">Adjuster packet</button>
+        <button id="openPacket" class="ghost-button" type="button">Sweep evidence</button>
       </header>
 
       <main class="desk-layout">
@@ -38,28 +38,29 @@
               <span class="camera-tag"><span class="rec-dot" aria-hidden="true"></span> Agent is watching</span>
             </div>
 
-            <p class="card-hint">Talk, type below, or show the camera.</p>
+            <p id="captureInstruction" class="card-hint" aria-live="polite">Sweep slowly across the shelves.</p>
+            <div class="capture-actions"><button id="captureReady" type="button" hidden>Ready to capture</button><button id="resumeSweep" type="button" hidden>Resume sweep</button></div>
             <div class="controls">
               <button id="micButton" class="round-button" type="button" aria-label="Start or stop voice" disabled>
                 <span class="icon-mic" aria-hidden="true"></span>
                 <span class="round-label">Talk</span>
               </button>
-              <button id="cameraButton" class="round-button" type="button" aria-label="Show the damage on camera">
+              <button id="cameraButton" class="round-button" type="button" aria-label="Show the books on camera">
                 <span class="icon-camera" aria-hidden="true"></span>
                 <span class="round-label">Show camera</span>
               </button>
-              <button id="newIntakeButton" class="round-button subtle" type="button" aria-label="Start a new intake">
+              <button id="newIntakeButton" class="round-button subtle" type="button" aria-label="Start a new sweep">
                 <span class="icon-new" aria-hidden="true"></span>
-                <span class="round-label">New intake</span>
+                <span class="round-label">New sweep</span>
               </button>
             </div>
           </section>
           <section class="card team-card">
             <div class="card-head">
-              <span class="card-kicker">Claim team</span>
+              <span class="card-kicker">Sweep activity</span>
               <span class="card-hint">Working in the background while you type</span>
             </div>
-            <ul id="teamFeed" class="team-feed" tabindex="0" aria-label="Claim team activity"></ul>
+            <ul id="teamFeed" class="team-feed" tabindex="0" aria-label="Sweep activity activity"></ul>
           </section>
         </aside>
 
@@ -67,11 +68,11 @@
           <div class="notebook">
             <div class="holes" aria-hidden="true"><span></span><span></span><span></span></div>
             <div class="page-head">
-              <span id="pageDate">Claim intake notes</span>
-              <span id="pageAgent">Crusoe, field notes</span>
+              <span id="pageDate">Library sweep</span>
+
             </div>
             <div id="notes" class="notes"></div>
-            <section id="bookInventory" class="book-inventory" aria-live="polite" aria-label="Provisional book inventory"></section>
+            <button id="openBooks" class="ghost-button" type="button">Books · 0 identified · 0 need review</button>
             <div id="pinboard" class="pinboard"></div>
             <div id="stamp" class="stamp" hidden></div>
             <div id="pen" class="pen" hidden><span class="pen-nib" aria-hidden="true"></span> writing</div>
@@ -89,8 +90,8 @@
                 id="textInput"
                 type="text"
                 autocomplete="off"
-                placeholder="Or type what the claimant says..."
-                aria-label="Type a claimant response"
+                placeholder="Ask about the library sweep..."
+                aria-label="Describe what you can see"
               />
               <button type="submit">Send</button>
             </form>
@@ -110,14 +111,22 @@
 
     <dialog id="packetDialog" class="packet-dialog">
       <div class="dialog-header">
-        <h2>Adjuster handoff packet</h2>
+        <h2>Sweep evidence summary</h2>
         <a id="downloadPacket" class="text-button" href="#" download>Download packet + evidence</a><button id="closePacket" type="button" aria-label="Close packet">Close</button>
       </div>
-      <pre id="packetMarkdown"></pre><p>Local demo: nothing is sent to an adjuster. Intakes expire after 30 minutes without activity. Download to keep a copy.</p>
+      <pre id="packetMarkdown"></pre><p>Local sweep evidence. Sessions expire after 30 minutes without activity. Download to keep a copy.</p>
     </dialog>
 
+    <dialog id="booksDialog" class="books-drawer" aria-labelledby="booksTitle">
+      <div class="dialog-header"><h2 id="booksTitle">Books</h2><button id="closeBooks" type="button">Back to sweep</button></div>
+      <p>Visual readings, not catalogue verification. Unresolved sightings are not extra copies.</p>
+      <div class="book-tabs" aria-label="Book views"><button id="reviewTab" type="button" aria-pressed="true">Needs review</button><button id="identifiedTab" type="button" aria-pressed="false">Identified</button></div>
+      <p id="bookActionStatus" role="status"></p>
+      <section id="bookInventory" aria-live="polite"></section>
+      <section id="bookDetail" aria-label="Selected book"></section>
+    </dialog>
     <canvas id="frameCanvas" hidden></canvas>
     <script src="./voice.js?v=1"></script>
-    <script src="./app.js?v=deepgram-1"></script>
+    <script src="./app.js?v=book-review-1"></script>
   </body>
 </html>
