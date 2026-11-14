@@ -143,7 +143,7 @@ function render() {
   renderNeeded();
   renderTeam();
   renderStamp();
-  document.querySelector("#downloadPacket").href = sessionId ? `${API_ORIGIN}/api/sessions/${sessionId}/claim-packet` : "#";
+  document.querySelector("#downloadPacket").disabled = !sessionId;
 }
 
 function renderTranscript() {
@@ -326,10 +326,10 @@ async function showPairingCode() {
     // A phone can only join a sweep that is already live, so open the socket first.
     await connectLive();
     const result = await api(`/api/sessions/${sessionId}/capture-code`);
-    panel.innerHTML = `On the phone open <code>${escapeHtml(window.location.origin)}/capture</code> and enter<strong>${escapeHtml(result.code)}</strong>The camera moves to the phone; talking and the inventory stay here.`;
+    document.querySelector("#pairingDigits").textContent = result.code;
     panel.hidden = false;
   } catch (error) {
-    panel.textContent = error.message;
+    document.querySelector("#pairingDigits").textContent = error.message;
     panel.hidden = false;
   }
 }
@@ -864,6 +864,13 @@ micButton.addEventListener("click", async () => {
     await connectLive();
     if (epoch === generation) await voice?.start();
   } catch (error) { appendSystem(error.message); }
+});
+document.querySelector("#closePairing").addEventListener("click", () => {
+  document.querySelector("#pairingCode").hidden = true;
+});
+// The packet is served as an attachment, so navigating to it downloads without leaving the page.
+document.querySelector("#downloadPacket").addEventListener("click", () => {
+  if (sessionId) window.location.href = `${API_ORIGIN}/api/sessions/${sessionId}/claim-packet`;
 });
 document.querySelector("#inventoryButton").addEventListener("click", () => {
   // The tables read the sweep by id, so they survive a reload of this page.

@@ -1036,6 +1036,12 @@ body:has(.books-drawer[open]) { overflow: hidden; }
 
 .book-price { color: #2f5d3a; }
 
-.pairing-code { margin: 10px 0 0; font-size: .85rem; line-height: 1.5; }
+.pairing-code { position: relative; margin: 10px 0 0; padding: 6px 34px 6px 4px; }
 .pairing-code strong { display: block; font-size: 1.9rem; letter-spacing: .32em;
-  font-variant-numeric: tabular-nums; margin: 2px 0; }
+  font-variant-numeric: tabular-nums; }
+.pairing-close { position: absolute; top: 0; right: 0; width: 26px; height: 26px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: inherit; opacity: .55;
+  font-size: 19px; line-height: 1; cursor: pointer; }
+.pairing-close:hover { opacity: 1; }
+.library-download { cursor: pointer; border: 1px solid #c9bda6; border-radius: 8px;
+  background: #efe9dc; padding: 7px 14px; }

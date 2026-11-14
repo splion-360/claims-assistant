@@ -62,7 +62,10 @@
                 <span class="round-label">New sweep</span>
               </button>
             </div>
-            <p id="pairingCode" class="pairing-code" hidden></p>
+            <div id="pairingCode" class="pairing-code" hidden>
+              <button id="closePairing" class="pairing-close" type="button" aria-label="Hide the pairing code">&times;</button>
+              <strong id="pairingDigits"></strong>
+            </div>
           </section>
           <section class="card team-card">
             <div class="card-head">
@@ -121,7 +124,7 @@
     <dialog id="booksDialog" class="books-drawer" aria-labelledby="booksTitle">
       <div class="dialog-header"><h2 id="booksTitle">Your library</h2><button id="closeBooks" type="button">Back to sweep</button></div>
       <p>Browse what the camera saw. Compare possible matches before combining them.</p>
-      <a id="downloadPacket" class="library-download" href="#" download>Download claim packet</a>
+      <button id="downloadPacket" class="library-download" type="button">Download claim packet</button>
       <div class="book-tabs" aria-label="Book views"><button id="reviewTab" type="button" aria-pressed="true">Needs review</button><button id="identifiedTab" type="button" aria-pressed="false">Identified</button></div>
       <p id="bookActionStatus" role="status"></p>
       <div class="library-layout"><section id="bookInventory" aria-live="polite"></section>
