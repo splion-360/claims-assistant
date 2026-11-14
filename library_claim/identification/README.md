@@ -158,12 +158,18 @@ tests; the downloaded library summary is evidence, not the final assignment pack
 
 ## Catalogue lookup
 
-A legible title is searched on Google Books, the single catalogue. Drex chooses among
-the returned volumes and must reach `drex.catalogue_min` before a match is accepted;
-otherwise the book keeps a `No confident catalogue match` review reason. Edition and
-ISBN are filled only when the publisher read on the spine matches the matched volume's
-publisher, so an ISBN is never attached to a printing the sweep did not see.
+A legible title is searched on Google Books first, then Open Library when Google Books
+fails, lists nothing, or Drex finds no confident match. Google Books leads because the
+same volume record also prices the book; Open Library needs no key, so it still answers
+when the key is missing or over quota. Drex chooses among the returned candidates and
+must reach `drex.catalogue_min` before a match is accepted; otherwise the book keeps a
+`No confident catalogue match` review reason.
 
-`GOOGLE_BOOKS_API_KEY` lifts the shared anonymous quota. Without it the catalogue
-refuses most requests and books stay unresolved rather than being matched on guesswork.
-The same key and endpoint serve price lookups through `library_claim.sources`.
+Edition and ISBN are filled only when the publisher read on the spine singles out one
+printing: the matched volume's own publisher for Google Books, or exactly one Open
+Library edition naming that publisher. An ISBN is never attached to a printing the
+sweep did not see, and a failing editions lookup leaves the accepted match in place
+without one.
+
+`GOOGLE_BOOKS_API_KEY` lifts the shared anonymous quota and is shared with price
+lookups through `library_claim.sources`.

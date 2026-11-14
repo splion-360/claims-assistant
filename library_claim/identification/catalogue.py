@@ -1,4 +1,4 @@
-"""Resolve legible spine readings to Google Books catalogue entries, with Drex choosing."""
+"""Resolve legible spine readings to a catalogue entry (Google Books, then Open Library), with Drex choosing."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
@@ -14,6 +14,7 @@ from library_claim.sources import GOOGLE_BOOKS, HEADERS, google_books_params, vo
 from library_claim.storage.repository import Repository
 from .matching import normalize
 
+OPEN_LIBRARY = 'https://openlibrary.org'
 logger = logging.getLogger(__name__)
 
 
@@ -84,13 +85,92 @@ def search_google_books(title: str, author: str | None, *,
     return candidates
 
 
+def _open_library(path: str, params: dict, client: httpx.Client | None) -> dict:
+    """Fetch JSON from Open Library.
+
+    Args:
+        path: URL path appended to the Open Library base.
+        params: Query parameters.
+        client: Optional HTTP client, used by tests.
+
+    Returns:
+        The decoded JSON body.
+
+    Raises:
+        httpx.HTTPError: The request failed or returned an error status.
+    """
+    owned = client is None
+    client = client or httpx.Client(timeout=15)
+    try:
+        response = client.get(OPEN_LIBRARY + path, params=params, headers=HEADERS)
+        response.raise_for_status()
+        return response.json()
+    finally:
+        if owned:
+            client.close()
+
+
+def search_works(title: str, author: str | None, *, client: httpx.Client | None = None) -> list[WorkCandidate]:
+    """Search Open Library works by title and, when read, author.
+
+    Args:
+        title: Title read from the spine.
+        author: Author read from the spine, if any.
+        client: Optional HTTP client, used by tests.
+
+    Returns:
+        Up to five candidate works.
+
+    Raises:
+        httpx.HTTPError: The request failed or returned an error status.
+    """
+    params = {'title': title, 'limit': 5, 'fields': 'key,title,author_name,first_publish_year'}
+    if author:
+        params['author'] = author
+    docs = _open_library('/search.json', params, client).get('docs', [])
+    return [WorkCandidate(doc['key'], doc.get('title', ''), doc.get('author_name', []),
+                          doc.get('first_publish_year'), source='openlibrary',
+                          url=OPEN_LIBRARY + doc['key'])
+            for doc in docs[:5] if doc.get('key')]
+
+
+def matching_edition(work_key: str, publisher: str | None, *, client: httpx.Client | None = None) -> dict | None:
+    """Pick an Open Library edition only when the spine's publisher identifies exactly one.
+
+    Args:
+        work_key: Open Library work key, e.g. '/works/OL1W'.
+        publisher: Publisher read from the spine.
+        client: Optional HTTP client, used by tests.
+
+    Returns:
+        Edition label and ISBN, or None when the evidence does not single out one edition.
+
+    Raises:
+        httpx.HTTPError: The request failed or returned an error status.
+    """
+    if not publisher:
+        return None
+    entries = _open_library(f'{work_key}/editions.json', {'limit': 50}, client).get('entries', [])
+    matches = [entry for entry in entries
+               if any(normalize(name) == normalize(publisher) for name in entry.get('publishers', []))]
+    if len(matches) != 1:
+        return None
+    edition = matches[0]
+    isbn = (edition.get('isbn_13') or edition.get('isbn_10') or [None])[0]
+    return {'edition': f"{edition.get('title', 'Edition')} ({edition['publishers'][0]})", 'isbn': isbn}
+
+
 def catalogue_sources() -> list[tuple[str, object]]:
     """Catalogues to try, in order.
+
+    Google Books answers first because the same record also prices the book;
+    Open Library needs no key, so it still answers when the key is missing,
+    over quota, or the volume is not listed.
 
     Returns:
         (provider name, search function) pairs.
     """
-    return [('Google Books', search_google_books)]
+    return [('Google Books', search_google_books), ('Open Library', search_works)]
 
 
 def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: httpx.Client | None = None) -> WorkCandidate | None:
@@ -122,19 +202,27 @@ def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: http
     return candidates[int(answer.choice[1:])]
 
 
-def _edition(work: WorkCandidate, publisher: str | None) -> dict | None:
+def _edition(work: WorkCandidate, publisher: str | None, http: httpx.Client | None = None) -> dict | None:
     """Edition and ISBN for a matched entry, only when the spine's publisher singles one out.
 
     The publisher read from the spine must match the record's, so an ISBN is
-    never attached to a printing the sweep did not actually see.
+    never attached to a printing the sweep did not actually see. A Google Books
+    volume carries its own publisher; an Open Library work needs its editions
+    walked to find the one printing that publisher names.
 
     Args:
         work: Matched catalogue entry.
         publisher: Publisher read from the spine.
+        http: Optional HTTP client, used by tests.
 
     Returns:
         Edition label and ISBN, or None when the evidence does not single out one edition.
+
+    Raises:
+        httpx.HTTPError: The Open Library editions request failed.
     """
+    if work.source == 'openlibrary':
+        return matching_edition(work.key, publisher, client=http)
     if publisher and work.publisher and normalize(publisher) == normalize(work.publisher):
         return {'edition': work.edition or f'{work.title} ({work.publisher})', 'isbn': work.isbn}
     return None
@@ -177,7 +265,10 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
             break
     if not answered:
         return
-    edition = _edition(work, book.get('publisher')) if work else None
+    try:
+        edition = _edition(work, book.get('publisher'), http) if work else None
+    except (httpx.HTTPError, ValueError, KeyError):
+        edition = None
     with Repository(database) as repo:
         if work is None:
             repo.add(ReviewIssue(sweep_id=sweep_id, book_id=book['id'], field='catalogue',

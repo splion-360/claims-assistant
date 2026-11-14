@@ -2141,7 +2141,7 @@ async def flow_events(request: Request) -> StreamingResponse:
                       "d5": CONFIG.drex.model, "d6": CONFIG.drex.model, "spine_reading": VISION_MODEL,
                       "reply": MODEL, "stt": CONFIG.speech.stt_model, "tts": CONFIG.speech.tts_model,
                       "depth": CONFIG.measurement.depth_pro_model,
-                      "catalogue": "Google Books"}
+                      "catalogue": "Google Books → Open Library"}
             setup = {"measurement": CONFIG.measurement.enabled, "models": models, "recent": list(FLOW.recent)}
             yield f"event: setup\ndata: {json.dumps(setup)}\n\n"
             while not await request.is_disconnected():
