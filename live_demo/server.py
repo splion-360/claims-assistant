@@ -88,6 +88,9 @@ from library_claim.identification.catalogue import resolve_book
 from library_claim.identification.corrections import apply_correction
 from library_claim.decisions.corrections import classify_intent, extract_stated_title, resolve_target, target_frame
 from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
+from library_claim.items.models import INSTRUCTION as ITEM_INSTRUCTION
+from library_claim.items.models import ItemFrameAnalysis
+from library_claim.items.storage import save_items
 from library_claim.packet import packet_archive
 from library_claim.pricing.storage import value_book
 from library_claim.storage.depth import load_depth, parse_depth_payload
@@ -158,6 +161,8 @@ class IntakeSession:
     read_count: int = 0
     camera_notes: list[str] = field(default_factory=list)
     book_inventory: list[dict[str, Any]] = field(default_factory=list)
+    item_inventory: list[dict[str, Any]] = field(default_factory=list)
+    last_items_at: float = float("-inf")
     library_sweep: bool = False
     sweep_phase: str = "Sweeping"
     capture_instruction: str = "Sweep slowly across the shelves."
@@ -490,6 +495,7 @@ def _ui_state(
         "evidence_photos": session.evidence_photos,
         "camera_notes": session.camera_notes,
         "book_inventory": session.book_inventory,
+        "item_inventory": session.item_inventory,
         "inventory_totals": inventory_totals(session.book_inventory),
         "severity": classification.severity,
         "claim_type": classification.claim_type.replace("_", " "),
@@ -981,6 +987,39 @@ def download_packet(session_id: str, request: Request):
     )
 
 
+async def record_items(session: IntakeSession, frame_id: str, frame: bytes) -> None:
+    """Detect and save the non-book contents visible in one admitted frame.
+
+    A failed detection leaves the books from that frame in place: the room's
+    contents are a separate list, not a precondition for the inventory.
+
+    Args:
+        session: Sweep the frame belongs to.
+        frame_id: Saved frame being inspected.
+        frame: The frame's encoded bytes.
+    """
+    try:
+        with telemetry.span("item_detection") as reported:
+            analysis = await structured(
+                ITEM_INSTRUCTION,
+                [{"type": "image_url", "image_url": {"url": _data_url(frame, "image/jpeg")}}],
+                ItemFrameAnalysis,
+                model=VISION_MODEL,
+            )
+            reported.model = VISION_MODEL
+            reported.detail = f"{len(analysis.items)} object(s)"
+        async with session.workflow_lock:
+            result = await asyncio.to_thread(
+                save_items, CAPTURE_DATA_DIR / "claims.sqlite3", session.session_id,
+                frame_id, analysis, frame, VISION_MODEL,
+            )
+        if not session.deleted:
+            session.item_inventory = result["inventory"]
+            telemetry.emit("items", "done", f"{len(session.item_inventory)} object(s) in the room")
+    except Exception as error:  # noqa: BLE001 - a missed object must not lose the frame's books
+        logger.warning("item detection failed: %s", type(error).__name__)
+
+
 class FrameObservation(BookFrameAnalysis):
     observation: str
     supports_claimant_description: bool
@@ -1080,6 +1119,12 @@ async def _pin_evidence_photo(
             return {"pinned": False, "message": "Camera activation changed."}
         session.book_inventory = book_result["inventory"]
         telemetry.emit("inventory", "done", f"{len(session.book_inventory)} book(s) in inventory")
+        # The room's contents are inspected on a cadence; a second call per frame
+        # would double the vision cost for furniture that does not move.
+        now = time.monotonic()
+        if CONFIG.items.enabled and now - session.last_items_at >= CONFIG.items.detection_interval_s:
+            session.last_items_at = now
+            await record_items(session, frame_id, frame)
     caption = observation.observation
     if book_result is not None:
         caption = f"{book_result['detected_count']} book(s) detected in this frame. "

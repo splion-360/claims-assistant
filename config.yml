@@ -147,6 +147,9 @@ pricing:
   appraisal_keywords: [signed, inscribed, first edition, limited edition, rare, antiquarian, folio society]
   # Markets tried for a converted figure when the local market has no price.
   convert_from: [US, GB]
+  # No keyless retail price API exists for furniture and electronics; add one here
+  # with its provider implementation to value non-book contents.
+  item_providers: []
   fx_base_url: https://api.frankfurter.app
   timeout_s: 15
   connect_timeout_s: 10
@@ -157,3 +160,10 @@ pricing:
     GB:
       currency: GBP
       providers: [google_books]
+items:
+  # Off: frames are not inspected for non-book contents and the packet's item list stays empty.
+  enabled: true
+  max_items_per_frame: 24
+  detection_interval_s: 12.0
+  association_min_iou: 0.45
+  print_statements: [print, poster, reproduction, reprint, not an original, it is a copy]

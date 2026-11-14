@@ -133,6 +133,42 @@ class BookObservation(Record):
     retrieved_at: AwareDatetime | None = None
 
 
+class Item(Record):
+    """Store the accepted identity of one physical non-book object."""
+    sweep_id: Identifier
+    excluded: bool = False
+    association_status: Literal['provisional', 'confirmed', 'uncertain'] = 'provisional'
+    category: str = 'other'
+    description: str = ''
+    material: str | None = None
+    brand_model: str | None = None
+    # Art and mirrors wait for a person unless the policyholder says the piece is a print.
+    needs_appraisal: bool = False
+    stated_print: bool = False
+
+
+class ItemObservation(Record):
+    """Associate frame evidence and extracted facts with a physical object."""
+    sweep_id: Identifier
+    item_id: Identifier
+    frame_id: Identifier
+    bbox: Box
+    category: str
+    description: str
+    material: str | None = None
+    brand_model: str | None = None
+    visual_issues: list[str] = Field(default_factory=list)
+    # Item review reasons live on the observation: review_issues keys on books.
+    review_reasons: list[str] = Field(default_factory=list)
+    association_method: str | None = None
+    quality: Quality = Field(default_factory=Quality)
+    source_model: str | None = None
+    width_cm: Centimetres | None = None
+    height_cm: Centimetres | None = None
+    depth_cm: Centimetres | None = None
+    scale_method: Literal['webxr_depth', 'depth_pro'] | None = None
+
+
 class ReviewIssue(Record):
     """Track an unresolved field requiring review."""
     sweep_id: Identifier
@@ -147,7 +183,7 @@ class ProcessingJob(Record):
     sweep_id: Identifier
     frame_id: Identifier
     book_id: Identifier | None = None
-    task: Literal['identify', 'measure', 'value', 'visual_diagnosis', 'frame_check']
+    task: Literal['identify', 'items', 'measure', 'value', 'visual_diagnosis', 'frame_check']
     status: Literal['pending', 'running', 'succeeded', 'failed', 'cancelled'] = 'pending'
     created_at: AwareDatetime
     model: str | None = None

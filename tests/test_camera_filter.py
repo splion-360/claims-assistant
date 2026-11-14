@@ -73,7 +73,7 @@ class FrozenCaptureTests(unittest.IsolatedAsyncioTestCase):
              patch.object(server, 'save_book_analysis', return_value={'inventory': [], 'detected_count': 0}):
             result = await server._pin_evidence_photo(session, {}, candidate=candidate)
         self.assertTrue(result['pinned'])
-        content = provider.call_args.args[1]
+        content = provider.call_args_list[0].args[1]
         self.assertEqual(base64.b64decode(content[1]['image_url']['url'].split(',')[1]), b'approved')
         self.assertEqual(session.evidence_photos[0]['frame_id'], 'approved')
 

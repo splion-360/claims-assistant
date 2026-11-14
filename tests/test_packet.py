@@ -10,7 +10,8 @@ from pathlib import Path
 import httpx
 
 from library_claim.config import CONFIG
-from library_claim.domain.models import Book, BookObservation, Box, Frame, ReviewIssue, Sweep
+from library_claim.domain.models import (Book, BookObservation, Box, Frame, Item,
+                                         ItemObservation, ReviewIssue, Sweep)
 from library_claim.packet import build_packet, packet_archive, render_report
 from library_claim.storage.evidence import EvidenceStore
 from library_claim.storage.repository import Repository
@@ -346,3 +347,85 @@ class PricedPacketTests(unittest.TestCase):
             packet = build_packet(self.database, 'sweep1', price=True, country='GB', client=http)
         self.assertEqual(packet['books'][0]['replacement_cost']['amount'], 9.99)
         self.assertEqual(packet['books'][0]['replacement_cost']['currency'], 'GBP')
+
+
+class ItemPacketTests(unittest.TestCase):
+    """Check the packet's non-book section, its status and its review lines."""
+
+    def setUp(self):
+        """Save a sweep holding one ordinary object and one framed picture."""
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.database = Path(self.directory.name) / 'claims.sqlite3'
+        start = datetime(2026, 11, 14, 9, 0, tzinfo=timezone.utc)
+        with Repository(self.database) as repo:
+            repo.add_many([
+                Sweep(id='sweep1', captured_at=start, device='browser camera', country='US', currency='USD'),
+                Frame(id='f1', sweep_id='sweep1', captured_at=start, evidence_key=f'{"c" * 64}.jpg',
+                      width_px=640, height_px=480),
+                Item(id='i1', sweep_id='sweep1', category='lighting', description='brass floor lamp'),
+                Item(id='i2', sweep_id='sweep1', category='art', description='framed portrait',
+                     needs_appraisal=True),
+                ItemObservation(sweep_id='sweep1', item_id='i1', frame_id='f1',
+                                bbox=Box(x_min=.1, y_min=.1, x_max=.4, y_max=.9),
+                                category='lighting', description='brass floor lamp', material='brass'),
+                ItemObservation(sweep_id='sweep1', item_id='i2', frame_id='f1',
+                                bbox=Box(x_min=.5, y_min=.1, x_max=.9, y_max=.5),
+                                category='art', description='framed portrait'),
+            ])
+
+    def packet(self):
+        """Build the packet without reaching a price source.
+
+        Returns:
+            The claim packet.
+        """
+        return build_packet(self.database, 'sweep1', price=False)
+
+    def test_each_object_becomes_a_contract_line(self):
+        """Emit one item line per object with the fields the contract fixes."""
+        items = self.packet()['items']
+        self.assertEqual(len(items), 2)
+        self.assertLessEqual({'id', 'category', 'description', 'brand_model', 'frame_ref',
+                              'dimensions_cm', 'status', 'replacement_cost', 'confidence'},
+                             set(items[0]))
+
+    def test_frame_ref_points_at_the_saved_frame(self):
+        """Name the stored JPEG an adjuster can open for each object."""
+        self.assertEqual(self.packet()['items'][0]['frame_ref'], f'frames/{"c" * 64}.jpg')
+
+    def test_art_is_reported_as_needing_appraisal(self):
+        """Mark framed art for a person and leave its figure empty."""
+        art = next(item for item in self.packet()['items'] if item['category'] == 'art')
+        self.assertEqual(art['status'], 'needs_appraisal')
+        self.assertIsNone(art['replacement_cost']['low'])
+
+    def test_unpriced_objects_leave_the_item_totals_at_zero(self):
+        """Keep unpriced objects out of the money totals."""
+        totals = self.packet()['totals']
+        self.assertEqual(totals['items_replacement_cost_low'], 0)
+        self.assertEqual(totals['items_replacement_cost_high'], 0)
+
+    def test_unmeasured_objects_reach_the_review_queue(self):
+        """Record that no pass measured the objects' dimensions."""
+        queue = self.packet()['review_queue']
+        self.assertTrue(any(entry['ref_id'] == 'i1' and 'dimensions' in entry['reason'] for entry in queue))
+        self.assertFalse(any(entry['ref_id'] == 'items' for entry in queue))
+
+    def test_a_sweep_with_no_objects_says_so_once(self):
+        """Flag an empty item list rather than leaving it unexplained."""
+        with Repository(self.database) as repo:
+            for row in repo.list_for_sweep(ItemObservation, 'sweep1'):
+                repo.connection.execute('DELETE FROM item_observations WHERE id = ?', (row.id,))
+            repo.connection.execute('DELETE FROM items WHERE sweep_id = ?', ('sweep1',))
+            repo.connection.commit()
+        packet = self.packet()
+        self.assertEqual(packet['items'], [])
+        self.assertTrue(any(entry['ref_id'] == 'items' for entry in packet['review_queue']))
+
+    def test_report_lists_the_objects(self):
+        """Show each object, its category and its status in the readable report."""
+        html = render_report(self.packet())
+        self.assertIn('brass floor lamp', html)
+        self.assertIn('needs_appraisal', html)
+        self.assertNotIn('No non-book items recorded', html)

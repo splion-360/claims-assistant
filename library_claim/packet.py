@@ -9,6 +9,8 @@ from pathlib import Path
 from library_claim.config import CONFIG
 from library_claim.domain.models import Frame, Sweep
 from library_claim.identification.storage import inventory, inventory_totals
+from library_claim.items.pricing import price_item
+from library_claim.items.storage import inventory as item_inventory
 from library_claim.pricing.models import Valuation
 from library_claim.pricing.storage import value_sweep
 from library_claim.storage.repository import Repository
@@ -78,6 +80,39 @@ def _book_line(book: dict, evidence: dict[str, str], valuation: Valuation | None
     }
 
 
+def _item_line(item: dict, evidence: dict[str, str], valuation: Valuation | None) -> dict:
+    """Convert one item inventory entry into a claim packet line.
+
+    Args:
+        item: Inventory entry from the item store.
+        evidence: Saved frame path indexed by frame ID.
+        valuation: Pricing outcome for this object, or None when pricing did not run.
+
+    Returns:
+        An item line holding only values backed by evidence.
+    """
+    frame_ids = item.get('frame_ids') or []
+    appraisal = item.get('needs_appraisal') or (valuation is not None and valuation.needs_appraisal)
+    price = None if appraisal or valuation is None else valuation.replacement
+    status = 'needs_appraisal' if appraisal else ('priced' if price else 'range')
+    return {
+        'id': item['id'], 'category': item.get('category', 'other'),
+        'description': item.get('description', ''), 'brand_model': item.get('brand_model') or '',
+        'material': item.get('material') or '',
+        'frame_ref': evidence.get(frame_ids[0], '') if frame_ids else '',
+        'frame_refs': [evidence[frame_id] for frame_id in frame_ids if frame_id in evidence],
+        # Dimensions need metric depth, which no item measurement pass supplies yet.
+        'dimensions_cm': {'w': None, 'h': None, 'd': None},
+        'status': status,
+        'replacement_cost': ({'low': round(price.amount, 2), 'high': round(price.amount, 2),
+                              'source': price.source, 'url': price.url,
+                              'retrieved_at': price.retrieved_at.isoformat()} if price else
+                             {'low': None, 'high': None, 'source': '', 'url': '', 'retrieved_at': ''}),
+        'observation_count': item.get('observation_count', 0),
+        'confidence': None,
+    }
+
+
 def _totals(books: list[dict], lines: list[dict], items: list[dict]) -> dict:
     """Compute every total in code by summing the packet's own lines.
 
@@ -93,7 +128,7 @@ def _totals(books: list[dict], lines: list[dict], items: list[dict]) -> dict:
     priced = [line for line in lines if line['replacement_cost']['amount'] is not None]
     used = [line for line in lines if line['used_value']['amount'] is not None]
     item_amounts = [item['replacement_cost'] for item in items
-                    if item.get('status') == 'priced' or item.get('status') == 'range']
+                    if item['replacement_cost'].get('low') is not None]
     return {
         **counts,
         'books_replacement_cost': round(sum(line['replacement_cost']['amount'] for line in priced), 2),
@@ -106,17 +141,20 @@ def _totals(books: list[dict], lines: list[dict], items: list[dict]) -> dict:
 
 
 def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep,
-                  valuations: dict[str, Valuation]) -> list[dict]:
+                  valuations: dict[str, Valuation], objects: list[dict],
+                  item_values: dict[str, Valuation]) -> list[dict]:
     """List every line the sweep is not confident in, with its reason.
 
     Args:
         books: Inventory entries carrying their review reasons.
         lines: Book lines of the packet.
         sweep: The sweep record, checked for the locale pricing needs.
-        valuations: Pricing outcomes indexed by book ID.
+        valuations: Book pricing outcomes indexed by book ID.
+        objects: Non-book inventory entries carrying their review reasons.
+        item_values: Item pricing outcomes indexed by item ID.
 
     Returns:
-        Review entries referencing a book, the room, the item list or the sweep.
+        Review entries referencing a book, an object, the room or the sweep.
     """
     queue = []
     for book in books:
@@ -129,8 +167,16 @@ def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep,
             queue.append({'ref_id': line['id'], 'reason': reason})
         if line['replacement_cost']['amount'] is None:
             queue.append({'ref_id': line['id'], 'reason': UNPRICED_REASON})
+    for entry in objects:
+        for reason in entry.get('review_reasons') or []:
+            queue.append({'ref_id': entry['id'], 'reason': reason})
+        for reason in (item_values[entry['id']].reasons if entry['id'] in item_values else ()):
+            queue.append({'ref_id': entry['id'], 'reason': reason})
+        # Dimensions for an object need metric depth that no item pass supplies yet.
+        queue.append({'ref_id': entry['id'], 'reason': 'Object dimensions were not measured'})
     queue.append({'ref_id': 'room', 'reason': 'Room dimensions and areas were not measured during this sweep'})
-    queue.append({'ref_id': 'items', 'reason': 'Non-book contents were not detected during this sweep'})
+    if not objects:
+        queue.append({'ref_id': 'items', 'reason': 'No non-book contents were recorded during this sweep'})
     if not sweep.country or not sweep.currency:
         queue.append({'ref_id': 'sweep',
                       'reason': 'Country and currency were not confirmed by the policyholder; '
@@ -171,6 +217,7 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
         sweep = repo.get(Sweep, sweep_id)
         frames = repo.list_for_sweep(Frame, sweep_id)
         books = inventory(repo, sweep_id)
+        contents = item_inventory(repo, sweep_id)
     # frame_ref must resolve to a file an adjuster can open, so it names the saved JPEG.
     evidence = {frame.id: f'frames/{frame.evidence_key}' for frame in frames}
     kept = [book for book in books if not book.get('excluded')]
@@ -180,8 +227,10 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
     if price:
         kept = [{**book, 'valuation': valuations[book['id']].model_dump(mode='json')}
                 if book['id'] in valuations else book for book in kept]
+    objects = [entry for entry in contents if not entry.get('excluded')]
+    item_values = {entry['id']: price_item(entry, chosen, client=client) for entry in objects} if price else {}
+    items = [_item_line(entry, evidence, item_values.get(entry['id'])) for entry in objects]
     lines = [_book_line(book, evidence, valuations.get(book['id'])) for book in kept]
-    items: list[dict] = []
     currency = sweep.currency or next((value.currency for value in valuations.values() if value.currency), '')
     return {
         'sweep': {'id': sweep.id, 'captured_at': sweep.captured_at.isoformat(), 'device': sweep.device,
@@ -193,7 +242,7 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
         'books': lines,
         'items': items,
         'totals': _totals(kept, lines, items),
-        'review_queue': _review_queue(kept, lines, sweep, valuations),
+        'review_queue': _review_queue(kept, lines, sweep, valuations, objects, item_values),
     }
 
 

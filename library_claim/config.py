@@ -233,6 +233,8 @@ class PricingConfig(Settings):
     appraisal_threshold: PositiveFloat
     appraisal_keywords: list[Text]
     convert_from: list[Text]
+    # Retail providers for non-book contents; empty means those lines stay unpriced.
+    item_providers: list[Text]
     fx_base_url: Text
     timeout_s: PositiveFloat
     connect_timeout_s: PositiveFloat
@@ -253,6 +255,18 @@ class PricingConfig(Settings):
         return self
 
 
+class ItemsConfig(Settings):
+    """Non-book detection limits, association geometry and the appraisal rule."""
+    enabled: bool
+    max_items_per_frame: PositiveInt
+    # Furniture does not move, so objects are inspected on a cadence, not every frame.
+    detection_interval_s: PositiveFloat
+    # Two detections of one object in a shared coordinate basis must overlap by this much.
+    association_min_iou: Unit
+    # Wording that lets a policyholder release a framed piece from appraisal.
+    print_statements: list[Text]
+
+
 class AppConfig(Settings):
     """Collect the independently owned setting groups."""
     identification: IdentificationConfig
@@ -266,6 +280,7 @@ class AppConfig(Settings):
     drex: DrexConfig
     measurement: MeasurementConfig
     pricing: PricingConfig
+    items: ItemsConfig
 
 
 def load_config(path: Path = ROOT / 'config.yml') -> AppConfig:

@@ -321,8 +321,9 @@ class LiveBookExtractionTests(unittest.IsolatedAsyncioTestCase):
                  patch.object(server, 'structured', new=AsyncMock(return_value=response)) as provider:
                 result = await server._pin_evidence_photo(session, {}, candidate=candidate)
             self.assertTrue(result['pinned'])
-            self.assertIn('normalized from 0 to 1', provider.call_args.args[0])
-            self.assertEqual(provider.call_args.args[2], server.FrameObservation)
+            # The spine read is the first vision call; object detection follows on its own cadence.
+            self.assertIn('normalized from 0 to 1', provider.call_args_list[0].args[0])
+            self.assertEqual(provider.call_args_list[0].args[2], server.FrameObservation)
             state = server._current_ui_state(session)
             self.assertEqual(state['book_inventory'][0]['title'], 'Visible Title')
             self.assertEqual(state['evidence_photos'][0]['books'][0]['bbox'], detection().bbox.model_dump())

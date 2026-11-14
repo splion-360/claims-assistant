@@ -17,6 +17,7 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 | `drex` | Drex model, endpoint, client name, timeouts, decision probability thresholds and guidance cooldowns |
 | `measurement` | Depth sampling inset/window and Depth Pro model (the AR depth-grid size is under `capture.browser`) |
 | `pricing` | Default country, per-country currency and price providers, appraisal keywords and threshold, conversion markets, exchange-rate endpoint and request timeouts |
+| `items` | Non-book detection on/off, per-frame cap, detection cadence, association overlap and the wording that releases a framed piece from appraisal |
 
 For quieter console output, change `capture.summary_log_interval_s` (default 5
 seconds). It controls the combined Rich table only; scoring, tracking, and image
@@ -130,3 +131,23 @@ Books whose readings contain `pricing.appraisal_keywords` (signed, first
 edition, rare and so on) are never priced automatically, and a figure above
 `pricing.appraisal_threshold` is withheld for a human appraiser. Both outcomes
 leave the money fields empty and put the line in the review queue.
+
+## Non-book contents
+
+Admitted frames are inspected for the room's non-book contents on a cadence of
+`items.detection_interval_s`, not on every frame: furniture does not move, and a
+second vision call per frame would double the sweep's cost. `items.enabled`
+turns the pass off entirely, leaving the packet's item list empty.
+
+Two sightings merge into one object only when they agree on category and their
+boxes overlap by `items.association_min_iou` in a verified shared basis, the
+same geometry rule the books use. Appearance alone never merges two records, and
+one object cannot absorb two detections from the same frame. Sightings that
+cannot be related leave separate records carrying a possible-duplicate reason.
+
+Framed art and mirrors are never valued automatically. They are recorded as
+needing appraisal unless the policyholder says the piece is a print, which is
+what `items.print_statements` lists. Every other object needs a retail price
+provider under `pricing.item_providers`; no keyless retail API exists for
+furniture and electronics, so that list ships empty and those lines are reported
+unpriced with the reason rather than carrying an invented figure.
