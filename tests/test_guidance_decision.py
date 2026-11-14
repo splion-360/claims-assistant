@@ -77,3 +77,14 @@ class GuidanceDecisionTests(unittest.TestCase):
         self.assertEqual(QUALITY_PROMPTS['reduce_glare'], 'Shift the camera slightly to the side to avoid the glare.')
         self.assertEqual(LABELS[0], 'stay_quiet')
         self.assertEqual(LABELS[-1], 'read_title')
+
+    def test_excluded_books_do_not_count_as_edge_cut(self):
+        """A skipped book cut off at the edge does not ask the user to pan back."""
+        self.assertEqual(edge_cut_count([{'excluded': True, 'observations': [{'issues': ['cut_off']}]}]), 0)
+
+    def test_gate_failures_map_to_matching_prompts(self):
+        """Dark frames ask for light, bright frames for less glare, unsharp frames to slow down."""
+        from live_demo.guidance_decision import gate_prompt
+        self.assertEqual(gate_prompt('too_dark'), 'more_light')
+        self.assertEqual(gate_prompt('too_bright'), 'reduce_glare')
+        self.assertEqual(gate_prompt('insufficient_texture_or_sharpness'), 'slow_down')

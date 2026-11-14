@@ -103,7 +103,24 @@ def edge_cut_count(inventory: list[dict]) -> int:
         Number of books whose every observation is cut off.
     """
     return sum(1 for book in inventory
-               if book.get('observations') and all('cut_off' in row.get('issues', []) for row in book['observations']))
+               if not book.get('excluded') and book.get('observations') and all('cut_off' in row.get('issues', []) for row in book['observations']))
+
+
+# Instant local gate failures map to the prompt that fixes them.
+GATE_PROMPTS = {'too_dark': 'more_light', 'too_bright': 'reduce_glare',
+                'insufficient_texture_or_sharpness': 'slow_down'}
+
+
+def gate_prompt(reason: str) -> str:
+    """Pick the quality prompt for a local gate failure.
+
+    Args:
+        reason: Failure reason from `local_gate`.
+
+    Returns:
+        A QUALITY_PROMPTS label.
+    """
+    return GATE_PROMPTS.get(reason, 'slow_down')
 
 
 def should_speak(*, user_speaking: bool, agent_speaking: bool) -> bool:

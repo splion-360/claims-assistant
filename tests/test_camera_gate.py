@@ -12,8 +12,8 @@ class CameraGateTests(unittest.TestCase):
     def test_exposure_and_sharpness_boundaries(self):
         """Reject only beyond the configured limits."""
         limit = CONFIG.quality.max_extreme_fraction
-        self.assertEqual(local_gate(quality(dark_fraction=limit + .01)), 'extreme_exposure')
-        self.assertEqual(local_gate(quality(bright_fraction=limit + .01)), 'extreme_exposure')
+        self.assertEqual(local_gate(quality(dark_fraction=limit + .01)), 'too_dark')
+        self.assertEqual(local_gate(quality(bright_fraction=limit + .01)), 'too_bright')
         self.assertIsNone(local_gate(quality(dark_fraction=limit)))
         self.assertEqual(local_gate(quality(sharpness=CONFIG.quality.min_sharpness - .1)),
                          'insufficient_texture_or_sharpness')

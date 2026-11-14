@@ -156,7 +156,7 @@ class PendingCheckTests(unittest.TestCase):
             stream = CameraTracking(LiveCaptureStore(Path(directory), 'sweep1'))
             stream.assess(jpeg(np.zeros((360, 480), np.uint8)), 'd1', 0)
             self.assertIsNone(stream.pending_check)
-            self.assertEqual(stream.gate_failure, 'extreme_exposure')
+            self.assertEqual(stream.gate_failure, 'too_dark')
 
     def test_saved_frames_keep_their_webxr_depth(self):
         """Write the depth sidecar for saved references and for later book candidates."""

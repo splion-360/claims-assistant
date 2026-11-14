@@ -103,7 +103,7 @@ from live_demo.camera_quality import log_scores
 from live_demo.camera_quality import logger as quality_logger
 from live_demo.frame_checker import FrameChecker
 from live_demo.guidance_decision import (QUALITY_PROMPTS, GuidanceSignals, QualityPromptLimiter,
-                                         choose_prompt, edge_cut_count, should_speak)
+                                         choose_prompt, edge_cut_count, gate_prompt, should_speak)
 from library_claim.decisions.frame_check import check_frame, is_book_candidate, save_frame_check
 from live_demo.camera_tracking import CameraTracking
 from provider import (
@@ -716,6 +716,25 @@ def book_evidence(session_id: str, observation_id: str, request: Request):
         raise HTTPException(404, "Book evidence not found")
 
 
+def drex_failure_message(error, consecutive: int) -> str | None:
+    """Choose the user-facing explanation for failed frame checks, if one is due.
+
+    Args:
+        error: Last DrexError from the frame checker, if any.
+        consecutive: Number of consecutive failed checks.
+
+    Returns:
+        A message to show once, or None while failures may still be transient.
+    """
+    if error is None:
+        return None
+    if error.status in (401, 402):
+        return "Drex decisions unavailable; check the Drex API key and credit."
+    if str(error).startswith("Set DREX_API_KEY"):
+        return str(error)
+    return "Drex is unreachable; frames are not being read." if consecutive >= 3 else None
+
+
 def invalidate_capture_context(session: IntakeSession) -> None:
     """Invalidate in-flight results after a spoken correction changed the inventory.
 
@@ -1103,6 +1122,7 @@ async def live_voice(websocket: WebSocket) -> None:
     # One D1 scheduler per camera activation, so a stale activation cannot admit frames.
     frame_checker = FrameChecker(check_frame)
     drex_error_reported = False
+    drex_failures = 0
     # D6 state: recent Drex issues, local-gate failures and when prompts were last spoken.
     guidance_limiter = QualityPromptLimiter()
     recent_issues = deque(maxlen=5)
@@ -1218,7 +1238,7 @@ async def live_voice(websocket: WebSocket) -> None:
         return user_turn_open or (text_task is not None and not text_task.done())
 
     def note_gate(stream):
-        """Count consecutive local-gate failures and ask the user to slow down after a run of them.
+        """Count consecutive local-gate failures and speak the matching prompt after a run of them.
 
         Args:
             stream: Tracker that just assessed a frame.
@@ -1230,7 +1250,7 @@ async def live_voice(websocket: WebSocket) -> None:
             gate_streak = 0
         if gate_streak >= CONFIG.drex.gate_failure_streak:
             gate_streak = 0
-            track(speak_quality("slow_down"))
+            track(speak_quality(gate_prompt(stream.gate_failure)))
 
     async def speak_quality(label):
         """Speak a capture-quality prompt when the limits and the speaking rule allow.
@@ -1365,17 +1385,19 @@ async def live_voice(websocket: WebSocket) -> None:
             stream: Tracker belonging to that activation.
             checker: Scheduler that produced the decision.
         """
-        nonlocal drex_error_reported
+        nonlocal drex_error_reported, drex_failures
         try:
             if session.deleted or not session.camera_enabled or session.camera_mode_revision != revision:
                 return
             if check is None:
-                error = checker.last_error
-                # Report credential or credit failures once; other failures just skip the frame.
-                if error is not None and error.status in (401, 402) and not drex_error_reported:
+                drex_failures += 1
+                message = drex_failure_message(checker.last_error, drex_failures)
+                # Say once why frames are not being read; transient failures only after a run of them.
+                if message and not drex_error_reported:
                     drex_error_reported = True
-                    await send({"type": "error", "message": "Drex decisions unavailable; check credit."})
+                    await send({"type": "error", "message": message})
                 return
+            drex_failures = 0
             stream.latest_check, stream.latest_check_at = check, time.monotonic()
             if check.issue not in ("none", "no_books"):
                 recent_issues.append((check.issue, round(time.monotonic(), 1)))

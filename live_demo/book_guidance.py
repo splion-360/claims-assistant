@@ -10,9 +10,10 @@ def needs_capture(book: dict) -> bool:
         book: Canonical inventory record.
 
     Returns:
-        True only for a missing title; association and optional metadata stay in review.
+        True only for a missing title on a book the user has not excluded; association and
+        optional metadata stay in review.
     """
-    return not bool(book.get('title'))
+    return not book.get('title') and not book.get('excluded')
 
 
 def capture_instruction(book: dict) -> str:

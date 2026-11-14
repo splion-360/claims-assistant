@@ -172,3 +172,47 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(server, '_pin_evidence_photo', new=AsyncMock(side_effect=remote)) as capture:
             await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=assess)
         self.assertEqual(capture.call_count, 1)
+
+
+class DrexFailureReportTests(unittest.IsolatedAsyncioTestCase):
+    """A sweep that cannot reach Drex says why instead of silently reading nothing."""
+
+    async def test_missing_key_is_reported_once(self):
+        """Show the safe missing-key message after the first failed frame check."""
+        from library_claim.decisions.drex import DrexError
+
+        _, encoded = cv2.imencode('.jpg', textured_view())
+        count = 0
+
+        def no_key(jpeg):
+            """Fail like a server without DREX_API_KEY.
+
+            Args:
+                jpeg: Frame bytes.
+
+            Raises:
+                DrexError: Always.
+            """
+            raise DrexError('Set DREX_API_KEY in .env and restart the server.')
+
+        async def receive(session, sent):
+            """Send one frame and close once the error is reported.
+
+            Args:
+                session: Live session.
+                sent: Emitted messages.
+
+            Returns:
+                Next simulated browser message.
+            """
+            nonlocal count
+            count += 1
+            if count == 1:
+                return {'type': 'video', 'data': base64.b64encode(encoded).decode()}
+            while not any(m['type'] == 'error' for m in sent):
+                await asyncio.sleep(.001)
+            return {'type': 'close'}
+
+        session, sent = await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=no_key)
+        errors = [m['message'] for m in sent if m['type'] == 'error']
+        self.assertEqual(errors, ['Set DREX_API_KEY in .env and restart the server.'])

@@ -41,3 +41,8 @@ class GuidancePolicyTests(unittest.TestCase):
             self.assertNotIn('tap', text)
             self.assertNotIn('ready', text)
             self.assertNotIn('hold the book', text)
+
+    def test_excluded_books_never_need_capture(self):
+        """Books the user skipped never trigger a title request."""
+        self.assertFalse(needs_capture({'id': 'a', 'title': None, 'excluded': True}))
+        self.assertTrue(needs_capture({'id': 'a', 'title': None, 'excluded': False}))

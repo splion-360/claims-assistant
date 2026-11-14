@@ -13,8 +13,10 @@ def local_gate(quality: QualityAssessment) -> str | None:
         A failure reason, or None when the frame may be checked by Drex.
     """
     signals = quality.signals
-    if (signals.dark_fraction or 0) > CONFIG.quality.max_extreme_fraction or (signals.bright_fraction or 0) > CONFIG.quality.max_extreme_fraction:
-        return 'extreme_exposure'
+    if (signals.dark_fraction or 0) > CONFIG.quality.max_extreme_fraction:
+        return 'too_dark'
+    if (signals.bright_fraction or 0) > CONFIG.quality.max_extreme_fraction:
+        return 'too_bright'
     if signals.sharpness is not None and signals.sharpness < CONFIG.quality.min_sharpness:
         return 'insufficient_texture_or_sharpness'
     return None
