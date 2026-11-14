@@ -45,12 +45,10 @@ an explicit reason. Model computation failures and nonfinite results likewise
 remain unknown while other measurements survive. Raw out-of-range BRISQUE scores
 are preserved, and only the convenience ranking score is clipped.
 
-The live relevance adapter applies provisional quality rejection rules before
-CLIP and Crusoe: BRISQUE >60, sharpness <20, either extreme-pixel fraction >80%,
-or BRISQUE >45 together with sharpness <50. Missing BRISQUE falls back to the
-other measurements. All thresholds are in `config.yml`; the assessor itself
-continues to report measurements without deciding admission. These whole-frame
-checks do not guarantee spine readability or trigger automatic voice guidance.
+The live local gate (`live_demo/camera_gate.py`) rejects a frame before its Drex
+frame check when sharpness <20 or either extreme-pixel fraction >80%. Thresholds
+are in `config.yml`; the assessor itself continues to report measurements without
+deciding admission. BRISQUE still ranks views during evidence selection.
 
 Validation:
 
@@ -68,8 +66,8 @@ These verify implementation behavior, not book-readability accuracy.
 The browser's existing camera frames are scored locally at most once per second,
 inside the single local tracking worker per WebSocket, with no frame backlog. CPU work runs
 in a background thread. The previous scored frame supplies temporal change;
-a camera mode change resets that history. Quality rejection precedes local
-relevance, and only passing book candidates can authorize remote vision requests.
+a camera mode change resets that history. The local gate precedes the Drex
+frame check, and only frames in which Drex sees a book reach remote spine reading.
 
 Run from the repository root:
 
@@ -79,9 +77,8 @@ Run from the repository root:
 
 Open `http://127.0.0.1:4177`, connect the session and enable the camera. Look for
 one compact Rich table every five seconds (and immediately on the first frame).
-It shows tracking, BRISQUE, sharpness, latest relevance/similarities, and the number
-of frames saved since the previous summary. Older quality/relevance measurements
-show their age. Change `capture.summary_log_interval_s` in `config.yml` and restart
+It shows tracking, BRISQUE, sharpness, the latest Drex frame check, and the number
+of frames saved since the previous summary. Older measurements show their age. Change `capture.summary_log_interval_s` in `config.yml` and restart
 to adjust display frequency without changing processing or capture cadence.
 Detailed scores, matches, overlap, timing, file paths, and frame/session references
 are available with `--log-level debug`.
@@ -90,17 +87,9 @@ The existing session setup still requires the configured Crusoe API key.
 
 Tracking now receives up to five camera frames per second; see [tracking](tracking/README.md) for its independent cadence and limitations.
 
-## Local relevance diagnostics
-
-The live backend can label sampled candidate views using a pretrained local
-CLIP model. See [setup, score semantics, and evaluation](relevance/README.md).
-It logs books or uncertain, plus diagnostic empty-background similarity, and
-stores the assessment with selected frames. Quality-blocked and below-threshold
-frames do not authorize remote inference.
-
 ## Experiment settings
 
 Edit the root [`config.yml`](../../config.yml) for quality, tracking, geometry,
-selection, relevance, scheduling, camera cadence, and model generation settings.
+selection, Drex decisions, scheduling, camera cadence, and model generation settings.
 The shared loader validates the file at startup; modules import those settings.
 See [configuration usage](../../docs/configuration.md) for reload and model setup.

@@ -11,20 +11,18 @@ from pydantic import ValidationError
 import yaml
 
 from library_claim.config import CONFIG, ROOT, load_config
-from library_claim.capture.relevance.classifier import RelevanceAssessment, decide
 
 
 class ConfigTests(unittest.TestCase):
     """Check strict config loading and behavior with alternate experiment values."""
 
     def test_invalid_and_unknown_settings_fail_early(self):
-        """Reject typos, malformed prompts, and unsafe numeric ranges."""
+        """Reject typos, inverted Drex bounds, and unsafe numeric ranges."""
         raw = yaml.safe_load((ROOT / 'config.yml').read_text())
         cases = [
-            ('relevance', 'min_similarity', 2),
-            ('relevance', 'min_similiarity', .4),
-            ('relevance', 'prompts', {'books': []}),
-            ('relevance', 'prompts', {'books': ['book'], 'empty_background': ['wall'], 'other_objects': ['mug']}),
+            ('drex', 'same_book_min', 2),
+            ('drex', 'same_book_minimum', .8),
+            ('drex', 'different_book_max', .9),
             ('quality', 'dark_cutoff', 250),
             ('tracking', 'min_matches', 3),
             ('tracking', 'max_gap_s', float('nan')),
@@ -41,18 +39,10 @@ class ConfigTests(unittest.TestCase):
                     with self.assertRaises(ValidationError):
                         load_config(path)
 
-    def test_book_only_target_abstains_below_threshold(self):
-        """Keep low similarity uncertain without a competing background target."""
-        self.assertEqual(set(CONFIG.relevance.prompts.model_dump()), {'books', 'empty_background'})
-        self.assertEqual(decide({'books': .1}, 1).label, 'uncertain')
-        with self.assertRaises(ValidationError):
-            RelevanceAssessment(label='empty_background', reason='retired')
-
     def test_experiment_values_reach_processing_defaults(self):
         """Load alternate YAML before consumers and verify settings affect behavior."""
         data = CONFIG.model_dump(mode='json')
-        data['relevance']['min_similarity'] = .5
-        data['relevance']['prompts']['books'] = ['a book cover']
+        data['drex']['model'] = 'experiment-drex'
         data['quality']['max_dimension'] = 320
         data['quality']['dark_cutoff'] = 24
         data['tracking']['capacity'] = 5
@@ -71,7 +61,7 @@ import inspect, json, sys
 from pathlib import Path
 import library_claim.config as config
 config.CONFIG = config.load_config(Path(sys.argv[1]))
-from library_claim.capture.relevance.classifier import decide, PROMPTS
+import library_claim.decisions.drex as drex
 from library_claim.capture.quality import QualityAssessor
 from library_claim.capture.tracking.tracker import FrameTracker
 from library_claim.capture.selection import SETTINGS as selection
@@ -80,8 +70,7 @@ import provider, speech
 from live_demo.server import health
 assessor = QualityAssessor()
 tracker = FrameTracker()
-print(json.dumps(dict(label=decide(dict(books=.4),1).label,
- prompts=PROMPTS, dimension=assessor.max_dimension, dark=assessor.dark_cutoff,
+print(json.dumps(dict(drex=drex.CONFIG.drex.model, dimension=assessor.max_dimension, dark=assessor.dark_cutoff,
  capacity=tracker.keyframes.capacity, reanchor=tracker.reanchor_every,
  coverage=selection.new_coverage_fraction,
  pending=inspect.signature(Scheduler).parameters['pending_limit'].default,
@@ -91,8 +80,7 @@ print(json.dumps(dict(label=decide(dict(books=.4),1).label,
             result = subprocess.run([sys.executable, '-c', code, str(path)], cwd=ROOT,
                                     capture_output=True, text=True, check=True, timeout=20)
         values = json.loads(result.stdout)
-        self.assertEqual(values['label'], 'uncertain')
-        self.assertEqual(values['prompts']['books'], ['a book cover'])
+        self.assertEqual(values['drex'], 'experiment-drex')
         self.assertEqual((values['dimension'], values['dark']), (320, 24))
         self.assertEqual((values['capacity'], values['reanchor']), (5, 7))
         self.assertEqual(values['coverage'], .4)
@@ -104,11 +92,11 @@ print(json.dumps(dict(label=decide(dict(books=.4),1).label,
 
     def test_default_config_is_independent_of_working_directory(self):
         """Resolve the project YAML when launched outside the repository directory."""
-        code = f'import sys; sys.path.insert(0, {str(ROOT)!r}); from library_claim.config import load_config; print(load_config().relevance.model_id)'
+        code = f'import sys; sys.path.insert(0, {str(ROOT)!r}); from library_claim.config import load_config; print(load_config().drex.model)'
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run([sys.executable, '-c', code], cwd=directory,
                                     capture_output=True, text=True, check=True, timeout=20)
-        self.assertEqual(result.stdout.strip(), CONFIG.relevance.model_id)
+        self.assertEqual(result.stdout.strip(), CONFIG.drex.model)
 
     def test_drex_thresholds_loaded(self):
         """Expose Drex decision thresholds from config.yml."""

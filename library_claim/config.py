@@ -17,47 +17,6 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra='forbid', frozen=True, allow_inf_nan=False)
 
 
-class Artifact(Settings):
-    """Identify one pinned downloadable model artifact."""
-    remote: Text
-    sha256: Annotated[str, Field(pattern=r'^[a-f0-9]{64}$')]
-
-
-class Prompts(Settings):
-    """Define book descriptions and diagnostic empty-background descriptions."""
-    books: Annotated[list[Text], Field(min_length=1)]
-    empty_background: Annotated[list[Text], Field(min_length=1)]
-
-
-class Artifacts(Settings):
-    """Name the required compatible CLIP encoder and tokenizer artifacts."""
-    vision: Artifact
-    text: Artifact
-    tokenizer: Artifact
-
-
-class RelevanceConfig(Settings):
-    """Configure local classification, preprocessing, and model setup."""
-    model_id: Text
-    revision: Text
-    model_dir: Path
-    crop_count: Annotated[int, Field(ge=2)]
-    method: Text
-    min_similarity: Annotated[float, Field(ge=-1, le=1)]
-    prompts: Prompts
-    image_size: PositiveInt
-    image_mean: tuple[Unit, Unit, Unit]
-    image_std: tuple[PositiveFloat, PositiveFloat, PositiveFloat]
-    padding_rgb: tuple[Byte, Byte, Byte]
-    token_length: PositiveInt
-    pad_id: Annotated[int, Field(ge=0)]
-    pad_token: Text
-    intra_op_threads: PositiveInt
-    inter_op_threads: PositiveInt
-    download_timeout_s: PositiveFloat
-    artifacts: Artifacts
-
-
 class IdentificationConfig(Settings):
     """Bound visual extraction and conservative physical-copy association."""
     guidance_cooldown_s: PositiveFloat
@@ -83,7 +42,7 @@ class IdentificationConfig(Settings):
 
 
 class QualityConfig(Settings):
-    """Configure measurement and conservative relevance admission thresholds."""
+    """Configure frame measurement and the local exposure/sharpness gate."""
     max_dimension: Annotated[int, Field(ge=32)]
     dark_cutoff: Byte
     bright_cutoff: Byte
@@ -93,9 +52,6 @@ class QualityConfig(Settings):
     brisque_ranking_scale: PositiveFloat
     max_extreme_fraction: Unit
     min_sharpness: Annotated[float, Field(ge=0)]
-    max_brisque: Annotated[float, Field(ge=0)]
-    combined_brisque_threshold: Annotated[float, Field(ge=0)]
-    combined_sharpness_threshold: Annotated[float, Field(ge=0)]
 
     @model_validator(mode='after')
     def ordered_cutoffs(self):
@@ -253,15 +209,8 @@ class MeasurementConfig(Settings):
     depth_grid_height: PositiveInt
 
 
-class ExperimentConfig(Settings):
-    """Configure offline comparisons independently of live classifier behavior."""
-    edge_crop_count: Annotated[int, Field(ge=2)]
-
-
 class AppConfig(Settings):
-    """Collect the independently owned experiment setting groups."""
-    experiments: ExperimentConfig
-    relevance: RelevanceConfig
+    """Collect the independently owned setting groups."""
     identification: IdentificationConfig
     quality: QualityConfig
     tracking: TrackingConfig

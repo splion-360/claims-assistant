@@ -1,62 +1,4 @@
 # Restart the backend after editing. Credentials belong in .env.
-relevance:
-  model_id: Xenova/clip-vit-base-patch32
-  revision: 6b7c523703ae26e39be4b03774966f8571c7f523
-  model_dir: .cache/book-relevance
-  method: clip-book-filter-background-diagnostics-v5
-  crop_count: 3
-  min_similarity: 0.26
-  prompts:
-    books:
-      - a photo of a book
-      - a photo of books on a bookshelf
-      - a photo of a stack of books
-      - a photo of book spines
-      - a photo of the front cover of a book
-      - a photo of the back cover of a book
-      - a photo of an open book with visible pages
-      - a photo of a closed notebook
-      - a photo of an open notebook
-      - a photo of a composition notebook
-      - a photo of a book viewed at an angle
-      - a photo of a partially visible book at the edge of the image
-      - a photo of a partially obscured book
-      - a photo of books lying flat
-      - a photo of books standing upright
-      - a photo of a person holding a book
-    # Diagnostic scores only: background never vetoes a qualifying book.
-    empty_background:
-      - a photo of a plain wall with no objects in front of it
-      - a photo of a bare wall and an empty floor
-      - a photo of an empty bookshelf with bare shelves
-      - a photo of an empty shelf with nothing resting on it
-      - a photo of a bare tabletop with no objects on its surface
-      - a photo of an empty desk surface
-      - a photo of a plain ceiling and the upper walls of a room
-      - a photo of an empty corner where two walls meet the floor
-      - a photo of a bare floor with no objects on it
-      - a photo of a window and surrounding wall with an empty windowsill
-  # These preprocessing/tokenizer values must match the selected model.
-  image_size: 224
-  image_mean: [0.48145466, 0.4578275, 0.40821073]
-  image_std: [0.26862954, 0.26130258, 0.27577711]
-  padding_rgb: [123, 117, 104]
-  token_length: 77
-  pad_id: 49407
-  pad_token: '<|endoftext|>'
-  intra_op_threads: 2
-  inter_op_threads: 1
-  download_timeout_s: 120
-  artifacts:
-    vision:
-      remote: onnx/vision_model_quantized.onnx
-      sha256: 583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299
-    text:
-      remote: onnx/text_model.onnx
-      sha256: 3f6571f5bad13a97c469c1622e1cfc4d9aef78b79fdbfcff804ca357bfada8cc
-    tokenizer:
-      remote: tokenizer.json
-      sha256: f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd
 identification:
   guidance_cooldown_s: 30
   guidance_timeout_s: 25
@@ -88,10 +30,6 @@ quality:
   brisque_ranking_scale: 100
   max_extreme_fraction: 0.80
   min_sharpness: 20
-  max_brisque: 60
-  # Reject moderate degradation only when both conditions hold.
-  combined_brisque_threshold: 45
-  combined_sharpness_threshold: 50
 tracking:
   max_dimension: 640
   capacity: 24
@@ -182,6 +120,3 @@ measurement:
   depth_grid_width: 96
   depth_grid_height: 54
 
-# Offline comparisons only; these settings do not enable live crop inference.
-experiments:
-  edge_crop_count: 3
