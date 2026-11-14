@@ -71,17 +71,7 @@ Drex returns **calibrated probabilities, not labels**. Every threshold is theref
 configuration, and the band between two thresholds is recorded as `unresolved` rather than
 forced into a guess:
 
-```mermaid
-flowchart LR
-    p["Drex probability"] --> low{"≤ different_book_max"}
-    low -->|yes| new["New physical copy"]
-    low -->|no| high{"≥ same_book_min"}
-    high -->|yes| merge["Same copy — merge"]
-    high -->|no| unres["Unresolved →<br/>review queue"]
-    style merge fill:#2F5D3A,color:#fff
-    style new fill:#2F5D3A,color:#fff
-    style unres fill:#f6e5c8,color:#7a5312
-```
+![A Drex probability becomes a new copy, an unresolved line, or a merge](docs/images/band.svg)
 
 Because several questions about the same images travel in one request, one Drex call replaces a
 handful of prompts.
@@ -123,16 +113,7 @@ Reproduce:
 
 ## The claim packet
 
-```mermaid
-flowchart LR
-    s["sweep<br/>id · device · country · currency"] --- r["room<br/>floor · wall · shelved wall<br/>m² and ft²"]
-    r --- b["books[]<br/>title · ISBN · spine cm<br/>replacement + used value"]
-    b --- i["items[]<br/>category · brand<br/>priced | range | needs_appraisal"]
-    i --- t["totals<br/><i>summed in code</i>"]
-    t --- q["review_queue<br/>every uncertain line,<br/>with its reason"]
-    style t fill:#2F5D3A,color:#fff
-    style q fill:#f6e5c8,color:#7a5312
-```
+![What a claim packet holds: sweep, room, books and items, with totals summed in code and a review queue naming every uncertain line](docs/images/packet.svg)
 
 Downloads as a zip holding `claim_packet.json`, `report.html`, and **every frame the packet
 cites**, so each `frame_ref` resolves without a running server.
