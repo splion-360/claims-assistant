@@ -7,7 +7,6 @@ const neededListEl = document.querySelector("#neededList");
 const teamFeedEl = document.querySelector("#teamFeed");
 const readinessEl = document.querySelector("#readiness");
 const callStatus = document.querySelector("#callStatus");
-const modelLabel = document.querySelector("#modelLabel");
 const pageDate = document.querySelector("#pageDate");
 const micButton = document.querySelector("#micButton");
 const cameraButton = document.querySelector("#cameraButton");
@@ -571,7 +570,6 @@ async function createSession(resume = false) {
     sessionStorage.setItem("intakeSession", sessionId);
     setState(payload.state);
     const health = await api("/api/health");
-    modelLabel.textContent = "Library sweep assistant";
     cameraConfig = health.camera;
     micButton.disabled = !health.voice_enabled;
     micButton.title = health.voice_enabled ? "Start or stop voice" : "Set DEEPGRAM_API_KEY and restart to enable voice";
@@ -606,8 +604,7 @@ function connectLive() {
         setStatus("Live", "");
         resolve();
       } else if (message.type === "session") {
-        modelLabel.textContent = "Library sweep assistant";
-      } else if (message.type === "voice_state") {
+          } else if (message.type === "voice_state") {
         voice?.setReady(message.enabled);
         if (!message.enabled) {
           state.transcript = state.transcript.filter(t => !(t.speaker === 'Claimant' && t.streaming));

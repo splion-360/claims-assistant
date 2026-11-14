@@ -86,12 +86,6 @@ h1 {
   letter-spacing: -0.01em;
 }
 
-.brand-sub {
-  color: var(--chrome-muted);
-  font-size: 12px;
-  margin-top: 2px;
-}
-
 .ghost-button,
 .text-entry button,
 .dialog-header button {
