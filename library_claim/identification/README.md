@@ -159,8 +159,6 @@ tests; the downloaded library summary is evidence, not the final assignment pack
 ## Catalogue lookup
 
 A legible title is searched on Open Library first, then the Library of Congress catalogue
-(SRU, no key), then Google Books when `GOOGLE_BOOKS_API_KEY` is set (it throttles anonymous
-use). Each catalogue is tried when the previous one fails, returns nothing, or Drex finds no
-confident match. Edition and ISBN are filled only when the publisher read on the spine matches
-exactly one Open Library edition, or the matched Library of Congress / Google Books record's
-publisher.
+(SRU, no key) when Open Library fails, returns nothing, or Drex finds no confident match.
+Edition and ISBN are filled only when the publisher read on the spine matches exactly one Open
+Library edition, or the matched Library of Congress record's publisher.

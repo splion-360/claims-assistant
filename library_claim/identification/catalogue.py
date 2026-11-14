@@ -1,8 +1,7 @@
-"""Resolve legible spine readings to catalogue entries (Open Library, Library of Congress, Google Books), with Drex choosing."""
+"""Resolve legible spine readings to catalogue entries (Open Library, then Library of Congress), with Drex choosing."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
-import os
 from pathlib import Path
 import re
 from xml.etree import ElementTree
@@ -17,7 +16,6 @@ from library_claim.storage.repository import Repository
 from .matching import normalize
 
 OPEN_LIBRARY = 'https://openlibrary.org'
-GOOGLE_BOOKS = 'https://www.googleapis.com/books/v1/volumes'
 LIBRARY_OF_CONGRESS = 'https://lx2.loc.gov/sru/lcdb'
 MODS = {'m': 'http://www.loc.gov/mods/v3'}
 # Generic client name only; no user or project details go to either catalogue.
@@ -33,7 +31,7 @@ class WorkCandidate:
     authors: list[str]
     first_publish_year: int | None
     source: str = 'openlibrary'
-    # Library of Congress and Google Books records carry their own link, publisher, edition and ISBN;
+    # Library of Congress records carry their own link, publisher, edition and ISBN;
     # Open Library editions are fetched separately.
     url: str | None = None
     publisher: str | None = None
@@ -107,35 +105,6 @@ def matching_edition(work_key: str, publisher: str | None, *, client: httpx.Clie
     edition = matches[0]
     isbn = (edition.get('isbn_13') or edition.get('isbn_10') or [None])[0]
     return {'edition': f"{edition.get('title', 'Edition')} ({edition['publishers'][0]})", 'isbn': isbn}
-
-
-def search_google_books(title: str, author: str | None, *, client: httpx.Client | None = None) -> list[WorkCandidate]:
-    """Search Google Books volumes by title and, when read, author.
-
-    Args:
-        title: Title read from the spine.
-        author: Author read from the spine, if any.
-        client: Optional HTTP client, used by tests.
-
-    Returns:
-        Up to five candidate volumes.
-    """
-    query = f'intitle:"{title}"' + (f' inauthor:"{author}"' if author else '')
-    params = {'q': query, 'maxResults': 5, 'printType': 'books'}
-    # An optional key only raises Google's anonymous rate limit.
-    if os.getenv('GOOGLE_BOOKS_API_KEY'):
-        params['key'] = os.environ['GOOGLE_BOOKS_API_KEY']
-    candidates = []
-    for item in _get('', params, client, GOOGLE_BOOKS).get('items', [])[:5]:
-        info = item.get('volumeInfo', {})
-        identifiers = {entry.get('type'): entry.get('identifier') for entry in info.get('industryIdentifiers', [])}
-        year = (info.get('publishedDate') or '')[:4]
-        candidates.append(WorkCandidate(
-            key=item['id'], title=info.get('title', ''), authors=info.get('authors', []),
-            first_publish_year=int(year) if year.isdigit() else None, source='googlebooks',
-            url=info.get('infoLink') or f"https://books.google.com/books?id={item['id']}",
-            publisher=info.get('publisher'), isbn=identifiers.get('ISBN_13') or identifiers.get('ISBN_10')))
-    return candidates
 
 
 def search_library_of_congress(title: str, author: str | None, *,
@@ -220,15 +189,12 @@ def _publisher(record) -> str | None:
 
 
 def catalogue_sources() -> list[tuple[str, object]]:
-    """Catalogues to try, in order; Google Books only with a key, since it throttles anonymous use.
+    """Keyless catalogues to try, in order.
 
     Returns:
-        (stage name, search function) pairs.
+        (provider name, search function) pairs.
     """
-    sources = [('openlibrary', search_works), ('loc', search_library_of_congress)]
-    if os.getenv('GOOGLE_BOOKS_API_KEY'):
-        sources.append(('googlebooks', search_google_books))
-    return sources
+    return [('Open Library', search_works), ('Library of Congress', search_library_of_congress)]
 
 
 def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: httpx.Client | None = None) -> WorkCandidate | None:
@@ -295,9 +261,11 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
     readings = {key: book.get(key) for key in ('title', 'author', 'publisher')}
     work, answered = None, False
     # Each catalogue is tried in turn until Drex accepts a match; a failing catalogue is skipped.
-    for stage, search in catalogue_sources():
+    for provider, search in catalogue_sources():
         try:
-            with telemetry.span(stage, book['title'][:40]) as reported:
+            # One catalogue block in the flow view; its provider line names who answered.
+            with telemetry.span('catalogue', book['title'][:40]) as reported:
+                reported.model = provider
                 candidates = search(book['title'], book.get('author'), client=http)
                 reported.detail = f'{len(candidates)} candidate(s)'
             work = choose_work(readings, candidates, client=drex)
@@ -307,7 +275,7 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
             logger.warning('catalogue decision failed: %s', type(error).__name__)
             return
         except (httpx.HTTPError, ValueError, KeyError) as error:
-            logger.warning('%s lookup failed: %s', stage, type(error).__name__)
+            logger.warning('%s lookup failed: %s', provider, type(error).__name__)
             continue
         if work is not None:
             break

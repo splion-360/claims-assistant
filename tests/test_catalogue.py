@@ -155,81 +155,6 @@ class ResolveBookTests(unittest.TestCase):
         self.assertNotIn('No confident catalogue match', reasons)
 
 
-GOOGLE = {'items': [{'id': 'gb1', 'volumeInfo': {
-    'title': 'Did I Say You Could Go', 'authors': ['Melanie Gideon'], 'publisher': 'Berkley',
-    'publishedDate': '2023-03-07', 'infoLink': 'https://books.google.com/books?id=gb1',
-    'industryIdentifiers': [{'type': 'ISBN_10', 'identifier': '0593546997'},
-                            {'type': 'ISBN_13', 'identifier': '9780593546994'}]}}]}
-
-
-class GoogleBooksFallbackTests(unittest.TestCase):
-    """Google Books is searched when Open Library gives no confident match."""
-
-    setUp = fixtures.BookObservationTests.setUp
-    save_frame = fixtures.BookObservationTests.save_frame
-    persist = fixtures.BookObservationTests.persist
-
-    def test_search_google_books_parses_volumes(self):
-        """Query by title and author and keep source, link, publisher and ISBN."""
-        from library_claim.identification.catalogue import search_google_books
-
-        def handler(request):
-            self.assertEqual(request.url.host, 'www.googleapis.com')
-            self.assertEqual(request.url.params['q'], 'intitle:"Did I Say You Could Go" inauthor:"Melanie Gideon"')
-            self.assertEqual(request.headers['User-Agent'], 'library-claim/1')
-            return httpx.Response(200, json=GOOGLE)
-
-        [candidate] = search_google_books('Did I Say You Could Go', 'Melanie Gideon', client=client(handler))
-        self.assertEqual((candidate.source, candidate.url, candidate.publisher, candidate.isbn, candidate.first_publish_year),
-                         ('googlebooks', 'https://books.google.com/books?id=gb1', 'Berkley', '9780593546994', 2023))
-
-    def resolve(self, open_library, publisher=None):
-        """Resolve one legible book with Open Library and Google Books handlers.
-
-        Args:
-            open_library: Response factory for Open Library requests.
-            publisher: Publisher read from the spine, if any.
-
-        Returns:
-            Catalogue observations and review reasons written.
-        """
-        book = self.persist(books=[detection(title='Did I Say You Could Go')])['inventory'][0]
-        book['publisher'] = publisher
-
-        def http(request):
-            return httpx.Response(200, json=GOOGLE) if request.url.host == 'www.googleapis.com' else open_library(request)
-
-        def drex(request):
-            criteria = json.loads(request.content)['questions']['match']['criteria']
-            return httpx.Response(200, json=drex_choice('c0' if 'Melanie Gideon' in criteria.get('c0', '') else 'none', 0.9))
-
-        # Library of Congress has no match here, so Google Books (with a key) is reached.
-        with patch.dict(os.environ, {'DREX_API_KEY': 'k', 'GOOGLE_BOOKS_API_KEY': 'key'}):
-            resolve_book(self.store.database, 'sweep', book, http=client(http), drex=client(drex))
-        with Repository(self.store.database) as repo:
-            rows = [row for row in repo.list_for_sweep(BookObservation, 'sweep') if row.provenance == 'catalogue']
-            reasons = [issue.reason for issue in repo.list_for_sweep(ReviewIssue, 'sweep')]
-        return rows, reasons
-
-    def test_no_open_library_match_falls_back_to_google_books(self):
-        """When Drex rejects every Open Library work, a Google Books volume can match."""
-        rows, reasons = self.resolve(lambda request: httpx.Response(200, json=SEARCH))
-        self.assertEqual(rows[0].catalogue_url, 'https://books.google.com/books?id=gb1')
-        self.assertIsNone(rows[0].isbn)
-        self.assertNotIn('No confident catalogue match', reasons)
-
-    def test_open_library_outage_falls_back_to_google_books(self):
-        """An Open Library failure still lets Google Books answer."""
-        rows, _ = self.resolve(lambda request: httpx.Response(503))
-        self.assertEqual(rows[0].catalogue_url, 'https://books.google.com/books?id=gb1')
-
-    def test_google_isbn_only_with_matching_spine_publisher(self):
-        """Fill edition and ISBN from Google Books only when the spine's publisher matches."""
-        rows, _ = self.resolve(lambda request: httpx.Response(200, json=SEARCH), publisher='BERKLEY')
-        self.assertEqual(rows[0].isbn, '9780593546994')
-        self.assertEqual(rows[0].edition, 'Did I Say You Could Go (Berkley)')
-
-
 LOC_RECORD = '''<?xml version="1.0"?>
 <zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:numberOfRecords>1</zs:numberOfRecords><zs:records><zs:record><zs:recordData>
 <mods xmlns="http://www.loc.gov/mods/v3">
@@ -264,12 +189,12 @@ class LibraryOfCongressFallbackTests(unittest.TestCase):
         self.assertEqual((candidate.url, candidate.publisher, candidate.isbn, candidate.edition),
                          ('https://lccn.loc.gov/2022036391', 'Berkley', '9780593546994', 'First edition.'))
 
-    def resolve(self, publisher=None, google_key=''):
+    def resolve(self, publisher=None, open_library=None):
         """Resolve one legible book when Open Library has no match.
 
         Args:
             publisher: Publisher read from the spine.
-            google_key: Value for GOOGLE_BOOKS_API_KEY.
+            open_library: Optional response factory for Open Library requests.
 
         Returns:
             Catalogue observations written and the hosts that were queried.
@@ -282,36 +207,45 @@ class LibraryOfCongressFallbackTests(unittest.TestCase):
             hosts.append(request.url.host)
             if request.url.host == 'lx2.loc.gov':
                 return httpx.Response(200, text=LOC_RECORD)
-            if request.url.host == 'www.googleapis.com':
-                return httpx.Response(200, json=GOOGLE)
-            return httpx.Response(200, json=SEARCH)
+            return open_library(request) if open_library else httpx.Response(200, json=SEARCH)
 
         def drex(request):
             criteria = json.loads(request.content)['questions']['match']['criteria']
             return httpx.Response(200, json=drex_choice('c0' if 'Gideon' in criteria.get('c0', '') else 'none', 0.9))
 
-        with patch.dict(os.environ, {'DREX_API_KEY': 'k', 'GOOGLE_BOOKS_API_KEY': google_key}):
+        with patch.dict(os.environ, {'DREX_API_KEY': 'k'}):
             resolve_book(self.store.database, 'sweep', book, http=client(http), drex=client(drex))
         with Repository(self.store.database) as repo:
             rows = [row for row in repo.list_for_sweep(BookObservation, 'sweep') if row.provenance == 'catalogue']
         return rows, hosts
 
     def test_library_of_congress_answers_when_open_library_has_no_match(self):
-        """Library of Congress matches before Google Books is ever asked."""
+        """Library of Congress matches when Drex rejects every Open Library work."""
         rows, hosts = self.resolve()
         self.assertEqual(rows[0].catalogue_url, 'https://lccn.loc.gov/2022036391')
-        self.assertNotIn('www.googleapis.com', hosts)
+        self.assertEqual(hosts[-1], 'lx2.loc.gov')
         self.assertIsNone(rows[0].isbn)
+
+    def test_open_library_outage_falls_back_to_library_of_congress(self):
+        """An Open Library failure still lets the Library of Congress answer."""
+        rows, _ = self.resolve(open_library=lambda request: httpx.Response(503))
+        self.assertEqual(rows[0].catalogue_url, 'https://lccn.loc.gov/2022036391')
+
+    def test_catalogue_stage_reports_which_provider_answered(self):
+        """The flow view's catalogue block names the provider of each search."""
+        from library_claim import telemetry
+        events = []
+        with telemetry.listening(events.append):
+            self.resolve()
+        providers = [e['model'] for e in events if e['stage'] == 'catalogue' and e['phase'] == 'done']
+        self.assertEqual(providers, ['Open Library', 'Library of Congress'])
 
     def test_catalogue_edition_and_isbn_need_matching_spine_publisher(self):
         """Edition and ISBN come from the record only when the spine's publisher matches."""
         rows, _ = self.resolve(publisher='Berkley')
         self.assertEqual((rows[0].edition, rows[0].isbn), ('First edition.', '9780593546994'))
 
-    def test_google_books_is_skipped_without_a_key(self):
-        """Without GOOGLE_BOOKS_API_KEY the throttled anonymous Google search is not attempted."""
+    def test_catalogue_order_is_open_library_then_library_of_congress(self):
+        """Only the two keyless catalogues are used, in this order."""
         from library_claim.identification.catalogue import catalogue_sources
-        with patch.dict(os.environ, {'GOOGLE_BOOKS_API_KEY': ''}):
-            self.assertEqual([name for name, _ in catalogue_sources()], ['openlibrary', 'loc'])
-        with patch.dict(os.environ, {'GOOGLE_BOOKS_API_KEY': 'key'}):
-            self.assertEqual([name for name, _ in catalogue_sources()], ['openlibrary', 'loc', 'googlebooks'])
+        self.assertEqual([name for name, _ in catalogue_sources()], ['Open Library', 'Library of Congress'])
