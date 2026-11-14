@@ -138,6 +138,7 @@ class CaptureConfig(Settings):
     summary_log_interval_s: PositiveFloat
     remote_interval_s: PositiveFloat
     frame_max_age_s: PositiveFloat
+    max_reads_per_session: PositiveInt
     browser: BrowserConfig
 
 

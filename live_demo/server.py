@@ -151,6 +151,8 @@ class IntakeSession:
     last_workflow_key: str | None = None
     last_workflow: dict[str, Any] | None = None
     evidence_photos: list[dict[str, Any]] = field(default_factory=list)
+    # Spine reads this session; only the newest MAX_PHOTOS photos are kept for the UI.
+    read_count: int = 0
     camera_notes: list[str] = field(default_factory=list)
     book_inventory: list[dict[str, Any]] = field(default_factory=list)
     library_sweep: bool = False
@@ -780,6 +782,7 @@ def health() -> dict[str, Any]:
 
 SESSION_TTL = 30 * 60
 MAX_SESSIONS = 32
+# Recent photos kept in memory and in the UI state; reads themselves are capped in config.
 MAX_PHOTOS = 20
 MAX_MESSAGE_BYTES = 800000
 
@@ -979,10 +982,10 @@ async def _pin_evidence_photo(
             "pinned": False,
             "message": "No fresh camera frame. Ask for a clear camera view.",
         }
-    if len(session.evidence_photos) >= MAX_PHOTOS:
+    if session.read_count >= CONFIG.capture.max_reads_per_session:
         return {
             "pinned": False,
-            "message": "Evidence limit reached. Download this packet before starting another intake.",
+            "message": "Spine-read limit for this session reached. Start a new session to continue.",
         }
     captured_at = datetime.now().astimezone().isoformat()
     claimant_said = str(args.get("claimant_description", ""))[:1000]
@@ -1007,8 +1010,8 @@ async def _pin_evidence_photo(
         not session.camera_enabled or candidate.revision != session.camera_mode_revision
     ):
         return {"pinned": False, "message": "Camera activation changed."}
-    if len(session.evidence_photos) >= MAX_PHOTOS:
-        return {"pinned": False, "message": "Evidence limit reached."}
+    if session.read_count >= CONFIG.capture.max_reads_per_session:
+        return {"pinned": False, "message": "Spine-read limit for this session reached."}
     book_result = None
     if candidate is not None:
         async with session.workflow_lock:
@@ -1055,10 +1058,12 @@ async def _pin_evidence_photo(
         ],
         "captured_at": captured_at,
     }
-    session.evidence_photos.append(photo)
-    session.camera_notes.append(
+    session.read_count += 1
+    # The UI state and reply prompt carry these; keep only the newest so they stay small.
+    session.evidence_photos = (session.evidence_photos + [photo])[-MAX_PHOTOS:]
+    session.camera_notes = (session.camera_notes + [
         f"Capture {photo['id']}: {photo['caption']}. Statement supplied to capture tool: {claimant_said or 'none'}. Verification: {'confirmed' if photo['confirmed'] else 'unconfirmed'}."
-    )
+    ])[-MAX_PHOTOS:]
     session.revision += 1
     return {
         "pinned": True,
@@ -1406,7 +1411,7 @@ async def live_voice(websocket: WebSocket) -> None:
             time.monotonic(),
             revision,
             busy=(camera_task is not None and not camera_task.done()) or session.sweep_phase == "Resuming",
-            at_limit=len(session.evidence_photos) >= MAX_PHOTOS,
+            at_limit=session.read_count >= CONFIG.capture.max_reads_per_session,
         )
         quality_logger.debug("camera_filter reason=%s", gate.reason)
         if candidate is not None:

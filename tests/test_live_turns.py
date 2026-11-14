@@ -369,3 +369,32 @@ class FlowViewTests(unittest.IsolatedAsyncioTestCase):
         response = TestClient(s.app, base_url='http://127.0.0.1:4177').get('/flow')
         self.assertEqual(response.status_code, 200)
         self.assertIn('live pipeline', response.text)
+
+
+class ReadLimitTests(unittest.IsolatedAsyncioTestCase):
+    """Spine reads continue past 20 per session while kept photos stay bounded."""
+
+    async def test_reads_continue_past_twenty_and_ui_keeps_recent_photos(self):
+        """25 reads all succeed; only the most recent 20 photos and notes are kept for the UI."""
+        import time as clock
+        session = s.IntakeSession('reads', owner='owner')
+        observation = s.FrameObservation(books=[], complete=True, observation='shelf', supports_claimant_description=False)
+        with patch.object(s, 'structured', AsyncMock(return_value=observation)):
+            for index in range(25):
+                session.last_frame, session.last_frame_at, session.last_frame_id = b'\xff\xd8\xff', clock.monotonic(), f'f{index}'
+                result = await s._pin_evidence_photo(session, {})
+                self.assertTrue(result['pinned'], result)
+        self.assertEqual(session.read_count, 25)
+        self.assertEqual(len(session.evidence_photos), 20)
+        self.assertEqual(session.evidence_photos[-1]['frame_id'], 'f24')
+        self.assertEqual(len(session.camera_notes), 20)
+
+    async def test_configured_read_limit_stops_reading(self):
+        """The safety limit from config stops further reads with a neutral message."""
+        import time as clock
+        session = s.IntakeSession('limit', owner='owner')
+        session.read_count = s.CONFIG.capture.max_reads_per_session
+        session.last_frame, session.last_frame_at, session.last_frame_id = b'\xff\xd8\xff', clock.monotonic(), 'f'
+        result = await s._pin_evidence_photo(session, {})
+        self.assertFalse(result['pinned'])
+        self.assertIn('limit', result['message'])

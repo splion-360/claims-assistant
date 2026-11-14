@@ -69,6 +69,8 @@ capture:
   summary_log_interval_s: 5.0  # Console only; processing cadence is unchanged.
   remote_interval_s: 8.0
   frame_max_age_s: 12.0
+  # Safety cap on spine reads per session (cost guard, not a functional limit).
+  max_reads_per_session: 300
   # Only this subsection is sent to the browser.
   browser:
     frame_interval_ms: 200

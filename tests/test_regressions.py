@@ -166,7 +166,7 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_stale_frames_and_photo_limits(self):
         session=s.IntakeSession('frame',last_frame=b'OLD',last_frame_at=time.monotonic()-30)
         self.assertFalse((await s._pin_evidence_photo(session,{}))['pinned'])
-        session.last_frame_at=time.monotonic();session.evidence_photos=[{}]*s.MAX_PHOTOS
+        session.last_frame_at=time.monotonic();session.read_count=s.CONFIG.capture.max_reads_per_session
         self.assertFalse((await s._pin_evidence_photo(session,{}))['pinned'])
 
 
