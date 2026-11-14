@@ -203,6 +203,7 @@ class DrexConfig(Settings):
 
 class MeasurementConfig(Settings):
     """Configure metric depth sampling and the fallback depth model."""
+    enabled: bool
     depth_inset: Annotated[float, Field(ge=0, lt=0.5)]
     depth_window_px: PositiveInt
     depth_tolerance: Unit

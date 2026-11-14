@@ -1313,7 +1313,7 @@ async def live_voice(websocket: WebSocket) -> None:
             jpeg: Its encoded bytes.
         """
         nonlocal measure_task, measure_next
-        if load_depth(CAPTURE_DATA_DIR, frame_id) is not None:
+        if not CONFIG.measurement.enabled or load_depth(CAPTURE_DATA_DIR, frame_id) is not None:
             return
         measure_next = (frame_id, jpeg)
         if measure_task is None or measure_task.done():

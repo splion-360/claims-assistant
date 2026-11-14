@@ -115,6 +115,8 @@ drex:
   same_prompt_cooldown_s: 20
   gate_failure_streak: 3
 measurement:
+  # Off: books are saved without dimensions and Depth Pro never loads.
+  enabled: false
   # Fraction of each spine axis trimmed at both ends so depth is sampled on the book, not behind it.
   depth_inset: 0.15
   depth_window_px: 5

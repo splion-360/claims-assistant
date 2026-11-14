@@ -282,5 +282,15 @@ class DepthSchedulingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((await self.run_capture(False)).called)
 
     async def test_frame_with_books_is_measured(self):
-        """Queue Depth Pro for a frame whose books were read."""
-        self.assertTrue((await self.run_capture(True)).called)
+        """Queue Depth Pro for a frame whose books were read when measurement is on."""
+        from library_claim.config import CONFIG
+        on = CONFIG.model_copy(update={'measurement': CONFIG.measurement.model_copy(update={'enabled': True})})
+        with patch.object(server, 'CONFIG', on):
+            self.assertTrue((await self.run_capture(True)).called)
+
+    async def test_disabled_measurement_never_runs_depth_pro(self):
+        """Skip Depth Pro entirely when measurement is switched off in config."""
+        from library_claim.config import CONFIG
+        off = CONFIG.model_copy(update={'measurement': CONFIG.measurement.model_copy(update={'enabled': False})})
+        with patch.object(server, 'CONFIG', off):
+            self.assertFalse((await self.run_capture(True)).called)
