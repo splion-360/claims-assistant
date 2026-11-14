@@ -89,6 +89,7 @@ from library_claim.identification.corrections import apply_correction
 from library_claim.decisions.corrections import classify_intent, extract_stated_title, resolve_target, target_frame
 from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
 from library_claim.storage.depth import load_depth, parse_depth_payload
+from library_claim.storage.prune import prune_finished, prune_sweep
 from library_claim.storage.live_capture import LiveCaptureStore
 from library_claim.storage.repository import Repository
 from library_claim.storage.evidence import EvidenceStore
@@ -838,6 +839,12 @@ async def discard_session(session: IntakeSession):
     session.evidence_photos.clear()
     session.book_inventory.clear()
     session.last_frame = None
+    database = CAPTURE_DATA_DIR / "claims.sqlite3"
+    # The sweep is over: keep only frames its book evidence depends on.
+    try:
+        await asyncio.to_thread(prune_sweep, database, session.session_id)
+    except Exception as error:
+        logger.warning("prune failed for an expired session: %s", type(error).__name__)
 
 
 async def cleanup_sessions():
@@ -1089,6 +1096,10 @@ async def start_cleanup():
             await cleanup_sessions()
 
     app.state.cleanup_task = asyncio.create_task(sweep())
+    # Sweeps left by earlier runs can no longer be live; prune them without delaying startup.
+    database = CAPTURE_DATA_DIR / "claims.sqlite3"
+    if database.exists():
+        app.state.prune_task = asyncio.create_task(asyncio.to_thread(prune_finished, database, set(sessions), SESSION_TTL))
 
 
 @app.on_event("shutdown")

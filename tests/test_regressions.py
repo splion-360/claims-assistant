@@ -200,6 +200,14 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
 
 class AccessTests(unittest.TestCase):
     def setUp(self):
+        # App startup prunes old sweeps; point it at a temporary folder so tests never touch real captures.
+        import tempfile
+        from pathlib import Path
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        guard = unittest.mock.patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name))
+        guard.start()
+        self.addCleanup(guard.stop)
         s.sessions.clear();self.client=TestClient(s.app,base_url='http://127.0.0.1:4188');self.headers={'Origin':'http://127.0.0.1:4188'}
     def tearDown(self):self.client.close();s.sessions.clear()
     def create(self):return self.client.post('/api/sessions',headers=self.headers).json()['session_id']
