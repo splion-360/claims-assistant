@@ -213,6 +213,46 @@ class SpeechConfig(Settings):
     close_timeout_s: PositiveFloat
 
 
+class DrexConfig(Settings):
+    """Configure the Drex decision endpoint and decision thresholds."""
+    model: Text
+    base_url: Text
+    client_name: Text
+    timeout_s: PositiveFloat
+    connect_timeout_s: PositiveFloat
+    book_visible_min: Unit
+    same_book_min: Unit
+    different_book_max: Unit
+    catalogue_min: Unit
+    target_min: Unit
+    quality_prompt_cooldown_s: PositiveFloat
+    same_prompt_cooldown_s: PositiveFloat
+    gate_failure_streak: PositiveInt
+
+    @model_validator(mode='after')
+    def ordered_same_book_bounds(self):
+        """Keep an unresolved band between the different and same thresholds.
+
+        Returns:
+            The validated settings.
+
+        Raises:
+            ValueError: The different-book bound is not below the same-book bound.
+        """
+        if self.different_book_max >= self.same_book_min:
+            raise ValueError('different_book_max must be below same_book_min')
+        return self
+
+
+class MeasurementConfig(Settings):
+    """Configure metric depth sampling and the fallback depth model."""
+    depth_inset: Annotated[float, Field(ge=0, lt=0.5)]
+    depth_window_px: PositiveInt
+    depth_pro_model: Text
+    depth_grid_width: PositiveInt
+    depth_grid_height: PositiveInt
+
+
 class ExperimentConfig(Settings):
     """Configure offline comparisons independently of live classifier behavior."""
     edge_crop_count: Annotated[int, Field(ge=2)]
@@ -230,6 +270,8 @@ class AppConfig(Settings):
     scheduler: SchedulerConfig
     inference: InferenceConfig
     speech: SpeechConfig
+    drex: DrexConfig
+    measurement: MeasurementConfig
 
 
 def load_config(path: Path = ROOT / 'config.yml') -> AppConfig:

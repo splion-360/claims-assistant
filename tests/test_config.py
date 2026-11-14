@@ -109,3 +109,9 @@ print(json.dumps(dict(label=decide(dict(books=.4),1).label,
             result = subprocess.run([sys.executable, '-c', code], cwd=directory,
                                     capture_output=True, text=True, check=True, timeout=20)
         self.assertEqual(result.stdout.strip(), CONFIG.relevance.model_id)
+
+    def test_drex_thresholds_loaded(self):
+        """Expose Drex decision thresholds from config.yml."""
+        self.assertEqual(CONFIG.drex.same_book_min, 0.8)
+        self.assertEqual(CONFIG.drex.different_book_max, 0.2)
+        self.assertEqual(CONFIG.measurement.depth_inset, 0.15)

@@ -159,6 +159,28 @@ speech:
   timeout_s: 30
   connect_timeout_s: 10
   close_timeout_s: 2
+drex:
+  model: drex-max-v1.1
+  base_url: https://console.nace.ai
+  client_name: library-claim/1
+  timeout_s: 30
+  connect_timeout_s: 10
+  # Probability thresholds; the band between the two same-book bounds stays unresolved.
+  book_visible_min: 0.5
+  same_book_min: 0.8
+  different_book_max: 0.2
+  catalogue_min: 0.7
+  target_min: 0.6
+  quality_prompt_cooldown_s: 8
+  same_prompt_cooldown_s: 20
+  gate_failure_streak: 3
+measurement:
+  # Fraction of each spine axis trimmed at both ends so depth is sampled on the book, not behind it.
+  depth_inset: 0.15
+  depth_window_px: 5
+  depth_pro_model: apple/DepthPro-hf
+  depth_grid_width: 96
+  depth_grid_height: 54
 
 # Offline comparisons only; these settings do not enable live crop inference.
 experiments:
