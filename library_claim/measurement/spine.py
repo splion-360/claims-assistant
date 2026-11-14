@@ -31,8 +31,8 @@ class SpineMeasurement:
     method: str
 
 
-def _depth_at(depth: DepthMap, u: float, v: float) -> float | None:
-    """Return the median known depth in a small window around an image point.
+def _to_grid(depth: DepthMap, u: float, v: float) -> tuple[int, int]:
+    """Map an image pixel to the depth-grid cell containing it.
 
     Args:
         depth: Depth map, possibly coarser than the image.
@@ -40,34 +40,68 @@ def _depth_at(depth: DepthMap, u: float, v: float) -> float | None:
         v: Vertical image coordinate in pixels.
 
     Returns:
-        Depth in metres, or None when the window holds no known depth.
+        Grid column and row.
     """
     rows, cols = depth.depth_m.shape
-    # Depth grids may be coarser than the JPEG; map image pixels onto grid cells.
-    gx = int(np.clip(u * cols / depth.image_width, 0, cols - 1))
-    gy = int(np.clip(v * rows / depth.image_height, 0, rows - 1))
-    half = CONFIG.measurement.depth_window_px // 2
-    window = depth.depth_m[max(gy - half, 0):gy + half + 1, max(gx - half, 0):gx + half + 1]
+    return (int(np.clip(u * cols / depth.image_width, 0, cols - 1)),
+            int(np.clip(v * rows / depth.image_height, 0, rows - 1)))
+
+
+def _median_depth(depth: DepthMap, x0: float, y0: float, x1: float, y1: float) -> float | None:
+    """Median known depth over the grid cells covering an image rectangle.
+
+    Args:
+        depth: Depth map.
+        x0: Left edge in image pixels.
+        y0: Top edge in image pixels.
+        x1: Right edge in image pixels.
+        y1: Bottom edge in image pixels.
+
+    Returns:
+        Depth in metres, or None when no covered cell has a known depth.
+    """
+    c0, r0 = _to_grid(depth, x0, y0)
+    c1, r1 = _to_grid(depth, x1, y1)
+    window = depth.depth_m[r0:r1 + 1, c0:c1 + 1]
     known = window[np.isfinite(window) & (window > 0)]
     return float(np.median(known)) if known.size else None
 
 
-def _axis_length_m(depth: DepthMap, start: tuple[float, float], end: tuple[float, float]) -> float | None:
+def _endpoint_depth(depth: DepthMap, u: float, v: float, reference: float) -> float:
+    """Depth at an axis endpoint, replaced by the book's reference depth when it looks like background.
+
+    Args:
+        depth: Depth map.
+        u: Horizontal image coordinate in pixels.
+        v: Vertical image coordinate in pixels.
+        reference: Median depth of the box interior.
+
+    Returns:
+        Depth in metres.
+    """
+    half = CONFIG.measurement.depth_window_px / 2
+    z = _median_depth(depth, u - half, v - half, u + half, v + half)
+    # A jump away from the book's own depth means the sample hit the wall or shelf behind it.
+    if z is None or abs(z - reference) > CONFIG.measurement.depth_tolerance * reference:
+        return reference
+    return z
+
+
+def _axis_length_m(depth: DepthMap, start: tuple[float, float], end: tuple[float, float], reference: float) -> float:
     """Back-project two image points and return their 3-D distance.
 
     Args:
         depth: Depth map with intrinsics.
         start: First point (u, v) in image pixels.
         end: Second point (u, v) in image pixels.
+        reference: Median depth of the box interior.
 
     Returns:
-        Distance in metres, or None when either depth is unknown.
+        Distance in metres.
     """
     points = []
     for u, v in (start, end):
-        z = _depth_at(depth, u, v)
-        if z is None:
-            return None
+        z = _endpoint_depth(depth, u, v, reference)
         points.append(np.array([(u - depth.cx) * z / depth.fx, (v - depth.cy) * z / depth.fy, z]))
     return float(np.linalg.norm(points[0] - points[1]))
 
@@ -97,10 +131,17 @@ def measure_spine(bbox: Box, view: str | None, issues: list[str], depth: DepthMa
     vertical = ((cu, cv - (y1 - y0) / 2 * keep), (cu, cv + (y1 - y0) / 2 * keep))
     horizontal = ((cu - (x1 - x0) / 2 * keep, cv), (cu + (x1 - x0) / 2 * keep, cv))
     long_axis, short_axis = (vertical, horizontal) if y1 - y0 >= x1 - x0 else (horizontal, vertical)
-    height, thickness = _axis_length_m(depth, *long_axis), _axis_length_m(depth, *short_axis)
-    if height is None or thickness is None or height <= 0 or thickness <= 0:
+    # The inner half of the box is the most reliable sample of the book's own depth.
+    reference = _median_depth(depth, cu - (x1 - x0) / 4, cv - (y1 - y0) / 4, cu + (x1 - x0) / 4, cv + (y1 - y0) / 4)
+    if reference is None:
         return None
-    return SpineMeasurement(height_cm=height / keep * 100, thickness_cm=thickness / keep * 100, method=depth.method)
+    height = _axis_length_m(depth, *long_axis, reference) / keep * 100
+    thickness = _axis_length_m(depth, *short_axis, reference) / keep * 100
+    low_h, high_h = CONFIG.measurement.height_range_cm
+    low_t, high_t = CONFIG.measurement.thickness_range_cm
+    if not (low_h <= height <= high_h and low_t <= thickness <= high_t):
+        return None
+    return SpineMeasurement(height_cm=height, thickness_cm=thickness, method=depth.method)
 
 
 def book_dimensions(observations: list[BookObservation]) -> tuple[float, float, str] | None:

@@ -74,3 +74,35 @@ class SpineMeasurementTests(unittest.TestCase):
         self.assertEqual(book_dimensions(rows), (21.0, 3.0, 'depth_pro'))
         self.assertIsNone(book_dimensions(rows[-1:]))
         self.assertAlmostEqual(shelf_run_m([3.0, 2.5]), 0.055)
+
+    def test_one_sided_background_on_thin_spine_is_not_inflated(self):
+        """A loose box edge on a thin spine must not measure the wall behind it."""
+        depth = np.full((SIZE, SIZE), 2.0)
+        # 30 px spine at 0.6 m; the box is 6 px loose on its right side.
+        depth[400:600, 485:515] = 0.6
+        box = Box(x_min=0.485, y_min=0.40, x_max=0.521, y_max=0.60)
+        result = measure_spine(box, 'spine', [], depth_map(depth))
+        self.assertLess(result.thickness_cm, 3.0)
+        self.assertAlmostEqual(result.height_cm, 12.0, delta=1.0)
+
+    def test_coarse_grid_isolated_spine(self):
+        """A 96×54 grid on a 1280×720 frame samples the book, not the surrounding wall."""
+        rows, cols = 54, 96
+        grid = np.full((rows, cols), 3.0, np.float32)
+        # Cells whose centres fall on a spine at x 625–655 px, y 260–460 px.
+        for row in range(rows):
+            for col in range(cols):
+                x, y = (col + 0.5) * 1280 / cols, (row + 0.5) * 720 / rows
+                if 625 <= x <= 655 and 260 <= y <= 460:
+                    grid[row, col] = 1.0
+        depth = DepthMap(depth_m=grid, fx=1000, fy=1000, cx=640, cy=360, image_width=1280, image_height=720,
+                         method='webxr_depth')
+        box = Box(x_min=625 / 1280, y_min=260 / 720, x_max=655 / 1280, y_max=460 / 720)
+        result = measure_spine(box, 'spine', [], depth)
+        self.assertAlmostEqual(result.height_cm, 20.0, delta=1.5)
+        self.assertAlmostEqual(result.thickness_cm, 3.0, delta=0.5)
+
+    def test_implausible_size_is_refused(self):
+        """Refuse sizes no book has rather than reporting them."""
+        far = depth_map(np.full((SIZE, SIZE), 10.0))
+        self.assertIsNone(measure_spine(BOX, 'spine', [], far))

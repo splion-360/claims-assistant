@@ -205,6 +205,9 @@ class MeasurementConfig(Settings):
     """Configure metric depth sampling and the fallback depth model."""
     depth_inset: Annotated[float, Field(ge=0, lt=0.5)]
     depth_window_px: PositiveInt
+    depth_tolerance: Unit
+    height_range_cm: tuple[PositiveFloat, PositiveFloat]
+    thickness_range_cm: tuple[PositiveFloat, PositiveFloat]
     depth_pro_model: Text
 
 

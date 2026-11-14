@@ -343,24 +343,24 @@ class BookMeasurementTests(unittest.TestCase):
         """Build a constant 1 m depth map for the 480×360 test frame.
 
         Returns:
-            A depth map with a 500-pixel focal length.
+            A depth map with a 1000-pixel focal length.
         """
         from library_claim.measurement.spine import DepthMap
-        return DepthMap(depth_m=np.ones((360, 480), np.float32), fx=500, fy=500, cx=240, cy=180,
+        return DepthMap(depth_m=np.ones((360, 480), np.float32), fx=1000, fy=1000, cx=240, cy=180,
                         image_width=480, image_height=360, method='depth_pro')
 
     def test_save_analysis_stores_measurements(self):
-        """A 216×96 px spine at 1 m with f=500 px measures 43.2×19.2 cm."""
+        """A 216×96 px spine at 1 m with f=1000 px measures 21.6×9.6 cm."""
         result = save_analysis(self.store.database, 'sweep', 'reference',
                                BookFrameAnalysis(books=[detection()], complete=True), self.jpeg, 'test-model',
                                depth=self.depth())
         with Repository(self.store.database) as repo:
             row = repo.list_for_sweep(BookObservation, 'sweep')[0]
-        self.assertAlmostEqual(row.spine_height_cm, 43.2, delta=0.5)
-        self.assertAlmostEqual(row.spine_thickness_cm, 19.2, delta=0.3)
+        self.assertAlmostEqual(row.spine_height_cm, 21.6, delta=0.3)
+        self.assertAlmostEqual(row.spine_thickness_cm, 9.6, delta=0.2)
         self.assertEqual(row.scale_method, 'depth_pro')
         book = result['inventory'][0]
-        self.assertAlmostEqual(book['spine_height_cm'], 43.2, delta=0.5)
+        self.assertAlmostEqual(book['spine_height_cm'], 21.6, delta=0.3)
         self.assertEqual(book['scale_method'], 'depth_pro')
         self.assertNotIn('No metric depth for this frame', book['review_reasons'])
 
@@ -380,7 +380,7 @@ class BookMeasurementTests(unittest.TestCase):
             book = inventory(repo, 'sweep')[0]
             jobs = [job for job in repo.list_for_sweep(ProcessingJob, 'sweep') if job.task == 'measure']
         self.assertEqual(len(jobs), 1)
-        self.assertAlmostEqual(book['spine_height_cm'], 43.2, delta=0.5)
+        self.assertAlmostEqual(book['spine_height_cm'], 21.6, delta=0.3)
         self.assertNotIn('No metric depth for this frame', book['review_reasons'])
 
     def test_inventory_totals_exclude_excluded_books(self):

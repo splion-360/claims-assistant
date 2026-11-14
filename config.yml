@@ -118,5 +118,11 @@ measurement:
   # Fraction of each spine axis trimmed at both ends so depth is sampled on the book, not behind it.
   depth_inset: 0.15
   depth_window_px: 5
+  # An endpoint whose depth differs from the box's inner median by more than this fraction
+  # is treated as background and replaced by the inner median.
+  depth_tolerance: 0.15
+  # Sizes outside these ranges are refused as implausible for a book.
+  height_range_cm: [5, 60]
+  thickness_range_cm: [0.3, 15]
   depth_pro_model: apple/DepthPro-hf
 
