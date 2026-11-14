@@ -13,18 +13,19 @@ from library_claim.domain.models import (Frame, FrameAssociation, Item, ItemObse
 from library_claim.capture.tracking.geometry import transform
 from library_claim.identification.storage import overlap, polygon, reference_geometry
 from library_claim.storage.repository import Repository
+from library_claim.decisions.drex import DrexError
+from library_claim.decisions.same_book import crop_jpeg
+from library_claim.decisions.same_object import (SameObjectCandidate, choose_same_object,
+                                                 same_object_probabilities)
+from library_claim.storage.evidence import EvidenceStore
 from .models import APPRAISAL_CATEGORIES, ItemFrameAnalysis
 
 logger = logging.getLogger(__name__)
 
 
-def _match(detection, frame: Frame, previous: list[ItemObservation], frames: dict,
-           associations: dict, taken: set[str]) -> str | None:
-    """Find the saved object a detection shows, using verified geometry only.
-
-    Two views of one object must agree on category and overlap in a shared
-    coordinate basis. Appearance alone never merges two records, and one saved
-    object cannot absorb two detections from the same frame.
+def _overlapping(detection, frame: Frame, previous: list[ItemObservation], frames: dict,
+                 associations: dict, taken: set[str]) -> str | None:
+    """Find the saved object a detection overlaps, in a verified shared basis.
 
     Args:
         detection: One detection from the current frame.
@@ -35,7 +36,7 @@ def _match(detection, frame: Frame, previous: list[ItemObservation], frames: dic
         taken: Item IDs already claimed by earlier detections in this frame.
 
     Returns:
-        The matching item ID, or None when the evidence does not establish one.
+        The matching item ID, or None when geometry does not establish one.
     """
     best, best_score = None, CONFIG.items.association_min_iou
     for observation in previous:
@@ -61,8 +62,64 @@ def _match(detection, frame: Frame, previous: list[ItemObservation], frames: dic
     return best
 
 
+def _match(detection, frame: Frame, previous: list[ItemObservation], frames: dict,
+           associations: dict, taken: set[str], image, evidence, decide_same) -> tuple[str | None, str]:
+    """Find the saved object a detection shows.
+
+    Verified geometry answers first. Where no shared basis exists, which is the
+    common case once the camera has moved, the crops of the detection and of
+    candidate objects of the same category go to Drex. One saved object still
+    cannot absorb two detections from the same frame, and competing confident
+    answers leave the sighting unmatched rather than guessing between them.
+
+    Args:
+        detection: One detection from the current frame.
+        frame: The current saved frame.
+        previous: Observations already saved for this sweep.
+        frames: Saved frames indexed by ID.
+        associations: Verified frame mappings indexed by source frame.
+        taken: Item IDs already claimed by earlier detections in this frame.
+        image: Decoded current frame.
+        evidence: Store holding the saved frames behind earlier sightings.
+        decide_same: `(crop, category, description, candidates) -> probabilities`.
+
+    Returns:
+        The matching item ID or None, with the method that decided it.
+    """
+    geometric = _overlapping(detection, frame, previous, frames, associations, taken)
+    if geometric is not None:
+        return geometric, 'geometry'
+    # One candidate per saved object of this category, newest sighting first.
+    seen, candidates = set(), []
+    for row in reversed(previous):
+        if row.category != detection.category or row.item_id in taken or row.item_id in seen:
+            continue
+        seen.add(row.item_id)
+        try:
+            other = cv2.imdecode(np.frombuffer(evidence.read(frames[row.frame_id].evidence_key), np.uint8),
+                                 cv2.IMREAD_COLOR)
+            if other is None:
+                continue
+            candidates.append(SameObjectCandidate(item_id=row.item_id, category=row.category,
+                                                  description=row.description,
+                                                  crop_jpeg=crop_jpeg(other, row.bbox)))
+        except (KeyError, OSError, ValueError, cv2.error):
+            continue
+        if len(candidates) == CONFIG.items.max_appearance_candidates:
+            break
+    if not candidates:
+        return None, 'new_provisional'
+    try:
+        probabilities = decide_same(crop_jpeg(image, detection.bbox), detection.category,
+                                    detection.description, candidates)
+    except (DrexError, ValueError, cv2.error) as error:
+        logger.warning('same-object decision failed: %s', type(error).__name__)
+        return None, 'new_provisional'
+    chosen = choose_same_object(probabilities)
+    return (candidates[chosen].item_id, 'appearance') if chosen is not None else (None, 'new_provisional')
+
 def save_items(database: Path, sweep_id: str, frame_id: str, analysis: ItemFrameAnalysis,
-               jpeg: bytes, model: str) -> dict:
+               jpeg: bytes, model: str, decide_same=same_object_probabilities) -> dict:
     """Append one frame's non-book detections and return the sweep's item inventory.
 
     Args:
@@ -72,6 +129,7 @@ def save_items(database: Path, sweep_id: str, frame_id: str, analysis: ItemFrame
         analysis: The model's detections for that frame.
         jpeg: The frame's encoded bytes, used for region quality only.
         model: Vision model that produced the detections.
+        decide_same: Same-object decision, injected by tests.
 
     Returns:
         The detected count, completeness flag and the current item inventory.
@@ -93,11 +151,12 @@ def save_items(database: Path, sweep_id: str, frame_id: str, analysis: ItemFrame
         frames = {row.id: row for row in repo.list_for_sweep(Frame, sweep_id)}
         associations = {row.frame_id: row for row in repo.list_for_sweep(FrameAssociation, sweep_id)}
         previous = repo.list_for_sweep(ItemObservation, sweep_id)
+        evidence = EvidenceStore(database.parent / 'frames')
         records, taken = [], set()
         assessor = QualityAssessor() if analysis.items else None
         for detection in analysis.items:
-            item_id = _match(detection, frame, previous, frames, associations, taken)
-            method = 'geometry' if item_id else 'new_provisional'
+            item_id, method = _match(detection, frame, previous, frames, associations, taken,
+                                     image, evidence, decide_same)
             reasons = list(detection.issues)
             if item_id is None:
                 # Art and mirrors are never valued automatically until the owner says otherwise.
@@ -107,7 +166,7 @@ def save_items(database: Path, sweep_id: str, frame_id: str, analysis: ItemFrame
                 item_id = item.id
                 records.append(item)
                 if previous:
-                    reasons.append('Object association unverified; possible duplicate')
+                    reasons.append('Not matched to an object already recorded; may be a duplicate')
             taken.add(item_id)
             signals = Quality()
             try:

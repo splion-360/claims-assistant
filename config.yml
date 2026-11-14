@@ -172,4 +172,5 @@ items:
   max_items_per_frame: 24
   detection_interval_s: 12.0
   association_min_iou: 0.45
+  max_appearance_candidates: 3
   print_statements: [print, poster, reproduction, reprint, not an original, it is a copy]

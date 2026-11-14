@@ -139,11 +139,22 @@ Admitted frames are inspected for the room's non-book contents on a cadence of
 second vision call per frame would double the sweep's cost. `items.enabled`
 turns the pass off entirely, leaving the packet's item list empty.
 
-Two sightings merge into one object only when they agree on category and their
-boxes overlap by `items.association_min_iou` in a verified shared basis, the
-same geometry rule the books use. Appearance alone never merges two records, and
-one object cannot absorb two detections from the same frame. Sightings that
-cannot be related leave separate records carrying a possible-duplicate reason.
+Two sightings merge into one object when they agree on category and their boxes
+overlap by `items.association_min_iou` in a verified shared basis, the same
+geometry rule the books use. Once the camera has moved, no shared basis usually
+exists, and geometry alone then records one object per sighting: a laptop seen
+from four angles became four laptops. So where geometry cannot decide, the crop
+of the new sighting and the crops of up to
+`items.max_appearance_candidates` saved objects of the same category go to Drex,
+which answers whether they are the same physical object rather than the same
+kind of thing.
+
+Exactly one candidate must reach `drex.same_book_min`. Competing confident
+answers leave the sighting unmatched, one object still cannot absorb two
+detections from the same frame, and a failed decision records a separate object
+rather than losing the sighting. Objects that stay unmatched carry a
+may-be-a-duplicate reason into the review queue, where a reviewer can confirm
+them, send them for appraisal, or mark them as not the policyholder's.
 
 Framed art and mirrors are never valued automatically. They are recorded as
 needing appraisal unless the policyholder says the piece is a print, which is

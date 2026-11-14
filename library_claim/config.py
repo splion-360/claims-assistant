@@ -271,6 +271,8 @@ class ItemsConfig(Settings):
     detection_interval_s: PositiveFloat
     # Two detections of one object in a shared coordinate basis must overlap by this much.
     association_min_iou: Unit
+    # Saved objects of the same category compared by appearance when geometry cannot decide.
+    max_appearance_candidates: PositiveInt
     # Wording that lets a policyholder release a framed piece from appraisal.
     print_statements: list[Text]
 

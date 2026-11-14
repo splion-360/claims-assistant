@@ -42,8 +42,19 @@ function statusTag(entry) {
   return '<span class="tag ok">recorded</span>';
 }
 
+// Detection issues are recorded as codes; a reviewer reads words.
+const ISSUE_WORDS = {
+  blur: "blurred", glare: "glare", dark: "too dark", occlusion: "partly hidden",
+  cut_off: "cut off", unreadable_text: "text unreadable", uncertain_book: "may not be a book",
+  uncertain_item: "may not be this kind of object",
+};
+
+function readable(reason) {
+  return ISSUE_WORDS[reason] || reason.replace(/_/g, " ");
+}
+
 function reasons(entry) {
-  const list = entry.review_reasons || [];
+  const list = (entry.review_reasons || []).map(readable);
   return list.length ? `<span class="reasons">${escapeHtml(list.join(" · "))}</span>` : cell("");
 }
 
