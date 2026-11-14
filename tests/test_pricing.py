@@ -1,10 +1,15 @@
 """Verify books are priced only from retrievable sources, in the policyholder's market."""
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 
 from library_claim.config import CONFIG
+from library_claim.domain.models import Book, Frame, Sweep
+from library_claim.pricing.storage import stored_valuations, value_book, value_sweep
+from library_claim.storage.repository import Repository
 from library_claim.pricing.markets import known_countries, market
 from library_claim.pricing.models import Price
 from library_claim.pricing.providers import PriceUnavailable, convert, exchange_rate, google_books_price
@@ -274,3 +279,151 @@ class ServiceTests(unittest.TestCase):
             valuation = price_book(book(), 'ZZ', client=http)
         self.assertIsNone(valuation.replacement)
         self.assertEqual(valuation.currency, '')
+
+
+class StoredValuationTests(unittest.TestCase):
+    """Check a book is priced once and the figure is reused until its reading changes."""
+
+    def setUp(self):
+        """Save a sweep holding one frame a valuation can be attributed to."""
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.database = Path(self.directory.name) / 'claims.sqlite3'
+        start = datetime(2026, 11, 14, 9, 0, tzinfo=timezone.utc)
+        with Repository(self.database) as repo:
+            repo.add_many([
+                Sweep(id='sweep1', captured_at=start, device='browser camera'),
+                Frame(id='f1', sweep_id='sweep1', captured_at=start, evidence_key=f'{"a" * 64}.jpg',
+                      width_px=640, height_px=480),
+                Book(id='b1', sweep_id='sweep1'),
+            ])
+
+    def counting_client(self, amount=18.99):
+        """Build a client that counts the price lookups it answers.
+
+        Args:
+            amount: Retail amount returned.
+
+        Returns:
+            The client and a mutable list of the queries it saw.
+        """
+        seen = []
+
+        def handle(request):
+            """Answer a price lookup and record its query.
+
+            Args:
+                request: The outgoing request.
+
+            Returns:
+                A volumes response.
+            """
+            seen.append(request.url.params.get('q'))
+            return httpx.Response(200, json={'items': [volume(amount, 'USD')]})
+
+        return client_for(handle), seen
+
+    def entry(self, **fields):
+        """Build an inventory entry naming the saved frame.
+
+        Args:
+            **fields: Overrides such as title or catalogue.
+
+        Returns:
+            An inventory entry.
+        """
+        return {'id': 'b1', 'title': 'The Good People', 'author': 'Hannah Kent',
+                'catalogue': None, 'observations': [], 'frame_ids': ['f1'], **fields}
+
+    def test_second_view_reuses_the_saved_figure(self):
+        """Price a book once and answer later reads from the saved job."""
+        http, seen = self.counting_client()
+        with http:
+            first = value_book(self.database, 'sweep1', self.entry(), client=http)
+            second = value_book(self.database, 'sweep1', self.entry(), client=http)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(first.replacement.amount, 18.99)
+        # The retrieval time is the sweep's lookup, not the moment of the second read.
+        self.assertEqual(second.replacement.retrieved_at, first.replacement.retrieved_at)
+
+    def test_a_changed_reading_is_priced_again(self):
+        """Price again when the title, author, ISBN or market changed."""
+        http, seen = self.counting_client()
+        with http:
+            value_book(self.database, 'sweep1', self.entry(), client=http)
+            value_book(self.database, 'sweep1', self.entry(title='Burial Rites'), client=http)
+        self.assertEqual(len(seen), 2)
+
+    def test_a_different_market_is_priced_again(self):
+        """Price again for another country rather than reusing the first market's figure."""
+        http, seen = self.counting_client()
+        with http:
+            value_book(self.database, 'sweep1', self.entry(), 'US', client=http)
+            value_book(self.database, 'sweep1', self.entry(), 'GB', client=http)
+        self.assertEqual(len(seen), 2)
+
+    def test_saved_valuation_is_readable_from_the_sweep(self):
+        """Expose the saved figure for the inventory to report."""
+        http, _ = self.counting_client()
+        with http:
+            value_book(self.database, 'sweep1', self.entry(), client=http)
+        with Repository(self.database) as repo:
+            saved = stored_valuations(repo, 'sweep1')
+        self.assertEqual(saved['b1']['replacement']['amount'], 18.99)
+
+    def test_book_without_a_frame_is_not_valued(self):
+        """Skip a book with no frame to attribute the figure to."""
+        http, seen = self.counting_client()
+        with http:
+            self.assertIsNone(value_book(self.database, 'sweep1', self.entry(frame_ids=[]), client=http))
+        self.assertEqual(seen, [])
+
+    def test_a_book_no_source_can_price_does_not_stop_the_others(self):
+        """Value every book, leaving an unreachable one empty with its reason."""
+        def handle(request):
+            """Refuse every lookup for one title and answer the other.
+
+            Args:
+                request: The outgoing request.
+
+            Returns:
+                A transport error or a volumes response.
+            """
+            if 'Good People' in request.url.params.get('q'):
+                raise httpx.ConnectError('down')
+            return httpx.Response(200, json={'items': [volume(18.99, 'USD')]})
+
+        with Repository(self.database) as repo:
+            repo.add(Book(id='b2', sweep_id='sweep1'))
+        with client_for(handle) as http:
+            valued = value_sweep(self.database, 'sweep1',
+                                 [self.entry(), self.entry(id='b2', title='Burial Rites')], client=http)
+        self.assertIsNone(valued['b1'].replacement)
+        self.assertTrue(any('unreachable' in reason for reason in valued['b1'].reasons))
+        self.assertEqual(valued['b2'].replacement.amount, 18.99)
+
+    def test_a_fallback_market_answers_when_the_local_one_is_unreachable(self):
+        """Use a fallback market when the local lookup cannot be made at all."""
+        calls = []
+
+        def handle(request):
+            """Fail the first market, answer the next, and publish an exchange rate.
+
+            Args:
+                request: The outgoing request.
+
+            Returns:
+                A transport error, a volumes response or a rate response.
+            """
+            if '/latest' in request.url.path:
+                return httpx.Response(200, json={'base': 'GBP', 'date': '2026-11-13', 'rates': {'USD': 1.3227}})
+            calls.append(request.url.params.get('country'))
+            if len(calls) == 1:
+                raise httpx.ConnectError('down')
+            return httpx.Response(200, json={'items': [volume(9.99, 'GBP')]})
+
+        with client_for(handle) as http:
+            valuation = value_book(self.database, 'sweep1', self.entry(), 'US', client=http)
+        self.assertEqual(calls[:2], ['US', 'GB'])
+        self.assertTrue(valuation.replacement.converted)
+        self.assertEqual(valuation.replacement.currency, 'USD')

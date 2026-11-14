@@ -111,6 +111,28 @@ test('possible duplicates form a visual group without changing records',()=>{
  e.run('state.book_inventory[1].frame_ids=["f1"]');
  assert.equal(e.run('bookGroups(state.book_inventory).length'),2);
 });
+test('book cards show the sourced price, a conversion and an unpriced line',()=>{
+ const e=env();
+ const priced={id:"a",title:"THE GOOD PEOPLE",needs_review:false,frame_ids:["f1"],observation_count:1,
+   valuation:{needs_appraisal:false,currency:"USD",replacement:{amount:17.99,currency:"USD",source:"Google Books",url:"https://books.example/buy",converted:false}}};
+ const converted={id:"b",title:"BURIAL RITES",needs_review:false,frame_ids:["f2"],observation_count:1,
+   valuation:{needs_appraisal:false,currency:"USD",replacement:{amount:13.6,currency:"USD",source:"Google Books",url:"",converted:true,converted_from:"GBP"}}};
+ const unpriced={id:"c",title:"NO SOURCE",needs_review:false,frame_ids:["f3"],observation_count:1,
+   valuation:{needs_appraisal:false,currency:"USD",replacement:null}};
+ const appraisal={id:"d",title:"SIGNED COPY",needs_review:false,frame_ids:["f4"],observation_count:1,
+   valuation:{needs_appraisal:true,currency:"USD",replacement:null}};
+ e.run('state={...emptyState,library_sweep:true};state.book_inventory='+JSON.stringify([priced,converted,unpriced,appraisal])+';bookTab="identified";renderBookInventory()');
+ const html=e.run('document.querySelector("#bookInventory").innerHTML');
+ assert.ok(html.includes('USD 17.99 · Google Books'));
+ assert.ok(html.includes('converted from GBP'));
+ assert.ok(html.includes('No price source'));
+ assert.ok(html.includes('Needs appraisal'));
+});
+test('a book with no valuation yet shows no price line',()=>{
+ const e=env();
+ e.run('state={...emptyState,library_sweep:true};state.book_inventory=[{id:"a",title:"PENDING",needs_review:false,frame_ids:["f1"],observation_count:1}];bookTab="identified";renderBookInventory()');
+ assert.ok(!e.run('document.querySelector("#bookInventory").innerHTML').includes('No price source'));
+});
 test('comparison shows both readings and collapses capture history',()=>{
  const e=env();e.run('state.book_inventory=[{id:"a",title:"THE GOOD PEOPLE",candidates:["b"],frame_ids:["f1"]},{id:"b",title:"OD PEOPLE",frame_ids:["f2"]}];selectedBookId="a";renderBookDetail()');
  const html=e.run('document.querySelector("#bookDetail").innerHTML');

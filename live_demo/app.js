@@ -296,6 +296,7 @@ function renderBookInventory() {
       <strong>${escapeHtml(book.title || "Unidentified book")}</strong>
       <span>${escapeHtml(book.author || "Author unreadable")}</span>
       <small>${escapeHtml(bookSize(book))}</small>
+      ${bookPrice(book) ? `<small class="book-price">${escapeHtml(bookPrice(book))}</small>` : ""}
       ${book.excluded ? "<small>Excluded by you · not counted</small>" : ""}
       ${book.needs_appraisal ? "<small>Needs human appraisal</small>" : ""}
       ${book.catalogue ? `<small>Google Books: ${escapeHtml(book.catalogue.title)}${book.catalogue.edition ? ` · ${escapeHtml(book.catalogue.edition)}` : ""}</small>` : ""}
@@ -306,6 +307,16 @@ function renderBookInventory() {
   document.querySelector("#captureInstruction").textContent = state.capture_instruction || "Sweep slowly across the shelves.";
 }
 
+function bookPrice(book) {
+  const valuation = book.valuation;
+  if (!valuation) return "";
+  if (valuation.needs_appraisal) return "Needs appraisal · not priced automatically";
+  const price = valuation.replacement;
+  if (!price) return "No price source";
+  const converted = price.converted ? ` · converted from ${price.converted_from}` : "";
+  return `${price.currency} ${Number(price.amount).toFixed(2)} · ${price.source}${converted}`;
+}
+
 function renderBookDetail() {
   const books = state.book_inventory || [];
   const book = books.find(item => item.id === selectedBookId);
@@ -314,7 +325,7 @@ function renderBookDetail() {
   const others = books.filter(item => item.id !== book.id && !(item.frame_ids || []).some(id => (book.frame_ids || []).includes(id)));
   const other = others.find(item => item.id === compareBookId) || others.find(item => (book.candidates || []).includes(item.id));
   compareBookId = other?.id || null;
-  const panel = item => `<article class="comparison-card">${cropImage(item, "book-best")}<h3>${escapeHtml(item.title || "Title unreadable")}</h3><p>${escapeHtml(item.author || "Author unreadable")}</p><p>${escapeHtml(bookSize(item))}</p>${item.catalogue?.url ? `<p><a href="${escapeHtml(item.catalogue.url)}" target="_blank" rel="noopener">Google Books: ${escapeHtml(item.catalogue.title)}</a>${item.catalogue.isbn ? ` · ISBN ${escapeHtml(item.catalogue.isbn)}` : ""}</p>` : ""}<small>${Number(item.observation_count)} observation(s)</small></article>`;
+  const panel = item => `<article class="comparison-card">${cropImage(item, "book-best")}<h3>${escapeHtml(item.title || "Title unreadable")}</h3><p>${escapeHtml(item.author || "Author unreadable")}</p><p>${escapeHtml(bookSize(item))}</p>${bookPrice(item) ? `<p class="book-price">${item.valuation?.replacement?.url ? `<a href="${escapeHtml(item.valuation.replacement.url)}" target="_blank" rel="noopener">${escapeHtml(bookPrice(item))}</a>` : escapeHtml(bookPrice(item))}</p>` : ""}${item.catalogue?.url ? `<p><a href="${escapeHtml(item.catalogue.url)}" target="_blank" rel="noopener">Google Books: ${escapeHtml(item.catalogue.title)}</a>${item.catalogue.isbn ? ` · ISBN ${escapeHtml(item.catalogue.isbn)}` : ""}</p>` : ""}<small>${Number(item.observation_count)} observation(s)</small></article>`;
   detail.innerHTML = `<h3>${other ? "Compare these sightings" : "Book details"}</h3>
     ${other ? "<p>Do these show the same copy? Compare the design and the text on each spine.</p>" : ""}
     <div class="book-comparison">${panel(book)}${other ? panel(other) : ""}</div>

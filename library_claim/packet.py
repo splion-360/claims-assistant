@@ -10,7 +10,7 @@ from library_claim.config import CONFIG
 from library_claim.domain.models import Frame, Sweep
 from library_claim.identification.storage import inventory, inventory_totals
 from library_claim.pricing.models import Valuation
-from library_claim.pricing.service import price_book
+from library_claim.pricing.storage import value_sweep
 from library_claim.storage.repository import Repository
 
 # Empty money blocks: the keys stay so the contract holds, the amounts stay unknown.
@@ -175,7 +175,11 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
     evidence = {frame.id: f'frames/{frame.evidence_key}' for frame in frames}
     kept = [book for book in books if not book.get('excluded')]
     chosen = country or sweep.country or CONFIG.pricing.default_country
-    valuations = {book['id']: price_book(book, chosen, client=client) for book in kept} if price else {}
+    # Books already priced keep their saved figure, so a second download fetches nothing.
+    valuations = value_sweep(database, sweep_id, kept, chosen, client=client) if price else {}
+    if price:
+        kept = [{**book, 'valuation': valuations[book['id']].model_dump(mode='json')}
+                if book['id'] in valuations else book for book in kept]
     lines = [_book_line(book, evidence, valuations.get(book['id'])) for book in kept]
     items: list[dict] = []
     currency = sweep.currency or next((value.currency for value in valuations.values() if value.currency), '')

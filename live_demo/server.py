@@ -89,6 +89,7 @@ from library_claim.identification.corrections import apply_correction
 from library_claim.decisions.corrections import classify_intent, extract_stated_title, resolve_target, target_frame
 from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
 from library_claim.packet import packet_archive
+from library_claim.pricing.storage import value_book
 from library_claim.storage.depth import load_depth, parse_depth_payload
 from library_claim.storage.prune import prune_finished, prune_sweep
 from library_claim.storage.live_capture import LiveCaptureStore
@@ -1438,8 +1439,28 @@ async def live_voice(websocket: WebSocket) -> None:
         """
         database = CAPTURE_DATA_DIR / "claims.sqlite3"
         await asyncio.to_thread(resolve_book, database, session.session_id, book)
+        if session.deleted:
+            return
+        inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
+        # Price the resolved book off the capture path; the figure is saved, not re-fetched.
+        priced = next((entry for entry in inventory if entry["id"] == book["id"]), None)
+        if priced is not None and priced.get("title"):
+            with telemetry.span("pricing", priced["title"][:40]) as reported:
+                try:
+                    valuation = await asyncio.to_thread(
+                        value_book, database, session.session_id, priced
+                    )
+                    reported.model = CONFIG.pricing.default_country
+                    reported.detail = (
+                        f"{valuation.currency} {valuation.replacement.amount:.2f}"
+                        if valuation and valuation.replacement
+                        else "no price source"
+                    )
+                except Exception as error:
+                    reported.detail = f"pricing failed ({type(error).__name__})"
+            inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
         if not session.deleted:
-            session.book_inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
+            session.book_inventory = inventory
             await send({"type": "state", "state": _current_ui_state(session)})
 
     def dispatch(stream, revision):

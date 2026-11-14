@@ -11,6 +11,7 @@ from library_claim.capture.tracking.geometry import intersection_area, transform
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.domain.models import Book, BookObservation, Frame, FrameAssociation, ProcessingJob, Quality, ReviewIssue
 from library_claim.measurement.spine import DepthMap, book_dimensions, measure_spine, shelf_run_m
+from library_claim.pricing.storage import stored_valuations
 from library_claim.decisions.drex import DrexError
 from library_claim.decisions.same_book import SameBookCandidate, choose_same_book, crop_jpeg, same_book_probabilities
 from library_claim.storage.repository import Repository
@@ -228,6 +229,8 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
     """
     observations = repo.list_for_sweep(BookObservation, sweep_id)
     issues = repo.list_for_sweep(ReviewIssue, sweep_id)
+    # Prices are fetched by a background job; the inventory reports what was saved.
+    valuations = stored_valuations(repo, sweep_id)
     # Background measure jobs add sizes to observations saved before depth was available.
     measured = {}
     for job in repo.list_for_sweep(ProcessingJob, sweep_id):
@@ -268,6 +271,7 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
                            'title': catalogue.title, 'author': catalogue.author, 'edition': catalogue.edition,
                            'isbn': catalogue.isbn, 'url': catalogue.catalogue_url,
                            'retrieved_at': catalogue.retrieved_at.isoformat() if catalogue.retrieved_at else None},
+                       'valuation': valuations.get(book.id),
                        'member_ids': [key for key, root in roots.items() if root == book.id],
                        'frame_ids': list(dict.fromkeys(row.frame_id for row in evidence)),
                        'observations': [{'id': row.id, 'frame_id': row.frame_id, 'bbox': row.bbox.model_dump(),

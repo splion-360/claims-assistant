@@ -1033,3 +1033,5 @@ body:has(.books-drawer[open]) { overflow: hidden; }
 @media (max-width: 760px) { .books-drawer { width: 100vw; } .library-layout { grid-template-columns: 1fr; } .book-best { height: 190px; } }
 
 .book-card.excluded { opacity: 0.5; }
+
+.book-price { color: #2f5d3a; }
