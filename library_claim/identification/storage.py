@@ -251,8 +251,9 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
         status = 'unresolved' if evidence and all(row.association_method == 'unresolved' for row in evidence) else 'provisional'
         if any(book.id in pair for pair in separate) or len({row.book_id for row in evidence}) > 1:
             status = 'provisional'
-        latest = evidence[-1] if evidence else None
-        needs_review = status == 'unresolved' or not readings['title'] or bool(latest and latest.visual_issues)
+        # Visual issues matter only while no sighting of the book is clean; one clear reading settles it.
+        needs_review = (status == 'unresolved' or not readings['title']
+                        or bool(evidence and all(row.visual_issues for row in evidence)))
         result.append({'needs_review': needs_review, 'id': book.id, **readings, 'status': status,
                        'observation_count': len(evidence),
                        'spine_height_cm': dimensions[0] if dimensions else None,

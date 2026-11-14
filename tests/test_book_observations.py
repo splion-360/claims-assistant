@@ -392,3 +392,26 @@ class BookMeasurementTests(unittest.TestCase):
                  {'excluded': True, 'title': 'B', 'spine_thickness_cm': 5.0}]
         self.assertEqual(inventory_totals(books), {'book_count': 3, 'books_identified': 1,
                                                    'books_unidentified': 2, 'shelf_run_m': 0.05})
+
+
+class ReviewRuleTests(unittest.TestCase):
+    """Visual issues send a book to review only when no sighting of it is clean."""
+
+    setUp = BookObservationTests.setUp
+    save_frame = BookObservationTests.save_frame
+    persist = BookObservationTests.persist
+
+    def test_later_blurry_sighting_does_not_unsettle_a_clean_reading(self):
+        """A clear reading followed by a blurry, glaring sighting stays identified."""
+        self.save_frame('second', [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        self.persist(books=[detection(title='The Good People')])
+        blurry = BookDetection(bbox=detection().bbox, view='spine', title='The Good People', issues=['blur', 'glare'])
+        [book] = self.persist(frame='second', books=[blurry])['inventory']
+        self.assertEqual(book['observation_count'], 2)
+        self.assertFalse(book['needs_review'])
+
+    def test_only_blurry_sightings_still_need_review(self):
+        """A book never seen cleanly stays in review."""
+        blurry = BookDetection(bbox=detection().bbox, view='spine', title='The Good People', issues=['blur'])
+        [book] = self.persist(books=[blurry])['inventory']
+        self.assertTrue(book['needs_review'])
