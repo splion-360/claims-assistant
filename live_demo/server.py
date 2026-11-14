@@ -51,11 +51,28 @@ def _load_dotenv() -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
+def public_host() -> str:
+    """Return the externally reachable host the sweep may also be served on.
+
+    A tunnel such as ngrok terminates TLS and forwards to this process over
+    localhost, so the connection still arrives from 127.0.0.1 while the Host
+    and Origin headers name the tunnel. Naming that host here is what admits
+    it; unset, the sweep stays local-only.
+
+    Returns:
+        The configured host without its port, lowercased, or an empty string.
+    """
+    return os.getenv("PUBLIC_HOST", "").strip().lower().split("//")[-1].split("/")[0].split(":")[0]
+
+
 def _cors_origins() -> list[str]:
     raw = os.getenv("FNOL_CORS_ORIGINS", "")
     if raw.strip():
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
-    return ["http://127.0.0.1:4177", "http://localhost:4177"]
+    origins = ["http://127.0.0.1:4177", "http://localhost:4177"]
+    # A tunnel is reached over https, but this process is told the scheme is http.
+    origins += [f"https://{public_host()}", f"http://{public_host()}"] if public_host() else []
+    return origins
 
 
 _load_dotenv()
@@ -810,18 +827,40 @@ def allowed_origin(origin: str | None, host: str, scheme="http") -> bool:
     return origin in set(_cors_origins()) | {f"{scheme}://{host}"}
 
 
-def local_host(host: str) -> bool:
-    return host.split(":")[0] in {"localhost", "127.0.0.1"}
+def allowed_client(host: str | None) -> bool:
+    """Report whether a connection's own address may reach this sweep.
+
+    Local-only is the default. Naming a public host is what opens the sweep to
+    remote clients, and from then on the Host and Origin checks are what guard
+    it, so this check stops narrowing the address.
+
+    Args:
+        host: The peer address the server sees, which a proxy may have rewritten
+            to the original client's.
+
+    Returns:
+        Whether the connection may proceed.
+    """
+    return bool(public_host()) or host in {"127.0.0.1", "::1", "testclient"}
+
+
+def allowed_host(host: str) -> bool:
+    """Report whether a Host header names somewhere this sweep may be served.
+
+    Args:
+        host: The request's Host header, with or without a port.
+
+    Returns:
+        True for localhost, and for the configured public host when one is set.
+    """
+    name = host.split(":")[0].lower()
+    return name in {"localhost", "127.0.0.1"} or (bool(public_host()) and name == public_host())
 
 
 @app.middleware("http")
 async def local_access(request: Request, call_next):
     # Local-only demo: public serving requires a separate authenticated deployment design.
-    if not local_host(request.headers.get("host", "")) or request.client.host not in {
-        "127.0.0.1",
-        "::1",
-        "testclient",
-    }:
+    if not allowed_host(request.headers.get("host", "")) or not allowed_client(request.client.host):
         return Response("This demo accepts local connections only.", status_code=403)
     origin = request.headers.get("origin")
     if (
@@ -1296,7 +1335,7 @@ def capture_script() -> FileResponse:
 async def live_capture(websocket: WebSocket) -> None:
     """Accept camera frames from a phone paired to a sweep running in another browser."""
     host = websocket.headers.get("host", "")
-    if not local_host(host) or websocket.client.host not in {"127.0.0.1", "::1", "testclient"}:
+    if not allowed_host(host) or not allowed_client(websocket.client.host):
         await websocket.close(code=1008)
         return
     session = session_for_code(websocket.query_params.get("code", ""))
@@ -1341,8 +1380,8 @@ async def live_voice(websocket: WebSocket) -> None:
     """Keep camera ingestion responsive while text and evidence jobs run."""
     host = websocket.headers.get("host", "")
     if (
-        not local_host(host)
-        or websocket.client.host not in {"127.0.0.1", "::1", "testclient"}
+        not allowed_host(host)
+        or not allowed_client(websocket.client.host)
         or not allowed_origin(
             websocket.headers.get("origin"),
             host,

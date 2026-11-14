@@ -184,3 +184,33 @@ geometry even though its books are still read and priced.
 Wall area covered by shelving is measured separately from the shelving
 detections: each unit's largest reading is taken once, so several sightings of
 one bookcase cannot inflate the figure.
+
+## Serving a phone through a tunnel
+
+`adb reverse` needs the phone and the laptop to reach each other. Public Wi-Fi
+usually forbids that: both devices sit on one subnet and still cannot exchange a
+packet, so pairing fails however correct the address is. A tunnel avoids the
+problem entirely by routing both devices through the internet.
+
+```sh
+ngrok http 4177                 # prints https://<name>.ngrok-free.dev
+# put that host in .env, with no scheme and no path:
+#   PUBLIC_HOST=<name>.ngrok-free.dev
+# restart the backend, then open the https URL on the phone
+```
+
+`PUBLIC_HOST` is what opens the sweep. Empty, the backend answers localhost
+only: it refuses any other Host header, any origin that is not local, and any
+client address that is not loopback. Naming a host admits that host over either
+scheme, because a tunnel terminates TLS and tells this process the scheme is
+plain http, and it stops narrowing the client address, since a tunnel forwards
+the original client's address and remote peers are then expected. The Host and
+Origin checks are what guard the sweep from that point on.
+
+The tunnel's certificate also satisfies the secure context that the camera and
+microphone require, which is why a phone can sweep over it at all. What it does
+not give is WebXR depth, so a sweep served this way measures no spine dimensions
+and no room geometry; those need the AR session that `adb reverse` supports.
+
+While `PUBLIC_HOST` is set, anyone holding the URL can reach the sweep. Clear it
+and restart when the demo is over.
