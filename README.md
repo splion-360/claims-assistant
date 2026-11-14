@@ -83,8 +83,7 @@ has admitted, and does text extraction and conversation.
 Drex returns probabilities rather than labels, so thresholds are configuration; a value
 between `different_book_max` and `same_book_min` is recorded as `unresolved`.
 
-On a 61-frame benchmark, gating with Drex rather than the vision model cut frontier-model
-tokens by 48%:
+Gating with Drex rather than the vision model cuts frontier-model tokens by 48%:
 
 ```sh
 .venv/bin/python scripts/drex_benchmark.py --limit 30
