@@ -78,6 +78,11 @@ if str(DEMO_DIR) not in sys.path:
 from live_tools import SYSTEM_INSTRUCTION, TOOL_NAMES, tool_headline
 
 import speech
+from library_claim.config import CONFIG
+from library_claim.identification.models import INSTRUCTION as BOOK_INSTRUCTION
+from library_claim.identification.models import BookFrameAnalysis
+from library_claim.identification.storage import save_analysis as save_book_analysis
+from library_claim.storage.live_capture import LiveCaptureStore
 from library_claim.storage.repository import Repository
 from library_claim.storage.evidence import EvidenceStore
 from library_claim.domain.models import BookObservation, Frame
@@ -86,15 +91,11 @@ from library_claim.orchestration.state_machine import SweepController
 from live_demo.book_guidance import capture_instruction, needs_capture, GuidancePolicy
 import cv2
 import numpy as np
+from live_demo.camera_filter import CameraCandidate
 from live_demo.camera_quality import log_scores
 from live_demo.camera_quality import logger as quality_logger
-from live_demo.camera_tracking import CameraTracking
-from live_demo.camera_filter import CameraCandidate
-from library_claim.identification.models import BookFrameAnalysis, INSTRUCTION as BOOK_INSTRUCTION
-from library_claim.identification.storage import save_analysis as save_book_analysis
 from live_demo.camera_relevance import CameraRelevance
-from library_claim.config import CONFIG
-from library_claim.storage.live_capture import LiveCaptureStore
+from live_demo.camera_tracking import CameraTracking
 from provider import (
     MODEL,
     VISION_MODEL,
@@ -904,7 +905,10 @@ def set_camera_mode(session: IntakeSession, enabled: bool) -> bool:
 
 
 async def _pin_evidence_photo(
-    session: IntakeSession, args: dict[str, Any], *, candidate: CameraCandidate | None = None
+    session: IntakeSession,
+    args: dict[str, Any],
+    *,
+    candidate: CameraCandidate | None = None,
 ) -> dict[str, Any]:
     """Describe a frozen capture and retain it only for its active camera session.
 
@@ -919,12 +923,20 @@ async def _pin_evidence_photo(
     frame = candidate.data if candidate is not None else session.last_frame
     frame_id = candidate.frame_id if candidate is not None else session.last_frame_id
     timestamp = candidate.timestamp if candidate is not None else session.last_frame_at
-    if candidate is not None and (not session.camera_enabled or candidate.revision != session.camera_mode_revision):
+    if candidate is not None and (
+        not session.camera_enabled or candidate.revision != session.camera_mode_revision
+    ):
         return {"pinned": False, "message": "Camera activation changed."}
     if frame is None or time.monotonic() - timestamp > FRAME_MAX_AGE_SECONDS:
-        return {"pinned": False, "message": "No fresh camera frame. Ask for a clear camera view."}
+        return {
+            "pinned": False,
+            "message": "No fresh camera frame. Ask for a clear camera view.",
+        }
     if len(session.evidence_photos) >= MAX_PHOTOS:
-        return {"pinned": False, "message": "Evidence limit reached. Download this packet before starting another intake."}
+        return {
+            "pinned": False,
+            "message": "Evidence limit reached. Download this packet before starting another intake.",
+        }
     captured_at = datetime.now().astimezone().isoformat()
     claimant_said = str(args.get("claimant_description", ""))[:1000]
     instruction = BOOK_INSTRUCTION
@@ -942,7 +954,9 @@ async def _pin_evidence_photo(
     )
     if session.deleted:
         raise asyncio.CancelledError()
-    if candidate is not None and (not session.camera_enabled or candidate.revision != session.camera_mode_revision):
+    if candidate is not None and (
+        not session.camera_enabled or candidate.revision != session.camera_mode_revision
+    ):
         return {"pinned": False, "message": "Camera activation changed."}
     if len(session.evidence_photos) >= MAX_PHOTOS:
         return {"pinned": False, "message": "Evidence limit reached."}
@@ -964,17 +978,21 @@ async def _pin_evidence_photo(
             or candidate.revision != session.camera_mode_revision
         ):
             return {"pinned": False, "message": "Camera activation changed."}
-        session.book_inventory = book_result['inventory']
+        session.book_inventory = book_result["inventory"]
     caption = observation.observation
     if book_result is not None:
         caption = f"{book_result['detected_count']} book(s) detected in this frame. "
-        caption += 'Frame inspection complete.' if observation.complete else 'Incomplete view; more evidence needed.'
+        caption += (
+            "Frame inspection complete."
+            if observation.complete
+            else "Incomplete view; more evidence needed."
+        )
     photo = {
         "id": uuid.uuid4().hex,
         "frame_id": frame_id,
         "data_url": _data_url(frame, "image/jpeg"),
         "caption": caption,
-        "books": [book.model_dump(mode='json') for book in observation.books],
+        "books": [book.model_dump(mode="json") for book in observation.books],
         "book_count": len(observation.books),
         "book_enumeration_complete": observation.complete,
         "claimant_description": claimant_said,
@@ -1116,7 +1134,11 @@ async def live_voice(websocket: WebSocket) -> None:
                 and session.camera_enabled
                 and session.camera_mode_revision == revision
             ):
-                assessment = stream.latest_relevance if stream.relevance_frame_id == frame_id else None
+                assessment = (
+                    stream.latest_relevance
+                    if stream.relevance_frame_id == frame_id
+                    else None
+                )
                 gate = stream.remote_filter
                 gate.offer(
                     CameraCandidate(data, frame_id, timestamp, revision), assessment
@@ -1140,7 +1162,6 @@ async def live_voice(websocket: WebSocket) -> None:
             raise
         except Exception as error:
             quality_logger.warning("camera_tracking failed=%s", type(error).__name__)
-
 
     async def activity(name, operation):
         nonlocal busy
@@ -1225,7 +1246,9 @@ async def live_voice(websocket: WebSocket) -> None:
                 for t in session.transcript
                 if t["speaker"] in {"Claimant", "Agent"}
             )
-            reply = await complete(messages, max_tokens=CONFIG.inference.conversation_max_tokens)
+            reply = await complete(
+                messages, max_tokens=CONFIG.inference.conversation_max_tokens
+            )
             if epoch != text_epoch or session.deleted:
                 return
             turn_id = uuid.uuid4().hex
@@ -1484,7 +1507,8 @@ async def live_voice(websocket: WebSocket) -> None:
                         return
                     await asyncio.to_thread(transition_capture, session, "Capturing")
             result = await activity(
-                "pin_evidence_photo", lambda: _pin_evidence_photo(session, {}, candidate=candidate)
+                "pin_evidence_photo",
+                lambda: _pin_evidence_photo(session, {}, candidate=candidate),
             )
             success = bool(result.get("pinned"))
             if success:
