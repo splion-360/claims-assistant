@@ -1,0 +1,494 @@
+{
+  "summary": {
+    "frames_compared": 30,
+    "agreement": 0.967,
+    "drex_mean_ms": 498,
+    "baseline_mean_ms": 663,
+    "speedup": 1.33,
+    "drex_input_tokens": 41446,
+    "drex_model": "drex-max-v1.1",
+    "baseline_model": "Qwen/Qwen3.8-27B"
+  },
+  "rows": [
+    {
+      "frame_id": "c91a2b69b70541cdbf94d0dc19862a54",
+      "drex": {
+        "book_visible": 0.9957141933942685,
+        "spine_legible": 0.9538787638913049,
+        "issue": "none",
+        "latency_ms": 544.2595829954371,
+        "wall_ms": 559.792208019644,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 0.95,
+        "wall_ms": 570.9704589098692
+      }
+    },
+    {
+      "frame_id": "eb661328118540718f63b4a4bb8f76a9",
+      "drex": {
+        "book_visible": 0.6832220946782203,
+        "spine_legible": 0.13022837430919332,
+        "issue": "occluded",
+        "latency_ms": 437.59283295366913,
+        "wall_ms": 450.0641250051558,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.9,
+        "spine_legible": 0.1,
+        "wall_ms": 736.714500002563
+      }
+    },
+    {
+      "frame_id": "2ab3a14cb82940c788b316f765bc27ef",
+      "drex": {
+        "book_visible": 0.012863226905782434,
+        "spine_legible": 0.006871911882688706,
+        "issue": "no_books",
+        "latency_ms": 562.6125419512391,
+        "wall_ms": 572.6796669187024,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.0,
+        "spine_legible": 0.0,
+        "wall_ms": 694.2809580359608
+      }
+    },
+    {
+      "frame_id": "6ca9c21bf98f49028be369778c359379",
+      "drex": {
+        "book_visible": 0.9943860709075728,
+        "spine_legible": 0.9887500138266474,
+        "issue": "none",
+        "latency_ms": 387.5792910112068,
+        "wall_ms": 396.8887079972774,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 1.0,
+        "wall_ms": 511.08841702807695
+      }
+    },
+    {
+      "frame_id": "073a5bf19d5447c7804163d96fd0ab31",
+      "drex": {
+        "book_visible": 0.9839263833293612,
+        "spine_legible": 0.2789912390107655,
+        "issue": "far",
+        "latency_ms": 412.3994999099523,
+        "wall_ms": 421.4149999897927,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 0.95,
+        "spine_legible": 0.3,
+        "wall_ms": 561.6767079336569
+      }
+    },
+    {
+      "frame_id": "8bda951a49a246599e8c90f7c89c45fc",
+      "drex": {
+        "book_visible": 0.0200689642074808,
+        "spine_legible": 0.012863226905782434,
+        "issue": "no_books",
+        "latency_ms": 428.8009579759091,
+        "wall_ms": 442.25958408787847,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.0,
+        "spine_legible": 0.0,
+        "wall_ms": 787.8949580481276
+      }
+    },
+    {
+      "frame_id": "9d08214e6e294d72b19fdc78486dead6",
+      "drex": {
+        "book_visible": 0.994127945763106,
+        "spine_legible": 0.968816291192356,
+        "issue": "none",
+        "latency_ms": 452.26495806127787,
+        "wall_ms": 465.3155420674011,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 0.05,
+        "wall_ms": 996.5743330540136
+      }
+    },
+    {
+      "frame_id": "eac1e6a8c2e54f82abebaa01b05c2226",
+      "drex": {
+        "book_visible": 0.9701536478503355,
+        "spine_legible": 0.3571472572430151,
+        "issue": "blur",
+        "latency_ms": 566.4165420457721,
+        "wall_ms": 576.711833011359,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.95,
+        "spine_legible": 0.3,
+        "wall_ms": 820.7649589749053
+      }
+    },
+    {
+      "frame_id": "e6ac2e0e57584de08c29c755f128901e",
+      "drex": {
+        "book_visible": 0.9945108686767155,
+        "spine_legible": 0.9901629529588202,
+        "issue": "none",
+        "latency_ms": 527.7667089831084,
+        "wall_ms": 537.3210420366377,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 1.0,
+        "wall_ms": 588.6769160861149
+      }
+    },
+    {
+      "frame_id": "a161ed24042b49c6920b861e3d294c63",
+      "drex": {
+        "book_visible": 0.016804530966214374,
+        "spine_legible": 0.008600027959420392,
+        "issue": "no_books",
+        "latency_ms": 464.60687497165054,
+        "wall_ms": 473.4247080050409,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.05,
+        "spine_legible": 0.0,
+        "wall_ms": 750.333083095029
+      }
+    },
+    {
+      "frame_id": "cc8ef73a80f04211b5ef1235190cd739",
+      "drex": {
+        "book_visible": 0.01230158629339368,
+        "spine_legible": 0.006281517768374472,
+        "issue": "no_books",
+        "latency_ms": 576.0387500049546,
+        "wall_ms": 587.0970420073718,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.0,
+        "spine_legible": 0.0,
+        "wall_ms": 745.2347080688924
+      }
+    },
+    {
+      "frame_id": "3e49a7899e5543f0b3589af226a64934",
+      "drex": {
+        "book_visible": 0.9293753920216289,
+        "spine_legible": 0.2881763193554783,
+        "issue": "occluded",
+        "latency_ms": 335.55812493432313,
+        "wall_ms": 344.7243330301717,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 0.95,
+        "spine_legible": 0.6,
+        "wall_ms": 496.1325420299545
+      }
+    },
+    {
+      "frame_id": "9c7b75eedad14428810630cd66493fe4",
+      "drex": {
+        "book_visible": 0.9852956469198041,
+        "spine_legible": 0.1463771716839918,
+        "issue": "far",
+        "latency_ms": 687.8472500247881,
+        "wall_ms": 699.1118750302121,
+        "input_tokens": 1817
+      },
+      "baseline": {
+        "book_visible": 0.95,
+        "spine_legible": 0.1,
+        "wall_ms": 694.7529580211267
+      }
+    },
+    {
+      "frame_id": "9b6475205c25452399682a608554dadc",
+      "drex": {
+        "book_visible": 0.009837047041179799,
+        "spine_legible": 0.005872051459332706,
+        "issue": "no_books",
+        "latency_ms": 397.3222079221159,
+        "wall_ms": 408.7751660263166,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.0,
+        "spine_legible": 0.0,
+        "wall_ms": 696.1838329443708
+      }
+    },
+    {
+      "frame_id": "dcb330f6d2e84ec997352ba79614bb92",
+      "drex": {
+        "book_visible": 0.9952037840661779,
+        "spine_legible": 0.5562767121956773,
+        "issue": "blur",
+        "latency_ms": 708.1404590280727,
+        "wall_ms": 717.0218329411,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 0.95,
+        "wall_ms": 756.9557499373332
+      }
+    },
+    {
+      "frame_id": "fe2586d9ef1a470188cf3bedea37ac64",
+      "drex": {
+        "book_visible": 0.6218344158480887,
+        "spine_legible": 0.06491489301923105,
+        "issue": "no_books",
+        "latency_ms": 550.0014589633793,
+        "wall_ms": 561.6370419738814,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.0,
+        "spine_legible": 0.0,
+        "wall_ms": 815.6812919769436
+      }
+    },
+    {
+      "frame_id": "4ac7ee6962f24b1f90f8e6c191b34dce",
+      "drex": {
+        "book_visible": 0.9957141957125965,
+        "spine_legible": 0.957697628882305,
+        "issue": "none",
+        "latency_ms": 496.19445903226733,
+        "wall_ms": 507.4430420063436,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 0.95,
+        "wall_ms": 734.90049992688
+      }
+    },
+    {
+      "frame_id": "265766d948fe45efa91ead05640b919e",
+      "drex": {
+        "book_visible": 0.9986429451288806,
+        "spine_legible": 0.9939945002265281,
+        "issue": "none",
+        "latency_ms": 442.9618329741061,
+        "wall_ms": 451.42079202923924,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 1.0,
+        "wall_ms": 533.4695000201464
+      }
+    },
+    {
+      "frame_id": "5fdd17e847224937b9d0acc4988af84e",
+      "drex": {
+        "book_visible": 0.995809592150509,
+        "spine_legible": 0.9865498570349529,
+        "issue": "none",
+        "latency_ms": 480.7782919378951,
+        "wall_ms": 490.07679196074605,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 1.0,
+        "wall_ms": 493.5991669772193
+      }
+    },
+    {
+      "frame_id": "0fb1ddd4a9884831b403246601f2409b",
+      "drex": {
+        "book_visible": 0.9954148327008576,
+        "spine_legible": 0.4661422371864319,
+        "issue": "occluded",
+        "latency_ms": 541.4691250771284,
+        "wall_ms": 555.47787505202,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.95,
+        "spine_legible": 0.3,
+        "wall_ms": 718.9822909422219
+      }
+    },
+    {
+      "frame_id": "ec893826a9b34dfcae6a71d923af5200",
+      "drex": {
+        "book_visible": 0.9921376645043348,
+        "spine_legible": 0.9497332330693764,
+        "issue": "none",
+        "latency_ms": 471.45449998788536,
+        "wall_ms": 480.98408291116357,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 0.98,
+        "spine_legible": 0.95,
+        "wall_ms": 535.1905409479514
+      }
+    },
+    {
+      "frame_id": "38bf783ec54d407bbcc44f483de32cc1",
+      "drex": {
+        "book_visible": 0.9808011778921043,
+        "spine_legible": 0.5674064755439758,
+        "issue": "far",
+        "latency_ms": 480.2423750516027,
+        "wall_ms": 491.7556250002235,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 0.95,
+        "spine_legible": 0.85,
+        "wall_ms": 476.9616249250248
+      }
+    },
+    {
+      "frame_id": "688c6f82e3f342d1afee965942d4a744",
+      "drex": {
+        "book_visible": 0.027336445622250478,
+        "spine_legible": 0.008994209689018061,
+        "issue": "no_books",
+        "latency_ms": 405.5213750107214,
+        "wall_ms": 413.96770800929517,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.05,
+        "spine_legible": 0.0,
+        "wall_ms": 701.9568339455873
+      }
+    },
+    {
+      "frame_id": "ecc2b066e44d4c88abe8ff33b13d8619",
+      "drex": {
+        "book_visible": 0.9949830691727287,
+        "spine_legible": 0.9016266599539915,
+        "issue": "blur",
+        "latency_ms": 426.2774580856785,
+        "wall_ms": 438.52500000502914,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.98,
+        "spine_legible": 0.95,
+        "wall_ms": 709.3234579078853
+      }
+    },
+    {
+      "frame_id": "2ddca4b65a284cffb68377f2e871e6c3",
+      "drex": {
+        "book_visible": 0.009619277149797923,
+        "spine_legible": 0.006005502550660306,
+        "issue": "no_books",
+        "latency_ms": 429.9070839770138,
+        "wall_ms": 440.8588749356568,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.05,
+        "spine_legible": 0.0,
+        "wall_ms": 729.3929998995736
+      }
+    },
+    {
+      "frame_id": "ff4a9a9a89114b1d99005c4964062c1c",
+      "drex": {
+        "book_visible": 0.9897126653748715,
+        "spine_legible": 0.923204779624939,
+        "issue": "none",
+        "latency_ms": 477.02162503264844,
+        "wall_ms": 486.40166700351983,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 0.95,
+        "spine_legible": 0.9,
+        "wall_ms": 499.6537920087576
+      }
+    },
+    {
+      "frame_id": "c8f750eacf5f4bd4979348ef4ba0f322",
+      "drex": {
+        "book_visible": 0.7474595531064139,
+        "spine_legible": 0.2789914393124413,
+        "issue": "occluded",
+        "latency_ms": 514.5979579538107,
+        "wall_ms": 524.7942080022767,
+        "input_tokens": 1761
+      },
+      "baseline": {
+        "book_visible": 0.95,
+        "spine_legible": 0.05,
+        "wall_ms": 821.0639170138165
+      }
+    },
+    {
+      "frame_id": "550eb3bab6bf4e76b9df6695e53b35ab",
+      "drex": {
+        "book_visible": 0.9942584519287939,
+        "spine_legible": 0.5784687572261321,
+        "issue": "none",
+        "latency_ms": 394.42387502640486,
+        "wall_ms": 406.81733400560915,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 1.0,
+        "wall_ms": 504.93833306245506
+      }
+    },
+    {
+      "frame_id": "1531f691bd174e47a247cc7c74b7f3f4",
+      "drex": {
+        "book_visible": 0.9976676073932679,
+        "spine_legible": 0.9928125369246104,
+        "issue": "none",
+        "latency_ms": 509.47616703342646,
+        "wall_ms": 519.8384589748457,
+        "input_tokens": 803
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 1.0,
+        "wall_ms": 490.7215409912169
+      }
+    },
+    {
+      "frame_id": "cda9fae32e7b4494a43460c888059a0a",
+      "drex": {
+        "book_visible": 0.9949830668561033,
+        "spine_legible": 0.9846260061632023,
+        "issue": "none",
+        "latency_ms": 510.0746249081567,
+        "wall_ms": 520.1074589276686,
+        "input_tokens": 1817
+      },
+      "baseline": {
+        "book_visible": 1.0,
+        "spine_legible": 1.0,
+        "wall_ms": 716.0135409794748
+      }
+    }
+  ]
+}
