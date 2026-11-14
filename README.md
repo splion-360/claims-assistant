@@ -9,8 +9,8 @@ the camera — and when the sweep ends it produces `claim_packet.json` and a rea
 every book identified from its spine and priced, every non-book object classified, and the
 room's floor and wall area, all from the same pass.
 
-Books are the deliberate hard case. A shelf is the densest, least distinguishable inventory in
-a home: dozens of near-identical objects, most partly hidden, each needing its own price.
+Books are the hard case it is built around: dozens of near-identical objects on a shelf, most
+partly hidden, each needing its own identity, size and price.
 
 ---
 
@@ -85,24 +85,24 @@ flowchart TB
     style drop fill:#f3f0e8,stroke:#aaa,color:#555
 ```
 
-The expensive model sits **behind** the gate, not in front of it. It never sees a blurred shelf,
-a blank wall, or a book it has already read.
+The vision model sits behind the gate: it is sent a frame only after Drex has admitted it, so
+it never receives a blurred shelf, a blank wall, or a book already recorded.
 
 ---
 
 ## Drex is the decision layer
 
-Not a classifier bolted on the side: every judgement in the pipeline is a `drex-max-v1.1` call,
-and the frontier model is invoked only once Drex has decided it is worth invoking.
+Every judgement in the pipeline is a `drex-max-v1.1` call. The vision model does spine text and
+the conversation; it makes no decisions.
 
-| # | Decision | Question put to Drex | Module |
-| --- | --- | --- | --- |
-| D1 | Frame admission | Is a book visible, and is its spine legible despite blur, glare or dark? | [`decisions/frame_check.py`](library_claim/decisions/frame_check.py) |
-| D2 | Same book | Is this spine the same physical copy as one already recorded? | [`decisions/same_book.py`](library_claim/decisions/same_book.py) |
-| D3 | Catalogue match | Which candidate work is the book whose spine was read? | [`identification/catalogue.py`](library_claim/identification/catalogue.py) |
-| D5 | Correction intent | Did they say "skip that", "it's a first edition", or something else? | [`decisions/corrections.py`](library_claim/decisions/corrections.py) |
-| D6 | Capture guidance | Which instruction should the agent speak now — or none? | [`live_demo/guidance_decision.py`](live_demo/guidance_decision.py) |
-| D7 | Same object | Is this the same physical lamp, or another lamp? | [`decisions/same_object.py`](library_claim/decisions/same_object.py) |
+| Decision | Question put to Drex | Module |
+| --- | --- | --- |
+| Frame admission | Is a book visible, and is its spine legible despite blur, glare or dark? | [`decisions/frame_check.py`](library_claim/decisions/frame_check.py) |
+| Capture guidance | Which instruction should the agent speak now — or none? | [`live_demo/guidance_decision.py`](live_demo/guidance_decision.py) |
+| Same book | Is this spine the same physical copy as one already recorded? | [`decisions/same_book.py`](library_claim/decisions/same_book.py) |
+| Same object | Is this the same physical lamp, or another lamp? | [`decisions/same_object.py`](library_claim/decisions/same_object.py) |
+| Catalogue match | Which candidate work is the book whose spine was read? | [`identification/catalogue.py`](library_claim/identification/catalogue.py) |
+| Correction intent | Did they say "skip that", "it's a first edition", or something else? | [`decisions/corrections.py`](library_claim/decisions/corrections.py) |
 
 Drex returns **calibrated probabilities, not labels**. Every threshold is therefore explicit
 configuration, and the band between two thresholds is recorded as `unresolved` rather than
@@ -132,8 +132,7 @@ handful of prompts.
 | Without Drex — vision model gates and reads | 102 | 81,761 |
 | With Drex — Drex gates, vision model only reads | **41** | **42,599** |
 
-20 frames were refused outright and never reached the vision model. On the single sweep that
-covered a room rather than a book held to the camera it was **73%** — one sample, not an average.
+20 of those frames were refused outright and never reached the vision model.
 
 Reproduce:
 
@@ -145,8 +144,6 @@ Reproduce:
 ---
 
 ## What it refuses to do
-
-When money is attached, a plausible wrong answer costs more than a blank.
 
 - **No invented prices.** A price exists only with a retrievable URL and a retrieval date. No
   source, no figure — the line leaves the totals and says why in the review queue.
@@ -199,17 +196,17 @@ Chrome lacks `depth-sensing` falls back to the plain camera and reports no dimen
 
 ```
 library_claim/
-  capture/       quality gates, frame tracking, evidence selection
-  decisions/     the Drex client and every decision that uses it
-  identification/ spine readings, association, catalogue resolution
-  items/         non-book detection, association, valuation
-  measurement/   spine sizes, room geometry from depth + pose
-  pricing/       markets, providers, stored valuations
-  packet.py      claim_packet.json and report.html
-  storage/       SQLite repository, frame store, depth sidecars
-live_demo/       FastAPI app, sweep console, phone capture page
-scripts/         the two Drex benchmarks
-tests/           388 Python tests, 52 browser tests
+  capture/         quality gates, frame tracking, evidence selection
+  decisions/       the Drex client and every decision that uses it
+  identification/  spine readings, association, catalogue resolution
+  items/           non-book detection, association, valuation
+  measurement/     spine sizes, room geometry from depth and pose
+  pricing/         markets, providers, stored valuations
+  storage/         SQLite repository, frame store, depth sidecars
+  packet.py        claim_packet.json and report.html
+live_demo/         FastAPI app, sweep console, phone capture page
+scripts/           the two Drex benchmarks
+tests/             388 Python tests, 52 browser tests
 ```
 
 ---
