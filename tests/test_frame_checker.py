@@ -118,3 +118,63 @@ class FrameCheckerTests(unittest.IsolatedAsyncioTestCase):
         await checker.submit(pending('A'), on_result)
         self.assertEqual(results, [None])
         self.assertEqual(checker.last_error.status, 402)
+
+
+class QuietBackoffTests(unittest.IsolatedAsyncioTestCase):
+    """Exercise the slower cadence that follows a run of frames holding no book."""
+
+    @staticmethod
+    async def run_checks(checker, outcomes):
+        """Submit one frame per outcome and return the spacing chosen after each.
+
+        Args:
+            checker: Checker under test.
+            outcomes: Callables returning a frame check or raising, one per frame.
+
+        Returns:
+            The checker's next-request spacing after each submission.
+        """
+        spacings = []
+
+        async def on_result(item, result):
+            """Ignore the result; spacing is read after the call returns.
+
+            Args:
+                item: Submitted pending frame.
+                result: Frame check or None.
+            """
+
+        for index, outcome in enumerate(outcomes):
+            checker.check = lambda jpeg, outcome=outcome: outcome()
+            await checker.submit(pending(f'frame{index}'), on_result)
+            spacings.append(checker.interval_s)
+        return spacings
+
+    async def test_cadence_slows_only_after_the_configured_streak(self):
+        """Keep the base spacing until enough consecutive frames hold no book."""
+        checker = FrameChecker(min_interval_s=0, quiet_streak=3, quiet_interval_s=0.05)
+        spacings = await self.run_checks(checker, [lambda: check(0.1)] * 4)
+        self.assertEqual(spacings, [0, 0, 0.05, 0.05])
+
+    async def test_a_visible_book_restores_the_base_cadence_at_once(self):
+        """Resume fast checking on the first frame that shows a book."""
+        checker = FrameChecker(min_interval_s=0, quiet_streak=2, quiet_interval_s=0.05)
+        outcomes = [lambda: check(0.1), lambda: check(0.1), lambda: check(0.9), lambda: check(0.1)]
+        spacings = await self.run_checks(checker, outcomes)
+        self.assertEqual(spacings, [0, 0.05, 0, 0])
+        self.assertEqual(checker.misses, 1)
+
+    async def test_failed_checks_back_off_like_frames_without_books(self):
+        """Count a Drex failure as a miss so an outage is not retried every interval."""
+        def failing():
+            """Raise the error a Drex outage produces.
+
+            Raises:
+                DrexError: Always.
+            """
+            raise DrexError('unavailable')
+
+        checker = FrameChecker(min_interval_s=0, quiet_streak=2, quiet_interval_s=0.05)
+        spacings = await self.run_checks(checker, [failing, failing])
+        self.assertEqual(spacings, [0, 0.05])
+        self.assertIsInstance(checker.last_error, DrexError)

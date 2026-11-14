@@ -190,6 +190,8 @@ class DrexConfig(Settings):
     quality_prompt_cooldown_s: PositiveFloat
     same_prompt_cooldown_s: PositiveFloat
     gate_failure_streak: PositiveInt
+    quiet_streak: PositiveInt
+    quiet_interval_s: PositiveFloat
 
     @model_validator(mode='after')
     def ordered_same_book_bounds(self):

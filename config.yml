@@ -122,6 +122,9 @@ drex:
   quality_prompt_cooldown_s: 8
   same_prompt_cooldown_s: 20
   gate_failure_streak: 3
+  # Frame checks slow to quiet_interval_s after this many consecutive checks see no book.
+  quiet_streak: 3
+  quiet_interval_s: 3.0
 measurement:
   # Off: books are saved without dimensions and Depth Pro never loads.
   enabled: false
