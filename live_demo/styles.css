@@ -1002,3 +1002,10 @@ body:has(.books-drawer[open]) { overflow: hidden; }
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .call-card .card-head .pill { margin-left: auto; }
+
+.phone-view { margin: 12px 0 0; position: relative; }
+.phone-view img { width: 100%; border-radius: 10px; display: block; background: #000;
+  aspect-ratio: 3 / 4; object-fit: cover; }
+.phone-view figcaption { position: absolute; left: 8px; bottom: 8px; font-size: 11px;
+  letter-spacing: .04em; text-transform: uppercase; color: #fff;
+  background: rgba(0, 0, 0, .55); padding: 2px 8px; border-radius: 999px; }

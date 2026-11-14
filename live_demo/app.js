@@ -317,6 +317,23 @@ function bookPrice(book) {
 
 
 // Pairing hands the camera to a phone while the conversation and inventory stay here.
+// The phone sends the camera; this is how the console shows what it sees.
+let phoneFrameTimer = null;
+
+function watchPhoneCamera() {
+  if (phoneFrameTimer) return;
+  const view = document.querySelector("#phoneView");
+  const image = document.querySelector("#phoneFrame");
+  phoneFrameTimer = window.setInterval(() => {
+    if (!sessionId) return;
+    // A cache-busting query is what makes the browser fetch each new frame.
+    const next = new Image();
+    next.onload = () => { image.src = next.src; view.hidden = false; };
+    next.onerror = () => { view.hidden = true; };
+    next.src = `${API_ORIGIN}/api/sessions/${sessionId}/live-frame?t=${Date.now()}`;
+  }, 400);
+}
+
 async function showPairingCode() {
   const panel = document.querySelector("#pairingCode");
   if (!sessionId) return;
@@ -326,6 +343,7 @@ async function showPairingCode() {
     const result = await api(`/api/sessions/${sessionId}/capture-code`);
     document.querySelector("#pairingDigits").textContent = result.code;
     panel.hidden = false;
+    watchPhoneCamera();
   } catch (error) {
     document.querySelector("#pairingDigits").textContent = error.message;
     panel.hidden = false;

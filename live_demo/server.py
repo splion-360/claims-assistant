@@ -795,6 +795,30 @@ def item_evidence(session_id: str, observation_id: str, request: Request):
         raise HTTPException(404, "Object evidence not found")
 
 
+@app.get("/api/sessions/{session_id}/live-frame")
+def live_frame(session_id: str, request: Request):
+    """Serve the newest camera frame of a sweep, so the console can show it.
+
+    A phone sends the camera while the conversation and the inventory stay on
+    the computer; this is how that computer shows what the phone is seeing.
+
+    Args:
+        session_id: Owning sweep.
+        request: Request carrying the owner cookie.
+
+    Returns:
+        The newest frame as a JPEG.
+
+    Raises:
+        HTTPException: No frame has arrived yet.
+    """
+    session = owned_session(session_id, request.cookies.get("intake_owner"))
+    if not session.last_frame:
+        raise HTTPException(404, "No camera frame yet")
+    return Response(session.last_frame, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
 class ItemReview(BaseModel):
     action: Literal["confirm", "exclude", "appraise"]
 
