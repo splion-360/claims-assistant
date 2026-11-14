@@ -223,53 +223,12 @@ h1 {
 
 .icon-mic,
 .icon-camera,
+.icon-phone,
 .icon-new {
   width: 26px;
   height: 26px;
   display: block;
   position: relative;
-}
-
-.icon-mic::before {
-  content: "";
-  position: absolute;
-  left: 9px;
-  top: 2px;
-  width: 8px;
-  height: 14px;
-  border-radius: 5px;
-  background: currentColor;
-}
-
-.icon-mic::after {
-  content: "";
-  position: absolute;
-  left: 5px;
-  top: 9px;
-  width: 14px;
-  height: 11px;
-  border: 2px solid currentColor;
-  border-top: 0;
-  border-radius: 0 0 9px 9px;
-}
-
-.icon-camera::before {
-  content: "";
-  position: absolute;
-  inset: 5px 3px;
-  border: 2px solid currentColor;
-  border-radius: 4px;
-}
-
-.icon-camera::after {
-  content: "";
-  position: absolute;
-  left: 9px;
-  top: 9px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 2px solid currentColor;
 }
 
 .icon-new::before,
@@ -294,7 +253,7 @@ h1 {
   height: 2px;
 }
 
-.round-button.active .icon-mic::before {
+.round-button.active .icon-mic {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
@@ -1045,3 +1004,5 @@ body:has(.books-drawer[open]) { overflow: hidden; }
 .pairing-close:hover { opacity: 1; }
 .library-download { cursor: pointer; border: 1px solid #c9bda6; border-radius: 8px;
   background: #efe9dc; padding: 7px 14px; }
+
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
