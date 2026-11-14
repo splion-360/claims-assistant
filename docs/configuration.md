@@ -207,10 +207,12 @@ plain http, and it stops narrowing the client address, since a tunnel forwards
 the original client's address and remote peers are then expected. The Host and
 Origin checks are what guard the sweep from that point on.
 
-The tunnel's certificate also satisfies the secure context that the camera and
-microphone require, which is why a phone can sweep over it at all. What it does
-not give is WebXR depth, so a sweep served this way measures no spine dimensions
-and no room geometry; those need the AR session that `adb reverse` supports.
+The tunnel's certificate satisfies the secure context that the camera, the
+microphone and WebXR all require, so a sweep served this way measures depth
+exactly as a forwarded localhost port does: `https://` is a secure context, and
+that is all WebXR asks for. Depth still depends on the phone, not the transport,
+so a device whose Chrome lacks `immersive-ar` with `depth-sensing` falls back to
+the plain camera and reports no spine dimensions and no room geometry.
 
 While `PUBLIC_HOST` is set, anyone holding the URL can reach the sweep. Clear it
 and restart when the demo is over.

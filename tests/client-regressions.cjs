@@ -1,6 +1,8 @@
 // Controlled browser primitives; no real devices or network.
 const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),crypto=require('node:crypto');
-const src=fs.readFileSync(path.join(__dirname,'../live_demo/app.js'),'utf8').replace(/\ncreateSession\(true\);\s*$/,'\n');
+// The page loads the shared AR module before app.js; the harness does the same.
+const src=fs.readFileSync(path.join(__dirname,'../live_demo/ar.js'),'utf8')
+  +'\n'+fs.readFileSync(path.join(__dirname,'../live_demo/app.js'),'utf8').replace(/\ncreateSession\(true\);\s*$/,'\n');
 function env(){
  const elements=new Map(), sockets=[], sources=[], storage=new Map();let counter=0;
  const el=()=>({textContent:'',className:'',hidden:false,style:{},dataset:{},classList:{add(){},remove(){}},querySelector(){return el()},querySelectorAll(){return[]},addEventListener(){},focus(){},showModal(){},close(){},getTracks(){return[]}});

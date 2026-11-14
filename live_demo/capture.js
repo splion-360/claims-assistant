@@ -10,6 +10,7 @@ const canvas = document.createElement("canvas");
 let socket = null;
 let cameraConfig = null;
 let stream = null;
+let arSession = null;
 let frameTimer = null;
 let screenLock = null;
 
@@ -71,7 +72,32 @@ function sendFrame() {
   socket.send(JSON.stringify({ type: "video", data: dataUrl.split(",")[1] }));
 }
 
+// AR depth is what measures spine sizes and the room, so it is tried first.
+async function startArCapture() {
+  arSession = await startArSession(cameraConfig, (message) => {
+    if (socket && socket.readyState === WebSocket.OPEN && socket.bufferedAmount <= 512000) {
+      socket.send(JSON.stringify(message));
+    }
+  }, () => { arSession = null; stopCamera(); });
+  // A track-less stand-in keeps the "camera is on" checks working in AR mode.
+  stream = { getTracks: () => [], ar: true };
+  socket.send(JSON.stringify({ type: "camera_state", enabled: true }));
+  cameraButton.textContent = "Stop sweep";
+  cameraButton.classList.add("stop");
+  await holdScreenAwake();
+  setStatus("Sweeping in AR, measuring with depth.");
+}
+
 async function startCamera() {
+  if (await arDepthSupported()) {
+    try {
+      await startArCapture();
+      return;
+    } catch (error) {
+      setStatus(`AR depth unavailable (${error.message}); using the normal camera.`, true);
+      arSession = null;
+    }
+  }
   if (!navigator.mediaDevices?.getUserMedia) { setStatus("This browser cannot open a camera.", true); return; }
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -95,6 +121,7 @@ async function startCamera() {
 
 function stopCamera() {
   releaseScreen();
+  if (arSession) { const session = arSession; arSession = null; session.end().catch(() => {}); }
   if (frameTimer) window.clearInterval(frameTimer);
   frameTimer = null;
   stream?.getTracks().forEach((track) => track.stop());

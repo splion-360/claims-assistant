@@ -1321,6 +1321,11 @@ def inventory_script() -> FileResponse:
     return FileResponse(DEMO_DIR / "inventory.js", media_type="text/javascript")
 
 
+@app.get("/ar.js")
+def ar_script() -> FileResponse:
+    return FileResponse(DEMO_DIR / "ar.js", media_type="text/javascript")
+
+
 @app.get("/capture")
 def capture_page() -> FileResponse:
     return FileResponse(DEMO_DIR / "capture.html")
