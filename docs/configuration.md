@@ -12,7 +12,7 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 | `selection` | New coverage, detail gain, BRISQUE improvement, sharpness improvement |
 | `capture` | Quality/logging/remote cadences, evidence freshness, browser resolution and JPEG quality |
 | `scheduler` | Default worker count, pending budget and timeout |
-| `inference` | Crusoe text/vision models, token budgets, temperature, Qwen thinking and request timeouts |
+| `inference` | Crusoe text/vision models and their fallback models (tried in order when a call fails), token budgets, temperature, Qwen thinking and request timeouts |
 | `speech` | Deepgram STT/TTS models, speech request chunk length and timeouts |
 | `drex` | Drex model, endpoint, client name, timeouts, decision probability thresholds and guidance cooldowns |
 | `measurement` | Depth sampling inset/window and Depth Pro model (the AR depth-grid size is under `capture.browser`) |

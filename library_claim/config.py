@@ -152,6 +152,8 @@ class InferenceConfig(Settings):
     """Configure shared remote model and generation defaults."""
     model: Text
     vision_model: Text
+    fallback_models: list[Text]
+    vision_fallback_models: list[Text]
     max_tokens: PositiveInt
     conversation_max_tokens: PositiveInt
     temperature: Annotated[float, Field(ge=0, le=2)]

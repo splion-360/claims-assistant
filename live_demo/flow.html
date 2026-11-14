@@ -51,6 +51,7 @@
   <span class="stat">Drex calls <b id="drexCount">0</b></span>
   <span class="stat">Drex avg <b id="drexAvg">–</b></span>
   <span class="stat">Qwen calls <b id="qwenCount">0</b></span>
+  <span class="stat">Model fallbacks <b id="fallbackCount">0</b></span>
   <span id="status">Connecting…</span>
 </header>
 <main id="strips"></main>
@@ -72,7 +73,8 @@ const STRIPS = [
     ["d6", "drex", "◆ D6 Speak now? Which prompt?"], ["guidance", "local", "Prompt chosen → spoken via Speech out"]] },
 ];
 const cards = {}, timers = {};
-const LABELS = {};
+const LABELS = { fallback: "Model fallback" };
+let fallbackCount = 0;
 
 // Build the strips once; each card is updated in place by stage events.
 const root = document.getElementById("strips");
@@ -110,6 +112,12 @@ function setState(card, state, holdMs) {
 }
 
 function apply(event, replay = false) {
+  // A model fallback has no block of its own; count it and log which model took over.
+  if (event.stage === "fallback") {
+    document.getElementById("fallbackCount").textContent = ++fallbackCount;
+    if (!replay) log(event);
+    return;
+  }
   const card = cards[event.stage];
   if (!card) return;
   const detail = card.querySelector(".detail");

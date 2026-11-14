@@ -49,3 +49,81 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(provider.InferenceError):
                 await provider.complete([])
             client.assert_not_called()
+
+
+class FallbackTests(unittest.IsolatedAsyncioTestCase):
+    """A failed Crusoe call is retried on the configured fallback model."""
+
+    def client(self, handler):
+        """Route every request to a handler through one reusable mock client.
+
+        Args:
+            handler: Callable returning a response for a request.
+
+        Returns:
+            A patch that makes provider use the mock client.
+        """
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return patch.object(provider.httpx, 'AsyncClient', return_value=client)
+
+    async def test_failed_primary_retries_on_fallback_model(self):
+        """A 503 from the primary model is answered by the fallback model."""
+        models = []
+
+        def handler(request):
+            model = json.loads(request.content)['model']
+            models.append(model)
+            if model == provider.MODEL:
+                return httpx.Response(503)
+            return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': 'Hi'}}]})
+
+        with patch.dict('os.environ', {'CRUSOE_API_KEY': 'k'}), self.client(handler):
+            self.assertEqual(await provider.complete([{'role': 'user', 'content': 'Hello'}]), 'Hi')
+        self.assertEqual(models, [provider.MODEL, provider.CONFIG.inference.fallback_models[0]])
+
+    async def test_vision_call_uses_vision_fallbacks(self):
+        """An image request falls back to the configured vision fallback model."""
+        models = []
+
+        def handler(request):
+            model = json.loads(request.content)['model']
+            models.append(model)
+            if len(models) == 1:
+                return httpx.Response(500)
+            return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': '{"answer":"red","details":[]}'}}]})
+
+        with patch.dict('os.environ', {'CRUSOE_API_KEY': 'k'}), self.client(handler):
+            result = await provider.structured('Describe.', 'Input', Result, model=provider.VISION_MODEL)
+        self.assertEqual(result.answer, 'red')
+        self.assertEqual(models[1], provider.CONFIG.inference.vision_fallback_models[0])
+
+    async def test_invalid_structured_answer_retries_on_fallback(self):
+        """Data that fails validation from the primary is retried on the fallback."""
+        contents = iter(['not json', '{"answer":"blue","details":[]}'])
+
+        def handler(request):
+            return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': next(contents)}}]})
+
+        with patch.dict('os.environ', {'CRUSOE_API_KEY': 'k'}), self.client(handler):
+            self.assertEqual((await provider.structured('Describe.', 'Input', Result)).answer, 'blue')
+
+    async def test_all_models_failing_raises(self):
+        """When every model fails, the caller still gets a safe InferenceError."""
+        with patch.dict('os.environ', {'CRUSOE_API_KEY': 'k'}), self.client(lambda request: httpx.Response(503)):
+            with self.assertRaises(provider.InferenceError):
+                await provider.complete([{'role': 'user', 'content': 'Hello'}])
+
+    async def test_fallback_is_reported_to_the_flow_view(self):
+        """The flow view hears which model replaced the failed one."""
+        from library_claim import telemetry
+        events = []
+
+        def handler(request):
+            if json.loads(request.content)['model'] == provider.MODEL:
+                return httpx.Response(503)
+            return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': 'Hi'}}]})
+
+        with patch.dict('os.environ', {'CRUSOE_API_KEY': 'k'}), self.client(handler), telemetry.listening(events.append):
+            await provider.complete([{'role': 'user', 'content': 'Hello'}])
+        self.assertEqual(events[0]['stage'], 'fallback')
+        self.assertIn(provider.CONFIG.inference.fallback_models[0], events[0]['detail'])
