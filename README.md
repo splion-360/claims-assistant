@@ -51,6 +51,9 @@ Everything else — models, thresholds, cadences — is in [`config.yml`](config
 The vision model sits behind the gate: it is sent a frame only after Drex has admitted it, so
 it never receives a blurred shelf, a blank wall, or a book already recorded.
 
+Room measurement, which the figure marks as planned, now ships: the AR session's depth and
+camera pose give floor area, wall area, ceiling height and the wall area shelving covers.
+
 ---
 
 ## Drex is the decision layer
