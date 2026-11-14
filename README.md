@@ -1,1 +1,264 @@
-# cozmo-assignment
+# Claims Assistant
+
+A live voice-and-vision agent that walks a room with a policyholder and returns a contents
+claim packet in which **every figure traces back to a saved frame and a dated source**.
+
+The policyholder opens the app on a phone and starts talking. They walk the room once while
+the camera runs. The agent directs the capture as it happens — slow down, step closer, steady
+the camera — and when the sweep ends it produces `claim_packet.json` and a readable report:
+every book identified from its spine and priced, every non-book object classified, and the
+room's floor and wall area, all from the same pass.
+
+Books are the deliberate hard case. A shelf is the densest, least distinguishable inventory in
+a home: dozens of near-identical objects, most partly hidden, each needing its own price.
+
+---
+
+## Quick start
+
+```sh
+git clone <this repo> && cd cozmo-assignment
+python3.13 -m venv .venv                      # 3.10+ required
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env                          # then add your keys
+.venv/bin/python -m uvicorn live_demo.server:app --host 127.0.0.1 --port 4177
+```
+
+Open <http://127.0.0.1:4177>. Press **Talk** to speak to the agent, **Show camera** to let it
+see, **Show inventory** for the tables, **Download claim packet** for the output.
+
+### Keys
+
+| Variable | Needed for | Without it |
+| --- | --- | --- |
+| `DREX_API_KEY` | every decision in the pipeline | frames are never admitted; nothing is read |
+| `CRUSOE_API_KEY` | spine text and conversation | no titles, no replies |
+| `GOOGLE_BOOKS_API_KEY` | catalogue and prices | Open Library still resolves titles; no prices |
+| `DEEPGRAM_API_KEY` | speech in and out | type instead of talking |
+| `PUBLIC_HOST` | serving through a tunnel | localhost only (the default) |
+
+Everything else — models, thresholds, cadences — is in [`config.yml`](config.yml), documented in
+[`docs/configuration.md`](docs/configuration.md).
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph device["Phone — camera only"]
+        cam["WebXR AR camera<br/>frame + depth grid + pose"]
+    end
+    subgraph console["Laptop — conversation and inventory"]
+        ui["Sweep console<br/>notepad · books · inventory"]
+    end
+
+    cam -->|"/ws/capture<br/>6-digit pairing code"| gate
+    ui <-->|"/ws/live"| gate
+
+    subgraph server["FastAPI backend"]
+        gate["Local quality gate<br/>sharpness · exposure<br/><i>free, instant</i>"]
+        d1{{"D1 · Drex<br/>book visible?<br/>spine legible?"}}
+        vision["Vision model<br/>spine text only"]
+        d2{{"D2 · Drex<br/>same physical book?"}}
+        d3{{"D3 · Drex<br/>which catalogue work?"}}
+        depth["Depth → centimetres<br/>spines · objects · room"]
+        price["Price lookup<br/>sourced + dated"]
+        store[("SQLite + frame store")]
+        packet["claim_packet.json<br/>+ report.html"]
+    end
+
+    gate -->|passes| d1
+    gate -.->|blurred, dark| drop(["refused"])
+    d1 -->|admitted| vision
+    d1 -.->|no book| drop
+    vision --> d2 --> d3
+    d2 --> store
+    d3 --> store
+    cam -.->|depth| depth --> store
+    store --> price --> packet
+    store --> packet
+
+    style d1 fill:#2F5D3A,color:#fff
+    style d2 fill:#2F5D3A,color:#fff
+    style d3 fill:#2F5D3A,color:#fff
+    style drop fill:#f3f0e8,stroke:#aaa,color:#555
+```
+
+The expensive model sits **behind** the gate, not in front of it. It never sees a blurred shelf,
+a blank wall, or a book it has already read.
+
+---
+
+## Drex is the decision layer
+
+Not a classifier bolted on the side: every judgement in the pipeline is a `drex-max-v1.1` call,
+and the frontier model is invoked only once Drex has decided it is worth invoking.
+
+| # | Decision | Question put to Drex | Module |
+| --- | --- | --- | --- |
+| D1 | Frame admission | Is a book visible, and is its spine legible despite blur, glare or dark? | [`decisions/frame_check.py`](library_claim/decisions/frame_check.py) |
+| D2 | Same book | Is this spine the same physical copy as one already recorded? | [`decisions/same_book.py`](library_claim/decisions/same_book.py) |
+| D3 | Catalogue match | Which candidate work is the book whose spine was read? | [`identification/catalogue.py`](library_claim/identification/catalogue.py) |
+| D5 | Correction intent | Did they say "skip that", "it's a first edition", or something else? | [`decisions/corrections.py`](library_claim/decisions/corrections.py) |
+| D6 | Capture guidance | Which instruction should the agent speak now — or none? | [`live_demo/guidance_decision.py`](live_demo/guidance_decision.py) |
+| D7 | Same object | Is this the same physical lamp, or another lamp? | [`decisions/same_object.py`](library_claim/decisions/same_object.py) |
+
+Drex returns **calibrated probabilities, not labels**. Every threshold is therefore explicit
+configuration, and the band between two thresholds is recorded as `unresolved` rather than
+forced into a guess:
+
+```mermaid
+flowchart LR
+    p["Drex probability"] --> low{"≤ different_book_max"}
+    low -->|yes| new["New physical copy"]
+    low -->|no| high{"≥ same_book_min"}
+    high -->|yes| merge["Same copy — merge"]
+    high -->|no| unres["Unresolved →<br/>review queue"]
+    style merge fill:#2F5D3A,color:#fff
+    style new fill:#2F5D3A,color:#fff
+    style unres fill:#f6e5c8,color:#7a5312
+```
+
+Because several questions about the same images travel in one request, one Drex call replaces a
+handful of prompts.
+
+### Measured result
+
+**Drex acts as a decision gate, keeping 48% of frontier-model tokens off the wire.**
+
+| 61 frames, 8 sweeps | Frontier calls | Frontier tokens |
+| --- | --- | --- |
+| Without Drex — vision model gates and reads | 102 | 81,761 |
+| With Drex — Drex gates, vision model only reads | **41** | **42,599** |
+
+20 frames were refused outright and never reached the vision model. On the single sweep that
+covered a room rather than a book held to the camera it was **73%** — one sample, not an average.
+
+Reproduce:
+
+```sh
+.venv/bin/python scripts/drex_benchmark.py --limit 30        # admission vs the vision model
+.venv/bin/python scripts/same_book_benchmark.py --pairs 12   # same-book, labelled from spine text
+```
+
+---
+
+## What it refuses to do
+
+When money is attached, a plausible wrong answer costs more than a blank.
+
+- **No invented prices.** A price exists only with a retrievable URL and a retrieval date. No
+  source, no figure — the line leaves the totals and says why in the review queue.
+- **No guessed titles.** An unreadable spine is logged as an unidentified book with its
+  dimensions, never a plausible title.
+- **No measured-from-nothing.** Dimensions come from depth. A reading that could not belong to a
+  book is refused, and the line records that the depth sampled past the spine.
+- **No auto-priced art.** Framed art and mirrors wait for an appraiser unless the policyholder
+  says the piece is a print.
+- **Totals are summed in code** from the packet's own lines. No language model writes a number
+  into `claim_packet.json`.
+
+---
+
+## The claim packet
+
+```mermaid
+flowchart LR
+    s["sweep<br/>id · device · country · currency"] --- r["room<br/>floor · wall · shelved wall<br/>m² and ft²"]
+    r --- b["books[]<br/>title · ISBN · spine cm<br/>replacement + used value"]
+    b --- i["items[]<br/>category · brand<br/>priced | range | needs_appraisal"]
+    i --- t["totals<br/><i>summed in code</i>"]
+    t --- q["review_queue<br/>every uncertain line,<br/>with its reason"]
+    style t fill:#2F5D3A,color:#fff
+    style q fill:#f6e5c8,color:#7a5312
+```
+
+Downloads as a zip holding `claim_packet.json`, `report.html`, and **every frame the packet
+cites**, so each `frame_ref` resolves without a running server.
+
+---
+
+## Using a phone
+
+The phone is the camera; the laptop keeps the conversation, the inventory and the packet.
+
+| Route | How | Depth? |
+| --- | --- | --- |
+| **USB or wireless adb** | `adb reverse tcp:4177 tcp:4177`, open `http://localhost:4177/capture` | yes |
+| **Tunnel** | `ngrok http 4177`, set `PUBLIC_HOST`, open the https URL | yes |
+| **Same Wi-Fi, no tunnel** | not supported — localhost only by default | — |
+
+Press **Use phone** on the laptop for a six-digit code, type it on the phone, press **Start
+sweep**. WebXR depth needs a secure context, which both routes above provide; a phone whose
+Chrome lacks `depth-sensing` falls back to the plain camera and reports no dimensions.
+
+---
+
+## Layout
+
+```
+library_claim/
+  capture/       quality gates, frame tracking, evidence selection
+  decisions/     the Drex client and every decision that uses it
+  identification/ spine readings, association, catalogue resolution
+  items/         non-book detection, association, valuation
+  measurement/   spine sizes, room geometry from depth + pose
+  pricing/       markets, providers, stored valuations
+  packet.py      claim_packet.json and report.html
+  storage/       SQLite repository, frame store, depth sidecars
+live_demo/       FastAPI app, sweep console, phone capture page
+scripts/         the two Drex benchmarks
+tests/           388 Python tests, 52 browser tests
+```
+
+---
+
+## Tests
+
+```sh
+.venv/bin/python -m unittest discover -s tests   # 388
+node tests/client-regressions.cjs                # 29 — sweep console
+node tests/inventory-regressions.cjs             # 13 — inventory tables
+node tests/capture-regressions.cjs               #  5 — phone capture, AR path
+node tests/voice-regressions.cjs                 #  5 — microphone and playback
+```
+
+No test makes a network call: Drex, the catalogues and the price sources are faked with
+`httpx.MockTransport` or injected callables.
+
+---
+
+## Known limits
+
+Stated plainly, because the packet states them too.
+
+- **Used book values are always empty.** No keyless source exists for second-hand prices; every
+  line says so rather than estimating one.
+- **Non-book prices need a retail provider.** `pricing.item_providers` ships empty because no
+  keyless retail API covers furniture and electronics. Art correctly goes to appraisal; the rest
+  report "no retail source configured".
+- **Room geometry is a convex hull**, so alcoves read as filled, and a sweep that does not turn
+  through the room measures only the part it looked at. Both are recorded in the review queue,
+  along with the fraction of a full turn that was swept.
+- **Country and currency are never confirmed** by the agent, so pricing falls back to the
+  configured default market and the packet flags it.
+- **Accuracy has not been measured against tape-measured ground truth.** The numbers above are
+  token and latency measurements, not accuracy claims.
+
+---
+
+## Relationship to the reference app
+
+Started from the Insurance Claim Live Agent example.
+
+**Kept** — the interaction shape: live voice with the camera on, a notebook that fills while the
+claimant talks, and background work assembling a packet.
+
+**Changed** — Gemini Live gave way to Drex for every decision, with Crusoe-hosted Qwen for text
+extraction and conversation and Deepgram for speech. Narrative description became measurement:
+spines read and sized, objects classified, the room computed from depth.
+
+**Thrown away** — the avatar, the sketch feature, and the insurance intake flow. The policy
+lookup and routing code remains only because its tests still cover it; the library sweep does
+not use it.

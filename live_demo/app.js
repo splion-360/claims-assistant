@@ -136,6 +136,8 @@ function setState(nextState) {
 }
 
 function render() {
+  // Frames may already be arriving from a paired phone, including after a reload.
+  if (sessionId) watchPhoneCamera();
   renderTranscript();
   renderNotes();
   renderPinboard();
