@@ -235,7 +235,10 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
     for book in repo.list_for_sweep(Book, sweep_id):
         if roots[book.id] != book.id:
             continue
-        evidence = [row for row in observations if roots[row.book_id] == book.id]
+        rows = [row for row in observations if roots[row.book_id] == book.id]
+        # Readings, counts and sizes come from camera evidence; catalogue and user rows are shown separately.
+        evidence = [row for row in rows if row.provenance == 'visual']
+        catalogue = next((row for row in reversed(rows) if row.provenance == 'catalogue'), None)
         readings = {}
         for field in ('title', 'author', 'publisher'):
             readings[field] = preferred_reading([getattr(row, field) for row in evidence if getattr(row, field)])
@@ -251,6 +254,10 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
                        'spine_thickness_cm': dimensions[1] if dimensions else None,
                        'scale_method': dimensions[2] if dimensions else None,
                        'excluded': book.excluded, 'needs_appraisal': book.needs_appraisal,
+                       'catalogue': None if catalogue is None else {
+                           'title': catalogue.title, 'author': catalogue.author, 'edition': catalogue.edition,
+                           'isbn': catalogue.isbn, 'url': catalogue.catalogue_url,
+                           'retrieved_at': catalogue.retrieved_at.isoformat() if catalogue.retrieved_at else None},
                        'member_ids': [key for key, root in roots.items() if root == book.id],
                        'frame_ids': list(dict.fromkeys(row.frame_id for row in evidence)),
                        'observations': [{'id': row.id, 'frame_id': row.frame_id, 'bbox': row.bbox.model_dump(),
@@ -370,7 +377,8 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
         if image is None:
             raise ValueError('Cannot decode source frame')
         frames = {row.id: row for row in repo.list_for_sweep(Frame, sweep_id)}
-        observations = repo.list_for_sweep(BookObservation, sweep_id)
+        # Only camera evidence takes part in physical-copy association.
+        observations = [row for row in repo.list_for_sweep(BookObservation, sweep_id) if row.provenance == 'visual']
         associations = {row.frame_id: row for row in repo.list_for_sweep(FrameAssociation, sweep_id)}
         roots, _ = identities(repo, sweep_id)
         associated = [row.model_copy(update={'book_id': roots[row.book_id]}) for row in observations]

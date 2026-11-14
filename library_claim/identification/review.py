@@ -81,7 +81,7 @@ def reconcile(repo: Repository, sweep_id: str, frame: Frame, image, database: Pa
 
     decide_same = decide_same or same_book_probabilities
 
-    observations = repo.list_for_sweep(BookObservation, sweep_id)
+    observations = [row for row in repo.list_for_sweep(BookObservation, sweep_id) if row.provenance == 'visual']
     frames = {row.id: row for row in repo.list_for_sweep(Frame, sweep_id)}
     mappings = {row.frame_id: row for row in repo.list_for_sweep(FrameAssociation, sweep_id)}
     for current in [row for row in observations if row.frame_id == frame.id]:

@@ -84,6 +84,7 @@ from library_claim.identification.models import INSTRUCTION as BOOK_INSTRUCTION
 from library_claim.identification.models import BookFrameAnalysis
 from library_claim.identification.storage import save_analysis as save_book_analysis
 from library_claim.identification.storage import current_inventory, inventory_totals, save_measurements
+from library_claim.identification.catalogue import resolve_book
 from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
 from library_claim.storage.depth import load_depth, parse_depth_payload
 from library_claim.storage.live_capture import LiveCaptureStore
@@ -1101,6 +1102,8 @@ async def live_voice(websocket: WebSocket) -> None:
     # Depth Pro is slow on CPU: one measurement runs, only the newest frame waits.
     measure_task = None
     measure_next = None
+    # Last title sent to the catalogue per book, so a lookup repeats only when the reading changes.
+    resolved_titles = {}
     voice_on = False
     spoken_turn_id = None
     audio_queue = asyncio.Queue(maxsize=25)
@@ -1297,6 +1300,26 @@ async def live_voice(websocket: WebSocket) -> None:
             if not session.deleted:
                 session.book_inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
                 await send({"type": "state", "state": _current_ui_state(session)})
+
+    def schedule_catalogue():
+        """Look up books whose best title reading is new since their last lookup."""
+        for book in session.book_inventory:
+            title = book.get("title")
+            if title and not book.get("excluded") and resolved_titles.get(book["id"]) != title:
+                resolved_titles[book["id"]] = title
+                track(run_catalogue(dict(book)))
+
+    async def run_catalogue(book):
+        """Resolve one book against Open Library and refresh the inventory.
+
+        Args:
+            book: Inventory entry snapshot to resolve.
+        """
+        database = CAPTURE_DATA_DIR / "claims.sqlite3"
+        await asyncio.to_thread(resolve_book, database, session.session_id, book)
+        if not session.deleted:
+            session.book_inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
+            await send({"type": "state", "state": _current_ui_state(session)})
 
     def dispatch(stream, revision):
         """Start spine reading for the filter's admitted or retried candidate, if any.
@@ -1711,6 +1734,7 @@ async def live_voice(websocket: WebSocket) -> None:
             success = bool(result.get("pinned"))
             if success and session.library_sweep:
                 schedule_measure(candidate.frame_id, candidate.data)
+                schedule_catalogue()
             if success:
                 await send({"type": "state", "state": _current_ui_state(session)})
                 await update()

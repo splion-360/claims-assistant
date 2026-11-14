@@ -128,6 +128,9 @@ class BookObservation(Record):
     spine_height_cm: Centimetres | None = None
     spine_thickness_cm: Centimetres | None = None
     scale_method: Literal['webxr_depth', 'depth_pro'] | None = None
+    # Where a catalogue observation came from and when it was fetched.
+    catalogue_url: str | None = None
+    retrieved_at: AwareDatetime | None = None
 
 
 class ReviewIssue(Record):
