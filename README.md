@@ -46,7 +46,7 @@ Everything else — models, thresholds, cadences — is in [`config.yml`](config
 
 ## Architecture
 
-![Pipeline: the phone and console feed a local quality gate, Drex admits or refuses each frame, the vision model reads only admitted frames, Drex decides the rest, and depth and prices feed the claim packet](docs/images/pipeline.svg)
+![Pipeline: the phone and console feed a local quality gate, Drex admits or refuses each frame, the vision model reads only admitted frames, Drex decides the rest, and depth and prices feed the claim packet](docs/images/pipeline.png)
 
 The vision model sits behind the gate: it is sent a frame only after Drex has admitted it, so
 it never receives a blurred shelf, a blank wall, or a book already recorded.
@@ -71,7 +71,7 @@ Drex returns **calibrated probabilities, not labels**. Every threshold is theref
 configuration, and the band between two thresholds is recorded as `unresolved` rather than
 forced into a guess:
 
-![A Drex probability becomes a new copy, an unresolved line, or a merge](docs/images/band.svg)
+![A Drex probability becomes a new copy, an unresolved line, or a merge](docs/images/band.png)
 
 Because several questions about the same images travel in one request, one Drex call replaces a
 handful of prompts.
@@ -113,7 +113,7 @@ Reproduce:
 
 ## The claim packet
 
-![What a claim packet holds: sweep, room, books and items, with totals summed in code and a review queue naming every uncertain line](docs/images/packet.svg)
+![What a claim packet holds: sweep, room, books and items, with totals summed in code and a review queue naming every uncertain line](docs/images/packet.png)
 
 Downloads as a zip holding `claim_packet.json`, `report.html`, and **every frame the packet
 cites**, so each `frame_ref` resolves without a running server.
