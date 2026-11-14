@@ -9,6 +9,8 @@ import numpy as np
 from library_claim.capture.quality import QualityAssessment, QualityAssessor
 from library_claim.capture.selection import compare_evidence
 from library_claim.capture.tracking.tracker import FrameTracker, TrackingResult
+from library_claim.measurement.spine import DepthMap
+from library_claim.storage.depth import save_depth
 from library_claim.storage.live_capture import LiveCaptureStore
 from live_demo.camera_quality import logger
 from live_demo.camera_logging import CameraSummary
@@ -29,6 +31,7 @@ class PendingCheck:
     width: int
     height: int
     saved: bool
+    depth: DepthMap | None = None
 
 
 class CameraTracking:
@@ -60,13 +63,14 @@ class CameraTracking:
         self.saved_path: Path | None = None
         self.saved_reason = None
 
-    def assess(self, jpeg: bytes, frame_id: str, timestamp: float) -> TrackingResult:
+    def assess(self, jpeg: bytes, frame_id: str, timestamp: float, depth: DepthMap | None = None) -> TrackingResult:
         """Track a frame and save selected evidence on the same background worker.
 
         Args:
             jpeg: Encoded camera image.
             frame_id: Identifier of the current capture.
             timestamp: Monotonic arrival time.
+            depth: WebXR depth captured with this frame, saved beside it when the frame is kept.
 
         Returns:
             Tracking diagnostics and any verified reference mapping.
@@ -109,6 +113,8 @@ class CameraTracking:
         if self.store is not None and reason is not None:
             try:
                 self.saved_path = self.store.save(jpeg, result, captured_at, image.shape[1], image.shape[0], reason, quality)
+                if depth is not None:
+                    save_depth(self.store.root, frame_id, depth)
             except Exception:
                 # Reacquire after a failed save; future mappings must not cite lost evidence.
                 self.tracker = FrameTracker()
@@ -127,7 +133,8 @@ class CameraTracking:
             self.gate_failure = local_gate(quality)
             if self.gate_failure is None:
                 self.pending_check = PendingCheck(jpeg, frame_id, timestamp, captured_at, result, quality,
-                                                  image.shape[1], image.shape[0], saved=self.saved_path is not None)
+                                                  image.shape[1], image.shape[0], saved=self.saved_path is not None,
+                                                  depth=depth)
 
         # Disk evidence survives eviction, while comparison state remains bounded.
         live_ids = {view.frame_id for view in self.tracker.keyframes.views}
@@ -148,6 +155,8 @@ class CameraTracking:
         if self.store is not None and not pending.saved:
             self.store.save(pending.jpeg, pending.result, pending.captured_at, pending.width, pending.height,
                             'book_candidate', pending.quality)
+            if pending.depth is not None:
+                save_depth(self.store.root, pending.frame_id, pending.depth)
 
     def log(self, result: TrackingResult, timestamp: float) -> None:
         """Log detailed diagnostics at debug level and a periodic camera table.

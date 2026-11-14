@@ -129,6 +129,8 @@ class BrowserConfig(Settings):
     ideal_width: PositiveInt
     ideal_height: PositiveInt
     jpeg_quality: Annotated[float, Field(gt=0, le=1)]
+    depth_grid_width: Annotated[int, Field(gt=0, le=160)]
+    depth_grid_height: Annotated[int, Field(gt=0, le=120)]
 
 
 class CaptureConfig(Settings):
@@ -205,8 +207,6 @@ class MeasurementConfig(Settings):
     depth_inset: Annotated[float, Field(ge=0, lt=0.5)]
     depth_window_px: PositiveInt
     depth_pro_model: Text
-    depth_grid_width: PositiveInt
-    depth_grid_height: PositiveInt
 
 
 class AppConfig(Settings):

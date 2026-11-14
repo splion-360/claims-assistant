@@ -85,7 +85,7 @@ from library_claim.identification.models import BookFrameAnalysis
 from library_claim.identification.storage import save_analysis as save_book_analysis
 from library_claim.identification.storage import current_inventory, inventory_totals, save_measurements
 from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
-from library_claim.storage.depth import load_depth
+from library_claim.storage.depth import load_depth, parse_depth_payload
 from library_claim.storage.live_capture import LiveCaptureStore
 from library_claim.storage.repository import Repository
 from library_claim.storage.evidence import EvidenceStore
@@ -1140,7 +1140,30 @@ async def live_voice(websocket: WebSocket) -> None:
         task.add_done_callback(finished)
         return task
 
-    async def track_camera(data, frame_id, revision, stream, timestamp):
+    def assess_frame(stream, data, frame_id, timestamp, depth_payload):
+        """Decode optional WebXR depth and track the frame on a worker thread.
+
+        Args:
+            stream: Tracker belonging to this camera activation.
+            data: Captured JPEG bytes.
+            frame_id: Identifier of the current frame.
+            timestamp: Monotonic arrival time.
+            depth_payload: Browser depth grid, or None.
+
+        Returns:
+            The tracking result.
+        """
+        depth = None
+        if depth_payload is not None:
+            image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_GRAYSCALE)
+            if image is not None:
+                try:
+                    depth = parse_depth_payload(depth_payload, image.shape[1], image.shape[0])
+                except ValueError as error:
+                    quality_logger.warning("depth payload rejected: %s", error)
+        return stream.assess(data, frame_id, timestamp, depth=depth)
+
+    async def track_camera(data, frame_id, revision, stream, timestamp, depth_payload=None):
         """Associate a frozen camera view without blocking transport.
 
         Args:
@@ -1149,9 +1172,10 @@ async def live_voice(websocket: WebSocket) -> None:
             revision: Camera activation revision.
             stream: Tracker belonging to this camera activation.
             timestamp: Monotonic arrival time.
+            depth_payload: Optional WebXR depth grid sent with the frame.
         """
         try:
-            result = await asyncio.to_thread(stream.assess, data, frame_id, timestamp)
+            result = await asyncio.to_thread(assess_frame, stream, data, frame_id, timestamp, depth_payload)
             if (
                 not session.deleted
                 and session.camera_enabled
@@ -1849,6 +1873,7 @@ async def live_voice(websocket: WebSocket) -> None:
                                 session.camera_mode_revision,
                                 tracking_stream,
                                 now,
+                                message.get("depth") if isinstance(message.get("depth"), dict) else None,
                             )
                         )
             except (ValueError, TypeError) as exc:

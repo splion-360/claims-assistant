@@ -77,6 +77,9 @@ capture:
     ideal_width: 1280
     ideal_height: 720
     jpeg_quality: 0.8
+    # WebXR depth grid sent with each AR frame; the server accepts at most 160x120.
+    depth_grid_width: 96
+    depth_grid_height: 54
 scheduler:
   concurrency: 1
   pending_limit: 8
@@ -117,6 +120,4 @@ measurement:
   depth_inset: 0.15
   depth_window_px: 5
   depth_pro_model: apple/DepthPro-hf
-  depth_grid_width: 96
-  depth_grid_height: 54
 

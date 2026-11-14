@@ -15,7 +15,7 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 | `inference` | Crusoe text/vision models, token budgets, temperature, Qwen thinking and request timeouts |
 | `speech` | Deepgram STT/TTS models, speech request chunk length and timeouts |
 | `drex` | Drex model, endpoint, client name, timeouts, decision probability thresholds and guidance cooldowns |
-| `measurement` | Depth sampling inset/window, Depth Pro model, browser depth-grid size |
+| `measurement` | Depth sampling inset/window and Depth Pro model (the AR depth-grid size is under `capture.browser`) |
 
 For quieter console output, change `capture.summary_log_interval_s` (default 5
 seconds). It controls the combined Rich table only; scoring, tracking, and image
@@ -63,3 +63,20 @@ Before a Drex frame check, reject a frame if either condition holds:
 Dark pixels have intensity ≤16 and bright pixels ≥239. These whole-frame checks
 are instant and free; perceptual quality and book presence are decided by Drex.
 Restart the backend after editing.
+
+## Phone AR depth (Android)
+
+On Android phones whose Chrome supports WebXR `immersive-ar` with `depth-sensing`
+and `camera-access`, the camera button starts an AR session and sends a
+`capture.browser.depth_grid_width` × `depth_grid_height` depth grid with every frame.
+Saved frames keep it as `.claim-data/depth/<frame_id>.npz`, and books are measured
+immediately (`scale_method: webxr_depth`). Other browsers use the normal camera;
+their saved book frames are measured in the background with Depth Pro.
+
+WebXR needs a secure context. Serve the phone over USB so it can use `localhost`:
+
+```sh
+adb reverse tcp:4177 tcp:4177
+.venv/bin/python -m uvicorn live_demo.server:app --host 127.0.0.1 --port 4177
+# then open http://localhost:4177 in Chrome on the phone
+```

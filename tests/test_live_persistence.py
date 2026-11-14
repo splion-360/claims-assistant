@@ -157,3 +157,23 @@ class PendingCheckTests(unittest.TestCase):
             stream.assess(jpeg(np.zeros((360, 480), np.uint8)), 'd1', 0)
             self.assertIsNone(stream.pending_check)
             self.assertEqual(stream.gate_failure, 'extreme_exposure')
+
+    def test_saved_frames_keep_their_webxr_depth(self):
+        """Write the depth sidecar for saved references and for later book candidates."""
+        from unittest.mock import Mock
+        from library_claim.measurement.spine import DepthMap
+        from library_claim.storage.depth import load_depth
+
+        depth = DepthMap(depth_m=np.ones((54, 96), np.float32), fx=800, fy=800, cx=240, cy=180,
+                         image_width=480, image_height=360, method='webxr_depth')
+        with tempfile.TemporaryDirectory() as directory:
+            store = LiveCaptureStore(Path(directory), 'sweep1')
+            stream = CameraTracking(store)
+            stream.assess(jpeg(textured_view()), 'r1', 0, depth=depth)
+            self.assertIsNotNone(load_depth(Path(directory), 'r1'))
+            stream.tracker = Mock(update=Mock(return_value=TrackingResult(frame_id='u2', status='uncertain', elapsed_ms=1)),
+                                  keyframes=Mock(views=[]))
+            stream.assess(jpeg(textured_view(3)), 'u2', 2, depth=depth)
+            self.assertIsNone(load_depth(Path(directory), 'u2'))
+            stream.save_book_candidate(stream.pending_check)
+            self.assertEqual(load_depth(Path(directory), 'u2').method, 'webxr_depth')
