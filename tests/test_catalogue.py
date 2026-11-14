@@ -1,5 +1,4 @@
-"""Verify Open Library candidates, the Drex match decision and catalogue observations."""
-import json
+"""Verify Google Books candidates, the Drex match decision and catalogue observations."""
 import os
 import unittest
 from unittest.mock import patch
@@ -7,18 +6,23 @@ from unittest.mock import patch
 import httpx
 
 from library_claim.domain.models import BookObservation, ReviewIssue
-from library_claim.identification.catalogue import (WorkCandidate, choose_work, matching_edition, resolve_book,
-                                                    search_works)
+from library_claim.identification.catalogue import (WorkCandidate, catalogue_sources, choose_work,
+                                                    resolve_book, search_google_books)
 from library_claim.storage.repository import Repository
 import test_book_observations as fixtures
 from test_book_observations import detection
 
-SEARCH = {'docs': [{'key': '/works/OL1W', 'title': 'Dune', 'author_name': ['Frank Herbert'], 'first_publish_year': 1965},
-                   {'key': '/works/OL2W', 'title': 'Dune Messiah', 'author_name': ['Frank Herbert']}]}
-EDITIONS = {'entries': [{'key': '/books/OL10M', 'title': 'Dune', 'publishers': ['Ace Books'], 'isbn_13': ['9780441172719']},
-                        {'key': '/books/OL11M', 'title': 'Dune', 'publishers': ['Hodder'], 'isbn_10': ['0340839937']}]}
-CANDIDATES = [WorkCandidate('/works/OL1W', 'Dune', ['Frank Herbert'], 1965),
-              WorkCandidate('/works/OL2W', 'Dune Messiah', ['Frank Herbert'], None)]
+VOLUMES = {'items': [
+    {'id': 'vol1', 'volumeInfo': {'title': 'Dune', 'authors': ['Frank Herbert'], 'publishedDate': '1965-08-01',
+                                  'publisher': 'Ace Books', 'canonicalVolumeLink': 'https://books.google.com/vol1',
+                                  'industryIdentifiers': [{'type': 'ISBN_13', 'identifier': '9780441172719'}]}},
+    {'id': 'vol2', 'volumeInfo': {'title': 'Dune Messiah', 'authors': ['Frank Herbert'],
+                                  'canonicalVolumeLink': 'https://books.google.com/vol2'}},
+]}
+CANDIDATES = [WorkCandidate('vol1', 'Dune', ['Frank Herbert'], 1965, url='https://books.google.com/vol1',
+                            publisher='Ace Books', isbn='9780441172719'),
+              WorkCandidate('vol2', 'Dune Messiah', ['Frank Herbert'], None,
+                            url='https://books.google.com/vol2')]
 
 
 def drex_choice(label: str, probability: float) -> dict:
@@ -56,42 +60,67 @@ class CatalogueTests(unittest.TestCase):
         guard.start()
         self.addCleanup(guard.stop)
 
-    def test_search_parses_candidates(self):
-        """Query by title and author and keep the top works."""
-        def handler(request):
-            self.assertEqual(request.url.host, 'openlibrary.org')
-            self.assertEqual(request.url.params['title'], 'Dune')
-            self.assertEqual(request.url.params['author'], 'Herbert')
-            self.assertEqual(request.headers['User-Agent'], 'library-claim/1')
-            return httpx.Response(200, json=SEARCH)
+    def test_google_books_is_the_only_catalogue(self):
+        """Try Google Books alone, so one provider answers catalogue lookups."""
+        self.assertEqual([name for name, _ in catalogue_sources()], ['Google Books'])
 
-        self.assertEqual(search_works('Dune', 'Herbert', client=client(handler)), CANDIDATES)
+    def test_search_parses_candidates(self):
+        """Read title, authors, year, link, publisher and ISBN from volume records."""
+        def handler(request):
+            """Answer the volumes request and check where it went.
+
+            Args:
+                request: The outgoing request.
+
+            Returns:
+                A volumes response.
+            """
+            self.assertEqual(request.url.host, 'www.googleapis.com')
+            self.assertIn('intitle:"Dune"', request.url.params.get('q'))
+            self.assertIn('inauthor:"Herbert"', request.url.params.get('q'))
+            return httpx.Response(200, json=VOLUMES)
+
+        self.assertEqual(search_google_books('Dune', 'Herbert', client=client(handler)), CANDIDATES)
+
+    def test_search_sends_the_api_key_when_configured(self):
+        """Send the configured key so the request is not refused on the shared quota."""
+        seen = []
+
+        def handler(request):
+            """Record the key sent.
+
+            Args:
+                request: The outgoing request.
+
+            Returns:
+                An empty volumes response.
+            """
+            seen.append(request.url.params.get('key'))
+            return httpx.Response(200, json={'items': []})
+
+        with patch.dict(os.environ, {'GOOGLE_BOOKS_API_KEY': 'books-key'}):
+            search_google_books('Dune', None, client=client(handler))
+        self.assertEqual(seen, ['books-key'])
+
+    def test_search_skips_records_without_an_identity(self):
+        """Drop a volume with no ID or title rather than carrying a blank candidate."""
+        partial = {'items': [{'id': 'vol1', 'volumeInfo': {}}, {'volumeInfo': {'title': 'Dune'}}]}
+        self.assertEqual(search_google_books('Dune', None, client=client(
+            lambda request: httpx.Response(200, json=partial))), [])
 
     def test_choose_work_rejects_low_probability(self):
-        """Refuse a match below the 0.7 catalogue threshold."""
-        drex = client(lambda request: httpx.Response(200, json=drex_choice('c0', 0.6)))
-        self.assertIsNone(choose_work({'title': 'Dune'}, CANDIDATES, client=drex))
+        """Keep a match only when Drex reaches the configured threshold."""
+        self.assertIsNone(choose_work({'title': 'Dune'}, CANDIDATES,
+                                      client=client(lambda request: httpx.Response(200, json=drex_choice('c0', 0.4)))))
 
     def test_choose_work_accepts_and_none_label_returns_none(self):
-        """Accept a confident pick and treat 'none' as no match."""
-        def handler(request):
-            body = json.loads(request.content)
-            self.assertEqual(set(body['questions']['match']['criteria']), {'c0', 'c1', 'none'})
-            return httpx.Response(200, json=drex_choice('c0', 0.9))
-
-        self.assertEqual(choose_work({'title': 'Dune'}, CANDIDATES, client=client(handler)), CANDIDATES[0])
-        none = client(lambda request: httpx.Response(200, json=drex_choice('none', 0.95)))
-        self.assertIsNone(choose_work({'title': 'Dune'}, CANDIDATES, client=none))
-
-    def test_edition_only_with_unique_publisher_match(self):
-        """Fill edition and ISBN only when exactly one edition's publisher matches the spine."""
-        editions = client(lambda request: httpx.Response(200, json=EDITIONS))
-        self.assertEqual(matching_edition('/works/OL1W', 'ACE books', client=editions),
-                         {'edition': 'Dune (Ace Books)', 'isbn': '9780441172719'})
-        self.assertIsNone(matching_edition('/works/OL1W', None, client=editions))
-        doubled = {'entries': EDITIONS['entries'] + [EDITIONS['entries'][0] | {'key': '/books/OL12M'}]}
-        self.assertIsNone(matching_edition('/works/OL1W', 'Ace Books',
-                                           client=client(lambda request: httpx.Response(200, json=doubled))))
+        """Accept a confident choice and respect an explicit no-match answer."""
+        chosen = choose_work({'title': 'Dune'}, CANDIDATES,
+                             client=client(lambda request: httpx.Response(200, json=drex_choice('c0', 0.95))))
+        self.assertEqual(chosen.key, 'vol1')
+        self.assertIsNone(choose_work({'title': 'Dune'}, CANDIDATES,
+                                      client=client(lambda request: httpx.Response(200, json=drex_choice('none', 0.9)))))
+        self.assertIsNone(choose_work({'title': 'Dune'}, [], client=client(lambda request: httpx.Response(500))))
 
 
 class ResolveBookTests(unittest.TestCase):
@@ -101,50 +130,77 @@ class ResolveBookTests(unittest.TestCase):
     save_frame = fixtures.BookObservationTests.save_frame
     persist = fixtures.BookObservationTests.persist
 
-    def book(self):
+    def book(self, **fields):
         """Save one legible spine and return its inventory entry.
+
+        Args:
+            **fields: Overrides applied to the inventory entry.
 
         Returns:
             The inventory entry.
         """
-        return self.persist(books=[detection(title='Dune')])['inventory'][0]
+        return {**self.persist(books=[detection(title='Dune')])['inventory'][0], **fields}
+
+    def resolve(self, book, *, label='c0', probability=0.9, volumes=VOLUMES):
+        """Run a catalogue resolution against mocked sources.
+
+        Args:
+            book: Inventory entry to resolve.
+            label: Drex choice label.
+            probability: Probability of that label.
+            volumes: Volumes response returned by the catalogue.
+        """
+        with patch.dict(os.environ, {'DREX_API_KEY': 'k'}):
+            resolve_book(self.store.database, 'sweep', book,
+                         http=client(lambda request: httpx.Response(200, json=volumes)),
+                         drex=client(lambda request: httpx.Response(200, json=drex_choice(label, probability))))
+
+    def catalogue_rows(self):
+        """Read the catalogue observations saved for the sweep.
+
+        Returns:
+            Catalogue-provenance observations.
+        """
+        with Repository(self.store.database) as repo:
+            return [row for row in repo.list_for_sweep(BookObservation, 'sweep') if row.provenance == 'catalogue']
 
     def test_resolve_writes_catalogue_observation(self):
-        """Append a catalogue observation with URL, retrieval time and no invented edition."""
-        def http(request):
-            if request.url.path == '/search.json':
-                return httpx.Response(200, json=SEARCH)
-            return httpx.Response(200, json=EDITIONS)
-
-        book = self.book()
-        with patch.dict(os.environ, {'DREX_API_KEY': 'k'}):
-            resolve_book(self.store.database, 'sweep', book, http=client(http),
-                         drex=client(lambda request: httpx.Response(200, json=drex_choice('c0', 0.9))))
+        """Append a catalogue observation with its URL, retrieval time and no invented edition."""
+        self.resolve(self.book())
+        rows = self.catalogue_rows()
         with Repository(self.store.database) as repo:
-            rows = [row for row in repo.list_for_sweep(BookObservation, 'sweep') if row.provenance == 'catalogue']
             from library_claim.identification.storage import inventory
             entry = inventory(repo, 'sweep')[0]
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0].catalogue_url, 'https://openlibrary.org/works/OL1W')
+        self.assertEqual(rows[0].catalogue_url, 'https://books.google.com/vol1')
         self.assertIsNotNone(rows[0].retrieved_at)
+        # The spine showed no publisher, so no edition or ISBN may be attached.
         self.assertIsNone(rows[0].isbn)
+        self.assertIsNone(rows[0].edition)
         self.assertEqual(entry['catalogue']['title'], 'Dune')
         self.assertEqual(entry['title'], 'Dune')
-        self.assertEqual(entry['observation_count'], 1)
+
+    def test_isbn_needs_a_matching_spine_publisher(self):
+        """Attach an ISBN only when the publisher read on the spine matches the record."""
+        self.resolve(self.book(publisher='Ace Books'))
+        rows = self.catalogue_rows()
+        self.assertEqual(rows[0].isbn, '9780441172719')
+        self.assertEqual(rows[0].edition, 'Dune (Ace Books)')
+
+    def test_conflicting_spine_publisher_withholds_the_isbn(self):
+        """Withhold the ISBN when the spine names a different publisher."""
+        self.resolve(self.book(publisher='Hodder'))
+        self.assertIsNone(self.catalogue_rows()[0].isbn)
 
     def test_no_confident_match_adds_review_issue(self):
         """Record why a legible book has no catalogue match."""
-        book = self.book()
-        with patch.dict(os.environ, {'DREX_API_KEY': 'k'}):
-            resolve_book(self.store.database, 'sweep', book,
-                         http=client(lambda request: httpx.Response(200, json=SEARCH)),
-                         drex=client(lambda request: httpx.Response(200, json=drex_choice('none', 0.9))))
+        self.resolve(self.book(), label='none')
         with Repository(self.store.database) as repo:
             reasons = [issue.reason for issue in repo.list_for_sweep(ReviewIssue, 'sweep')]
         self.assertIn('No confident catalogue match', reasons)
 
     def test_resolve_failure_writes_nothing(self):
-        """Leave the store untouched when Open Library fails."""
+        """Leave the store untouched when the catalogue fails."""
         book = self.book()
         resolve_book(self.store.database, 'sweep', book, http=client(lambda request: httpx.Response(503)),
                      drex=client(lambda request: httpx.Response(500)))
@@ -154,98 +210,12 @@ class ResolveBookTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertNotIn('No confident catalogue match', reasons)
 
-
-LOC_RECORD = '''<?xml version="1.0"?>
-<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:numberOfRecords>1</zs:numberOfRecords><zs:records><zs:record><zs:recordData>
-<mods xmlns="http://www.loc.gov/mods/v3">
-  <titleInfo><title>Did I say you could go</title></titleInfo>
-  <name type="personal" usage="primary"><namePart>Gideon, Melanie,</namePart><role><roleTerm type="text">author</roleTerm></role></name>
-  <originInfo><dateIssued encoding="marc">2023</dateIssued><edition>First edition.</edition></originInfo>
-  <originInfo eventType="publication"><agent><namePart>Berkley,</namePart><role><roleTerm>publisher</roleTerm></role></agent></originInfo>
-  <identifier type="isbn">9780593546994 (hardcover)</identifier>
-  <identifier type="lccn">2022036391</identifier>
-</mods></zs:recordData></zs:record></zs:records></zs:searchRetrieveResponse>'''
-
-
-class LibraryOfCongressFallbackTests(unittest.TestCase):
-    """The Library of Congress catalogue is the keyless fallback after Open Library."""
-
-    setUp = fixtures.BookObservationTests.setUp
-    save_frame = fixtures.BookObservationTests.save_frame
-    persist = fixtures.BookObservationTests.persist
-
-    def test_search_parses_catalogue_records(self):
-        """Query the catalogue by title and author and keep link, publisher, edition and ISBN."""
-        from library_claim.identification.catalogue import search_library_of_congress
-
-        def handler(request):
-            self.assertEqual(request.url.host, 'lx2.loc.gov')
-            self.assertEqual(request.url.params['query'], 'dc.title="Did I Say You Could Go" and dc.creator="Gideon"')
-            return httpx.Response(200, text=LOC_RECORD)
-
-        [candidate] = search_library_of_congress('Did I Say You Could Go', 'Gideon', client=client(handler))
-        self.assertEqual((candidate.source, candidate.title, candidate.authors, candidate.first_publish_year),
-                         ('loc', 'Did I say you could go', ['Gideon, Melanie'], 2023))
-        self.assertEqual((candidate.url, candidate.publisher, candidate.isbn, candidate.edition),
-                         ('https://lccn.loc.gov/2022036391', 'Berkley', '9780593546994', 'First edition.'))
-
-    def resolve(self, publisher=None, open_library=None):
-        """Resolve one legible book when Open Library has no match.
-
-        Args:
-            publisher: Publisher read from the spine.
-            open_library: Optional response factory for Open Library requests.
-
-        Returns:
-            Catalogue observations written and the hosts that were queried.
-        """
-        hosts = []
-        book = self.persist(books=[detection(title='Did I Say You Could Go')])['inventory'][0]
-        book['publisher'] = publisher
-
-        def http(request):
-            hosts.append(request.url.host)
-            if request.url.host == 'lx2.loc.gov':
-                return httpx.Response(200, text=LOC_RECORD)
-            return open_library(request) if open_library else httpx.Response(200, json=SEARCH)
-
-        def drex(request):
-            criteria = json.loads(request.content)['questions']['match']['criteria']
-            return httpx.Response(200, json=drex_choice('c0' if 'Gideon' in criteria.get('c0', '') else 'none', 0.9))
-
-        with patch.dict(os.environ, {'DREX_API_KEY': 'k'}):
-            resolve_book(self.store.database, 'sweep', book, http=client(http), drex=client(drex))
-        with Repository(self.store.database) as repo:
-            rows = [row for row in repo.list_for_sweep(BookObservation, 'sweep') if row.provenance == 'catalogue']
-        return rows, hosts
-
-    def test_library_of_congress_answers_when_open_library_has_no_match(self):
-        """Library of Congress matches when Drex rejects every Open Library work."""
-        rows, hosts = self.resolve()
-        self.assertEqual(rows[0].catalogue_url, 'https://lccn.loc.gov/2022036391')
-        self.assertEqual(hosts[-1], 'lx2.loc.gov')
-        self.assertIsNone(rows[0].isbn)
-
-    def test_open_library_outage_falls_back_to_library_of_congress(self):
-        """An Open Library failure still lets the Library of Congress answer."""
-        rows, _ = self.resolve(open_library=lambda request: httpx.Response(503))
-        self.assertEqual(rows[0].catalogue_url, 'https://lccn.loc.gov/2022036391')
-
     def test_catalogue_stage_reports_which_provider_answered(self):
-        """The flow view's catalogue block names the provider of each search."""
+        """Name the answering provider in the flow view's catalogue block."""
         from library_claim import telemetry
         events = []
         with telemetry.listening(events.append):
-            self.resolve()
-        providers = [e['model'] for e in events if e['stage'] == 'catalogue' and e['phase'] == 'done']
-        self.assertEqual(providers, ['Open Library', 'Library of Congress'])
-
-    def test_catalogue_edition_and_isbn_need_matching_spine_publisher(self):
-        """Edition and ISBN come from the record only when the spine's publisher matches."""
-        rows, _ = self.resolve(publisher='Berkley')
-        self.assertEqual((rows[0].edition, rows[0].isbn), ('First edition.', '9780593546994'))
-
-    def test_catalogue_order_is_open_library_then_library_of_congress(self):
-        """Only the two keyless catalogues are used, in this order."""
-        from library_claim.identification.catalogue import catalogue_sources
-        self.assertEqual([name for name, _ in catalogue_sources()], ['Open Library', 'Library of Congress'])
+            self.resolve(self.book())
+        providers = [event['model'] for event in events
+                     if event['stage'] == 'catalogue' and event['phase'] == 'done']
+        self.assertEqual(providers, ['Google Books'])

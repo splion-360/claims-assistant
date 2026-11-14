@@ -298,7 +298,7 @@ function renderBookInventory() {
       <small>${escapeHtml(bookSize(book))}</small>
       ${book.excluded ? "<small>Excluded by you · not counted</small>" : ""}
       ${book.needs_appraisal ? "<small>Needs human appraisal</small>" : ""}
-      ${book.catalogue ? `<small>Open Library: ${escapeHtml(book.catalogue.title)}${book.catalogue.edition ? ` · ${escapeHtml(book.catalogue.edition)}` : ""}</small>` : ""}
+      ${book.catalogue ? `<small>Google Books: ${escapeHtml(book.catalogue.title)}${book.catalogue.edition ? ` · ${escapeHtml(book.catalogue.edition)}` : ""}</small>` : ""}
       <small>${group.length > 1 ? `${group.length} sightings to compare · not a copy count` : `${Number(book.observation_count)} observation(s)`}</small>
       ${book.status === "unresolved" ? "<small>Association unresolved</small>" : ""}</span></button>`;
   }).join("") : `<p class="empty">${bookTab === "review" ? "No books need review yet." : "No identified books yet."}</p>`;
@@ -314,7 +314,7 @@ function renderBookDetail() {
   const others = books.filter(item => item.id !== book.id && !(item.frame_ids || []).some(id => (book.frame_ids || []).includes(id)));
   const other = others.find(item => item.id === compareBookId) || others.find(item => (book.candidates || []).includes(item.id));
   compareBookId = other?.id || null;
-  const panel = item => `<article class="comparison-card">${cropImage(item, "book-best")}<h3>${escapeHtml(item.title || "Title unreadable")}</h3><p>${escapeHtml(item.author || "Author unreadable")}</p><p>${escapeHtml(bookSize(item))}</p>${item.catalogue?.url ? `<p><a href="${escapeHtml(item.catalogue.url)}" target="_blank" rel="noopener">Open Library: ${escapeHtml(item.catalogue.title)}</a>${item.catalogue.isbn ? ` · ISBN ${escapeHtml(item.catalogue.isbn)}` : ""}</p>` : ""}<small>${Number(item.observation_count)} observation(s)</small></article>`;
+  const panel = item => `<article class="comparison-card">${cropImage(item, "book-best")}<h3>${escapeHtml(item.title || "Title unreadable")}</h3><p>${escapeHtml(item.author || "Author unreadable")}</p><p>${escapeHtml(bookSize(item))}</p>${item.catalogue?.url ? `<p><a href="${escapeHtml(item.catalogue.url)}" target="_blank" rel="noopener">Google Books: ${escapeHtml(item.catalogue.title)}</a>${item.catalogue.isbn ? ` · ISBN ${escapeHtml(item.catalogue.isbn)}` : ""}</p>` : ""}<small>${Number(item.observation_count)} observation(s)</small></article>`;
   detail.innerHTML = `<h3>${other ? "Compare these sightings" : "Book details"}</h3>
     <p>${other ? "These may show the same book. Compare the visible design and text; similar titles alone do not establish identity." : "Visual reading only; not catalogue verification."}</p>
     <div class="book-comparison">${panel(book)}${other ? panel(other) : ""}</div>

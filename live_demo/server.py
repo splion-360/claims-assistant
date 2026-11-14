@@ -1431,7 +1431,7 @@ async def live_voice(websocket: WebSocket) -> None:
                 track(run_catalogue(dict(book)))
 
     async def run_catalogue(book):
-        """Resolve one book against Open Library and refresh the inventory.
+        """Resolve one book against the catalogue and refresh the inventory.
 
         Args:
             book: Inventory entry snapshot to resolve.
@@ -2141,7 +2141,7 @@ async def flow_events(request: Request) -> StreamingResponse:
                       "d5": CONFIG.drex.model, "d6": CONFIG.drex.model, "spine_reading": VISION_MODEL,
                       "reply": MODEL, "stt": CONFIG.speech.stt_model, "tts": CONFIG.speech.tts_model,
                       "depth": CONFIG.measurement.depth_pro_model,
-                      "catalogue": "Open Library → Library of Congress"}
+                      "catalogue": "Google Books"}
             setup = {"measurement": CONFIG.measurement.enabled, "models": models, "recent": list(FLOW.recent)}
             yield f"event: setup\ndata: {json.dumps(setup)}\n\n"
             while not await request.is_disconnected():

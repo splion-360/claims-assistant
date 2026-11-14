@@ -1,16 +1,13 @@
 """Fetch book prices and exchange rates from sources an adjuster can retrieve."""
 from datetime import datetime, timezone
 import logging
-import os
 
 import httpx
 
 from library_claim.config import CONFIG
+from library_claim.sources import GOOGLE_BOOKS, HEADERS, google_books_params
 from .models import Price
 
-GOOGLE_BOOKS = 'https://www.googleapis.com/books/v1/volumes'
-# Generic client name only; no policyholder or project details reach a price source.
-HEADERS = {'User-Agent': 'library-claim/1'}
 logger = logging.getLogger(__name__)
 
 
@@ -59,11 +56,7 @@ def google_books_price(title: str, author: str | None, isbn: str | None, market,
         query = f'intitle:"{title}"' + (f' inauthor:"{author}"' if author else '')
     else:
         raise PriceUnavailable('No title or ISBN to price')
-    params = {'q': query, 'country': market.country, 'maxResults': 5}
-    # An API key lifts the shared anonymous quota; without one the source may refuse.
-    key = os.environ.get('GOOGLE_BOOKS_API_KEY')
-    if key:
-        params['key'] = key
+    params = google_books_params(q=query, country=market.country, maxResults=5)
     http, owned = _client(client)
     try:
         response = http.get(GOOGLE_BOOKS, params=params)

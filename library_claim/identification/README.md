@@ -158,7 +158,12 @@ tests; the downloaded library summary is evidence, not the final assignment pack
 
 ## Catalogue lookup
 
-A legible title is searched on Open Library first, then the Library of Congress catalogue
-(SRU, no key) when Open Library fails, returns nothing, or Drex finds no confident match.
-Edition and ISBN are filled only when the publisher read on the spine matches exactly one Open
-Library edition, or the matched Library of Congress record's publisher.
+A legible title is searched on Google Books, the single catalogue. Drex chooses among
+the returned volumes and must reach `drex.catalogue_min` before a match is accepted;
+otherwise the book keeps a `No confident catalogue match` review reason. Edition and
+ISBN are filled only when the publisher read on the spine matches the matched volume's
+publisher, so an ISBN is never attached to a printing the sweep did not see.
+
+`GOOGLE_BOOKS_API_KEY` lifts the shared anonymous quota. Without it the catalogue
+refuses most requests and books stay unresolved rather than being matched on guesswork.
+The same key and endpoint serve price lookups through `library_claim.sources`.

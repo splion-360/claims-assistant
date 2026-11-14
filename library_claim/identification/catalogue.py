@@ -1,10 +1,8 @@
-"""Resolve legible spine readings to catalogue entries (Open Library, then Library of Congress), with Drex choosing."""
+"""Resolve legible spine readings to Google Books catalogue entries, with Drex choosing."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
-import re
-from xml.etree import ElementTree
 
 import httpx
 
@@ -12,14 +10,10 @@ from library_claim import telemetry
 from library_claim.config import CONFIG
 from library_claim.decisions.drex import DrexError, choice, decide
 from library_claim.domain.models import BookObservation, ReviewIssue
+from library_claim.sources import GOOGLE_BOOKS, HEADERS, google_books_params, volume_isbn
 from library_claim.storage.repository import Repository
 from .matching import normalize
 
-OPEN_LIBRARY = 'https://openlibrary.org'
-LIBRARY_OF_CONGRESS = 'https://lx2.loc.gov/sru/lcdb'
-MODS = {'m': 'http://www.loc.gov/mods/v3'}
-# Generic client name only; no user or project details go to either catalogue.
-HEADERS = {'User-Agent': 'library-claim/1'}
 logger = logging.getLogger(__name__)
 
 
@@ -30,171 +24,73 @@ class WorkCandidate:
     title: str
     authors: list[str]
     first_publish_year: int | None
-    source: str = 'openlibrary'
-    # Library of Congress records carry their own link, publisher, edition and ISBN;
-    # Open Library editions are fetched separately.
+    source: str = 'googlebooks'
     url: str | None = None
     publisher: str | None = None
     isbn: str | None = None
     edition: str | None = None
 
 
-def _get(path: str, params: dict | None, client: httpx.Client | None, base: str = OPEN_LIBRARY) -> dict:
-    """Fetch JSON from a catalogue.
+def _year(published: str | None) -> int | None:
+    """Read the publication year from a catalogue date of any precision.
 
     Args:
-        path: URL path appended to `base`.
-        params: Query parameters.
-        client: Optional HTTP client, used by tests.
-        base: Catalogue base URL.
+        published: A date such as '2016', '2016-09' or '2016-09-27'.
 
     Returns:
-        The decoded JSON body.
+        The year, or None when the record carries no usable date.
+    """
+    try:
+        return int(str(published or '')[:4])
+    except ValueError:
+        return None
+
+
+def search_google_books(title: str, author: str | None, *,
+                        client: httpx.Client | None = None) -> list[WorkCandidate]:
+    """Search Google Books by title and, when read, author.
+
+    Args:
+        title: Title read from the spine.
+        author: Author read from the spine, if any.
+        client: Optional HTTP client, used by tests.
+
+    Returns:
+        Up to five candidate volumes.
 
     Raises:
         httpx.HTTPError: The request failed or returned an error status.
     """
+    query = f'intitle:"{title}"' + (f' inauthor:"{author}"' if author else '')
     owned = client is None
     client = client or httpx.Client(timeout=15)
     try:
-        response = client.get(base + path, params=params, headers=HEADERS)
+        response = client.get(GOOGLE_BOOKS, params=google_books_params(q=query, maxResults=5), headers=HEADERS)
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
     finally:
         if owned:
             client.close()
-
-
-def search_works(title: str, author: str | None, *, client: httpx.Client | None = None) -> list[WorkCandidate]:
-    """Search Open Library works by title and, when read, author.
-
-    Args:
-        title: Title read from the spine.
-        author: Author read from the spine, if any.
-        client: Optional HTTP client, used by tests.
-
-    Returns:
-        Up to five candidate works.
-    """
-    params = {'title': title, 'limit': 5, 'fields': 'key,title,author_name,first_publish_year'}
-    if author:
-        params['author'] = author
-    docs = _get('/search.json', params, client).get('docs', [])
-    return [WorkCandidate(doc['key'], doc.get('title', ''), doc.get('author_name', []), doc.get('first_publish_year'))
-            for doc in docs[:5] if doc.get('key')]
-
-
-def matching_edition(work_key: str, publisher: str | None, *, client: httpx.Client | None = None) -> dict | None:
-    """Pick an edition only when the spine's publisher identifies exactly one.
-
-    Args:
-        work_key: Open Library work key, e.g. '/works/OL1W'.
-        publisher: Publisher read from the spine.
-        client: Optional HTTP client, used by tests.
-
-    Returns:
-        Edition label and ISBN, or None when the evidence does not single out one edition.
-    """
-    if not publisher:
-        return None
-    entries = _get(f'{work_key}/editions.json', {'limit': 50}, client).get('entries', [])
-    matches = [entry for entry in entries
-               if any(normalize(name) == normalize(publisher) for name in entry.get('publishers', []))]
-    if len(matches) != 1:
-        return None
-    edition = matches[0]
-    isbn = (edition.get('isbn_13') or edition.get('isbn_10') or [None])[0]
-    return {'edition': f"{edition.get('title', 'Edition')} ({edition['publishers'][0]})", 'isbn': isbn}
-
-
-def search_library_of_congress(title: str, author: str | None, *,
-                               client: httpx.Client | None = None) -> list[WorkCandidate]:
-    """Search the Library of Congress catalogue (SRU, MODS records) by title and, when read, author.
-
-    Args:
-        title: Title read from the spine.
-        author: Author read from the spine, if any.
-        client: Optional HTTP client, used by tests.
-
-    Returns:
-        Up to five catalogue records.
-
-    Raises:
-        ValueError: The catalogue returned something other than MODS XML.
-    """
-    # Quotes would end the CQL phrase early, so they are dropped from spine readings.
-    query = f'dc.title="{title.replace(chr(34), "")}"'
-    if author:
-        query += f' and dc.creator="{author.replace(chr(34), "")}"'
-    params = {'version': '1.1', 'operation': 'searchRetrieve', 'maximumRecords': 5, 'recordSchema': 'mods', 'query': query}
-    owned = client is None
-    client = client or httpx.Client(timeout=15)
-    try:
-        response = client.get(LIBRARY_OF_CONGRESS, params=params, headers=HEADERS)
-        response.raise_for_status()
-        root = ElementTree.fromstring(response.text)
-    except ElementTree.ParseError:
-        raise ValueError('Library of Congress returned invalid XML') from None
-    finally:
-        if owned:
-            client.close()
-
-    def text(node, path):
-        """First matching text, with trailing catalogue punctuation removed.
-
-        Args:
-            node: MODS element.
-            path: Namespaced XPath.
-
-        Returns:
-            Cleaned text, or None.
-        """
-        found = node.find(path, MODS)
-        return found.text.strip().rstrip(',:;/ ').strip() if found is not None and found.text else None
-
     candidates = []
-    for record in root.iter('{http://www.loc.gov/mods/v3}mods'):
-        lccn = text(record, "m:identifier[@type='lccn']")
-        isbn = text(record, "m:identifier[@type='isbn']")
-        primary = record.find("m:name[@usage='primary']/m:namePart", MODS)
-        year = re.search(r'\d{4}', text(record, 'm:originInfo/m:dateIssued') or '')
-        # Catalogues file leading articles ("The") separately so they do not affect sorting.
-        title = ' '.join(part for part in (text(record, 'm:titleInfo/m:nonSort'), text(record, 'm:titleInfo/m:title')) if part)
+    for item in (payload.get('items') or [])[:5]:
+        info = item.get('volumeInfo') or {}
+        if not item.get('id') or not info.get('title'):
+            continue
         candidates.append(WorkCandidate(
-            key=lccn or title, title=title,
-            authors=[primary.text.strip().rstrip(',. ')] if primary is not None and primary.text else [],
-            first_publish_year=int(year.group()) if year else None, source='loc',
-            url=f'https://lccn.loc.gov/{lccn}' if lccn else None,
-            publisher=_publisher(record),
-            isbn=isbn.split()[0] if isbn else None, edition=text(record, 'm:originInfo/m:edition')))
-    return candidates[:5]
-
-
-def _publisher(record) -> str | None:
-    """Publisher of a MODS record, from a publisher agent or the older publisher element.
-
-    Args:
-        record: MODS record element.
-
-    Returns:
-        Publisher name without trailing catalogue punctuation, or None.
-    """
-    for agent in record.iterfind('m:originInfo/m:agent', MODS):
-        role = agent.find('m:role/m:roleTerm', MODS)
-        name = agent.find('m:namePart', MODS)
-        if role is not None and (role.text or '').strip().lower() == 'publisher' and name is not None and name.text:
-            return name.text.strip().rstrip(',:;/ ').strip()
-    found = record.find('m:originInfo/m:publisher', MODS)
-    return found.text.strip().rstrip(',:;/ ').strip() if found is not None and found.text else None
+            key=item['id'], title=info['title'], authors=info.get('authors', []),
+            first_publish_year=_year(info.get('publishedDate')),
+            url=info.get('canonicalVolumeLink') or info.get('infoLink'),
+            publisher=info.get('publisher'), isbn=volume_isbn(info)))
+    return candidates
 
 
 def catalogue_sources() -> list[tuple[str, object]]:
-    """Keyless catalogues to try, in order.
+    """Catalogues to try, in order.
 
     Returns:
         (provider name, search function) pairs.
     """
-    return [('Open Library', search_works), ('Library of Congress', search_library_of_congress)]
+    return [('Google Books', search_google_books)]
 
 
 def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: httpx.Client | None = None) -> WorkCandidate | None:
@@ -202,7 +98,7 @@ def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: http
 
     Args:
         readings: Spine readings (title, author, publisher, visible_text).
-        candidates: Open Library candidates.
+        candidates: Catalogue candidates.
         client: Optional HTTP client, used by tests.
 
     Returns:
@@ -226,22 +122,22 @@ def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: http
     return candidates[int(answer.choice[1:])]
 
 
-def _edition(work: WorkCandidate, publisher: str | None, http: httpx.Client | None) -> dict | None:
+def _edition(work: WorkCandidate, publisher: str | None) -> dict | None:
     """Edition and ISBN for a matched entry, only when the spine's publisher singles one out.
+
+    The publisher read from the spine must match the record's, so an ISBN is
+    never attached to a printing the sweep did not actually see.
 
     Args:
         work: Matched catalogue entry.
         publisher: Publisher read from the spine.
-        http: Optional HTTP client, used by tests.
 
     Returns:
-        Edition label and ISBN, or None.
+        Edition label and ISBN, or None when the evidence does not single out one edition.
     """
-    if work.source != 'openlibrary':
-        if publisher and work.publisher and normalize(publisher) == normalize(work.publisher):
-            return {'edition': work.edition or f'{work.title} ({work.publisher})', 'isbn': work.isbn}
-        return None
-    return matching_edition(work.key, publisher, client=http)
+    if publisher and work.publisher and normalize(publisher) == normalize(work.publisher):
+        return {'edition': work.edition or f'{work.title} ({work.publisher})', 'isbn': work.isbn}
+    return None
 
 
 def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Client | None = None,
@@ -252,7 +148,7 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
         database: Capture SQLite path.
         sweep_id: Owning sweep.
         book: Inventory entry with a title and at least one visual observation.
-        http: Optional Open Library client, used by tests.
+        http: Optional catalogue client, used by tests.
         drex: Optional Drex client, used by tests.
     """
     if not book.get('title') or not book.get('observations'):
@@ -281,10 +177,7 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
             break
     if not answered:
         return
-    try:
-        edition = _edition(work, book.get('publisher'), http) if work else None
-    except (httpx.HTTPError, ValueError, KeyError):
-        edition = None
+    edition = _edition(work, book.get('publisher')) if work else None
     with Repository(database) as repo:
         if work is None:
             repo.add(ReviewIssue(sweep_id=sweep_id, book_id=book['id'], field='catalogue',
@@ -295,5 +188,5 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
                                  title=work.title, author=', '.join(work.authors) or None,
                                  edition=edition['edition'] if edition else None,
                                  isbn=edition['isbn'] if edition else None,
-                                 catalogue_url=work.url or OPEN_LIBRARY + work.key, retrieved_at=datetime.now(timezone.utc),
+                                 catalogue_url=work.url, retrieved_at=datetime.now(timezone.utc),
                                  source_model=CONFIG.drex.model))

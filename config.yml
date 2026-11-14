@@ -146,7 +146,7 @@ pricing:
   appraisal_threshold: 250.0
   appraisal_keywords: [signed, inscribed, first edition, limited edition, rare, antiquarian, folio society]
   # Markets tried for a converted figure when the local market has no price.
-  convert_from: [GB]
+  convert_from: [US, GB]
   fx_base_url: https://api.frankfurter.app
   timeout_s: 15
   connect_timeout_s: 10
