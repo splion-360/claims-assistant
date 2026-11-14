@@ -1,7 +1,7 @@
 """Verify exact-frame admission, bounded pending work, and remote retry limits."""
 import unittest
 
-from library_claim.capture.relevance.classifier import decide
+from test_frame_check import check
 from library_claim.config import CONFIG
 from live_demo.camera_filter import CameraCandidate, CameraFilter
 
@@ -10,11 +10,9 @@ class CameraFilterTests(unittest.TestCase):
     """Exercise admission independently from network and pretrained weights."""
 
     def test_rejected_and_unavailable_frames_never_dispatch(self):
-        """Keep below-threshold and failed local assessments off the remote path."""
+        """Keep unchecked and below-threshold frames off the remote path."""
         candidate = CameraCandidate(b'frame', 'id', 0, 1)
-        for assessment in [None, decide({'books': .1}, 0),
-                           decide({'books': .4}, 0).model_copy(update={'status': 'quality_blocked'}),
-                           decide({'books': .4}, 0).model_copy(update={'status': 'unavailable'})]:
+        for assessment in [None, check(0.1)]:
             gate = CameraFilter()
             gate.offer(candidate, assessment)
             self.assertIsNone(gate.take(0, 1, busy=False, at_limit=False))
@@ -24,7 +22,7 @@ class CameraFilterTests(unittest.TestCase):
         """Retain one approved frame while a remote request is busy."""
         gate = CameraFilter()
         first, second = CameraCandidate(b'a', 'a', 0, 1), CameraCandidate(b'b', 'b', 1, 1)
-        passed = decide({'books': .4, 'empty_background': .9}, 0)
+        passed = check(0.9)
         gate.offer(first, passed)
         self.assertIsNone(gate.take(0, 1, busy=True, at_limit=False))
         gate.offer(second, passed)
@@ -35,24 +33,24 @@ class CameraFilterTests(unittest.TestCase):
         """Retry a fresh failed candidate without resubmitting successful bytes."""
         gate = CameraFilter()
         frame = CameraCandidate(b'a', 'a', 0, 1)
-        gate.offer(frame, decide({'books': .4}, 0))
+        gate.offer(frame, check(0.9))
         self.assertEqual(gate.take(0, 1, busy=False, at_limit=False), frame)
         gate.finish(frame, False)
         self.assertIsNone(gate.take(1, 1, busy=False, at_limit=False))
         self.assertEqual(gate.reason, 'rate_limited')
         self.assertEqual(gate.take(CONFIG.capture.remote_interval_s, 1, busy=False, at_limit=False), frame)
         gate.finish(frame, True)
-        gate.offer(CameraCandidate(b'a', 'new-id', 9, 1), decide({'books': .4}, 0))
+        gate.offer(CameraCandidate(b'a', 'new-id', 9, 1), check(0.9))
         self.assertIsNone(gate.pending)
 
     def test_stale_activation_expiry_and_photo_limit(self):
         """Never dispatch expired or prior-activation candidates or exceed capacity."""
         for now, revision in [(0, 2), (CONFIG.capture.frame_max_age_s + 1, 1)]:
             gate = CameraFilter()
-            gate.offer(CameraCandidate(b'a', 'a', 0, 1), decide({'books': .4}, 0))
+            gate.offer(CameraCandidate(b'a', 'a', 0, 1), check(0.9))
             self.assertIsNone(gate.take(now, revision, busy=False, at_limit=False))
             self.assertIsNone(gate.pending)
-        gate.offer(CameraCandidate(b'a', 'a', 0, 1), decide({'books': .4}, 0))
+        gate.offer(CameraCandidate(b'a', 'a', 0, 1), check(0.9))
         self.assertIsNone(gate.take(0, 1, busy=False, at_limit=True))
         self.assertEqual(gate.reason, 'photo_limit')
 

@@ -125,3 +125,35 @@ class LivePersistenceTests(unittest.TestCase):
                 repo.add_many([frame, mapping])
             with self.assertRaises(KeyError):
                 repo.get(Frame, 'new')
+
+
+class PendingCheckTests(unittest.TestCase):
+    """Exercise when uncertain-tracking frames reach the disk."""
+
+    def test_uncertain_frame_not_saved_until_checked(self):
+        """Hold an untracked frame for D1 and save it only as a book candidate."""
+        from unittest.mock import Mock
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = LiveCaptureStore(Path(directory), 'sweep1')
+            stream = CameraTracking(store)
+            stream.tracker = Mock(update=Mock(return_value=TrackingResult(frame_id='u1', status='uncertain', elapsed_ms=1)),
+                                  keyframes=Mock(views=[]))
+            stream.assess(jpeg(textured_view()), 'u1', 0)
+            pending = stream.pending_check
+            self.assertIsNotNone(pending)
+            self.assertFalse(pending.saved)
+            with Repository(store.database) as repo:
+                self.assertEqual(repo.list_for_sweep(Frame, 'sweep1'), [])
+            stream.save_book_candidate(pending)
+            with Repository(store.database) as repo:
+                frames = repo.list_for_sweep(Frame, 'sweep1')
+            self.assertEqual([frame.selection_reason for frame in frames], ['book_candidate'])
+
+    def test_dark_frame_fails_local_gate(self):
+        """Skip D1 for frames the local exposure check already rejects."""
+        with tempfile.TemporaryDirectory() as directory:
+            stream = CameraTracking(LiveCaptureStore(Path(directory), 'sweep1'))
+            stream.assess(jpeg(np.zeros((360, 480), np.uint8)), 'd1', 0)
+            self.assertIsNone(stream.pending_check)
+            self.assertEqual(stream.gate_failure, 'extreme_exposure')

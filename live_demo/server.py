@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import base64
 import contextlib
 import io
@@ -94,7 +95,8 @@ import numpy as np
 from live_demo.camera_filter import CameraCandidate
 from live_demo.camera_quality import log_scores
 from live_demo.camera_quality import logger as quality_logger
-from live_demo.camera_relevance import CameraRelevance
+from live_demo.frame_checker import FrameChecker
+from library_claim.decisions.frame_check import check_frame, is_book_candidate, save_frame_check
 from live_demo.camera_tracking import CameraTracking
 from provider import (
     MODEL,
@@ -1076,7 +1078,10 @@ async def live_voice(websocket: WebSocket) -> None:
     text_task = camera_task = speech_task = workflow_task = None
     tracking_task = None
     capture_store = LiveCaptureStore(CAPTURE_DATA_DIR, session.session_id)
-    tracking_stream = CameraTracking(capture_store, relevance=CameraRelevance())
+    tracking_stream = CameraTracking(capture_store)
+    # One D1 scheduler per camera activation, so a stale activation cannot admit frames.
+    frame_checker = FrameChecker(check_frame)
+    drex_error_reported = False
     voice_on = False
     spoken_turn_id = None
     audio_queue = asyncio.Queue(maxsize=25)
@@ -1126,7 +1131,6 @@ async def live_voice(websocket: WebSocket) -> None:
             stream: Tracker belonging to this camera activation.
             timestamp: Monotonic arrival time.
         """
-        nonlocal camera_task
         try:
             result = await asyncio.to_thread(stream.assess, data, frame_id, timestamp)
             if (
@@ -1134,27 +1138,12 @@ async def live_voice(websocket: WebSocket) -> None:
                 and session.camera_enabled
                 and session.camera_mode_revision == revision
             ):
-                assessment = (
-                    stream.latest_relevance
-                    if stream.relevance_frame_id == frame_id
-                    else None
-                )
-                gate = stream.remote_filter
-                gate.offer(
-                    CameraCandidate(data, frame_id, timestamp, revision), assessment
-                )
-                candidate = gate.take(
-                    time.monotonic(),
-                    revision,
-                    busy=(camera_task is not None and not camera_task.done()) or session.sweep_phase == "Resuming",
-                    at_limit=len(session.evidence_photos) >= MAX_PHOTOS,
-                )
-                quality_logger.debug(
-                    "camera_filter frame=%s reason=%s", frame_id, gate.reason
-                )
-                if candidate is not None:
-                    stream.requested_capture = False
-                    camera_task = track(capture(candidate, gate))
+                pending = stream.pending_check
+                if pending is not None:
+                    checker = frame_checker
+                    track(checker.submit(pending, lambda item, check: admit_checked(item, check, revision, stream, checker)))
+                # Failed captures are retried from the filter even when this frame needs no new check.
+                dispatch(stream, revision)
                 stream.log(result, timestamp)
                 if stream.quality_frame_id == frame_id:
                     log_scores(session.session_id, frame_id, stream.latest_quality)
@@ -1162,6 +1151,61 @@ async def live_voice(websocket: WebSocket) -> None:
             raise
         except Exception as error:
             quality_logger.warning("camera_tracking failed=%s", type(error).__name__)
+
+    def dispatch(stream, revision):
+        """Start spine reading for the filter's admitted or retried candidate, if any.
+
+        Args:
+            stream: Tracker whose filter holds candidates.
+            revision: Current camera activation revision.
+        """
+        nonlocal camera_task
+        gate = stream.remote_filter
+        candidate = gate.take(
+            time.monotonic(),
+            revision,
+            busy=(camera_task is not None and not camera_task.done()) or session.sweep_phase == "Resuming",
+            at_limit=len(session.evidence_photos) >= MAX_PHOTOS,
+        )
+        quality_logger.debug("camera_filter reason=%s", gate.reason)
+        if candidate is not None:
+            stream.requested_capture = False
+            camera_task = track(capture(candidate, gate))
+
+    async def admit_checked(pending, check, revision, stream, checker):
+        """Save, record and admit a frame once Drex has decided it.
+
+        Args:
+            pending: Frame held by tracking for its D1 check.
+            check: Drex result, or None when the decision failed.
+            revision: Camera activation revision the frame belongs to.
+            stream: Tracker belonging to that activation.
+            checker: Scheduler that produced the decision.
+        """
+        nonlocal drex_error_reported
+        try:
+            if session.deleted or not session.camera_enabled or session.camera_mode_revision != revision:
+                return
+            if check is None:
+                error = checker.last_error
+                # Report credential or credit failures once; other failures just skip the frame.
+                if error is not None and error.status in (401, 402) and not drex_error_reported:
+                    drex_error_reported = True
+                    await send({"type": "error", "message": "Drex decisions unavailable; check credit."})
+                return
+            stream.latest_check, stream.latest_check_at = check, time.monotonic()
+            if is_book_candidate(check) and not pending.saved:
+                await asyncio.to_thread(stream.save_book_candidate, pending)
+                pending = dataclasses.replace(pending, saved=True)
+            if pending.saved:
+                await asyncio.to_thread(save_frame_check, CAPTURE_DATA_DIR / "claims.sqlite3",
+                                        session.session_id, pending.frame_id, check)
+            stream.remote_filter.offer(CameraCandidate(pending.jpeg, pending.frame_id, pending.timestamp, revision), check)
+            dispatch(stream, revision)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            quality_logger.warning("frame_check failed=%s", type(error).__name__)
 
     async def activity(name, operation):
         nonlocal busy
@@ -1585,9 +1629,8 @@ async def live_voice(websocket: WebSocket) -> None:
                     if not isinstance(enabled, bool):
                         raise ValueError("Camera state must be true or false")
                     if set_camera_mode(session, enabled):
-                        tracking_stream = CameraTracking(
-                            capture_store, relevance=CameraRelevance()
-                        )
+                        tracking_stream = CameraTracking(capture_store)
+                        frame_checker = FrameChecker(check_frame)
                         tracking_stream.requested_capture = session.sweep_phase in {"Approaching", "Capturing"}
                         if not enabled and session.sweep_phase != "Sweeping":
                             await finish_capture()

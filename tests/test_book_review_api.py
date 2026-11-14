@@ -93,7 +93,7 @@ class BookGuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
         """
         from test_live_turns import LiveTurnTests
         from unittest.mock import Mock
-        from library_claim.capture.relevance.classifier import decide
+        from test_frame_check import check
         import asyncio
         import base64
         count = 0
@@ -151,7 +151,7 @@ class BookGuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
             return {'type':'close'}
 
         with patch.object(server, '_pin_evidence_photo', side_effect=capture):
-            await LiveTurnTests.drive(self, receive, relevance=Mock(assess=Mock(return_value=decide({'books':.4}, 1))))
+            await LiveTurnTests.drive(self, receive, frame_check=lambda jpeg: check(0.9))
 
     async def test_request_automatically_captures_and_resumes(self):
         """Resume after a suitable frame supplies the title without manual controls."""

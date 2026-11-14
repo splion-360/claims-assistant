@@ -1,38 +1,52 @@
 """Track live camera views and persist selected evidence with quality metadata."""
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from library_claim.capture.quality import QualityAssessor
+from library_claim.capture.quality import QualityAssessment, QualityAssessor
 from library_claim.capture.selection import compare_evidence
 from library_claim.capture.tracking.tracker import FrameTracker, TrackingResult
 from library_claim.storage.live_capture import LiveCaptureStore
 from live_demo.camera_quality import logger
 from live_demo.camera_logging import CameraSummary
 from live_demo.camera_filter import CameraFilter
-from live_demo.camera_relevance import CameraRelevance
+from live_demo.camera_gate import local_gate
 from library_claim.config import CONFIG
+
+
+@dataclass(frozen=True)
+class PendingCheck:
+    """Keep a frame awaiting its Drex check together with what is needed to save it."""
+    jpeg: bytes
+    frame_id: str
+    timestamp: float
+    captured_at: datetime
+    result: TrackingResult
+    quality: QualityAssessment
+    width: int
+    height: int
+    saved: bool
 
 
 class CameraTracking:
     """Own tracking, sampled quality, and retained evidence for one camera activation."""
 
-    def __init__(self, store: LiveCaptureStore | None = None,
-                 relevance: CameraRelevance | None = None):
+    def __init__(self, store: LiveCaptureStore | None = None):
         """Initialize bounded stream state and optional persistence.
 
         Args:
             store: Persistent destination for selected frames from this stream.
-            relevance: Optional local classifier used for remote inference admission.
         """
         self.tracker = FrameTracker()
         self.store = store
-        self.relevance = relevance
         self.requested_capture = False
-        self.latest_relevance = None
-        self.relevance_frame_id = None
+        self.pending_check: PendingCheck | None = None
+        self.gate_failure: str | None = None
+        self.latest_check = None
+        self.latest_check_at = None
         self.summary = CameraSummary()
         self.remote_filter = CameraFilter()
         self.summary.remote_filter = self.remote_filter
@@ -92,19 +106,9 @@ class CameraTracking:
         # An explicit recapture may revisit a known view, but still must pass local gates.
         if self.requested_capture and quality is not None:
             reason = reason or 'requested_capture'
-        # Unverified views still need semantic inspection; a plain wall may not track.
-        self.latest_relevance, self.relevance_frame_id = None, None
-        if self.relevance is not None and quality is not None and (reason is not None or result.status == 'uncertain'):
-            self.latest_relevance = self.relevance.assess(image, quality)
-            self.relevance_frame_id = frame_id
-        # Every remote candidate needs a durable source even when tracking is uncertain.
-        if (reason is None and self.latest_relevance is not None
-                and self.latest_relevance.status == 'assessed' and self.latest_relevance.label == 'books'):
-            reason = 'book_candidate'
         if self.store is not None and reason is not None:
             try:
-                self.saved_path = self.store.save(jpeg, result, captured_at, image.shape[1], image.shape[0], reason, quality,
-                                                  relevance=self.latest_relevance.model_dump(mode='json') if self.latest_relevance else None)
+                self.saved_path = self.store.save(jpeg, result, captured_at, image.shape[1], image.shape[0], reason, quality)
             except Exception:
                 # Reacquire after a failed save; future mappings must not cite lost evidence.
                 self.tracker = FrameTracker()
@@ -116,11 +120,34 @@ class CameraTracking:
                 self._saved_references.add(frame_id)
             self._retained[result.reference_frame_id] = (result, quality)
 
+        # Frames that would need semantic inspection go to Drex unless the local gate rejects them.
+        # A plain wall may not track, so uncertain views are checked too; they are saved only if Drex sees books.
+        self.pending_check, self.gate_failure = None, None
+        if quality is not None and (reason is not None or result.status == 'uncertain'):
+            self.gate_failure = local_gate(quality)
+            if self.gate_failure is None:
+                self.pending_check = PendingCheck(jpeg, frame_id, timestamp, captured_at, result, quality,
+                                                  image.shape[1], image.shape[0], saved=self.saved_path is not None)
+
         # Disk evidence survives eviction, while comparison state remains bounded.
         live_ids = {view.frame_id for view in self.tracker.keyframes.views}
         self._retained = {key: value for key, value in self._retained.items() if key in live_ids}
         self._saved_references.intersection_update(live_ids)
         return result
+
+    def save_book_candidate(self, pending: PendingCheck) -> None:
+        """Save a held frame after Drex confirmed it shows books.
+
+        Args:
+            pending: Frame held by `assess` and not yet saved.
+
+        Raises:
+            OSError: Evidence cannot be written.
+            sqlite3.Error: Records cannot be committed.
+        """
+        if self.store is not None and not pending.saved:
+            self.store.save(pending.jpeg, pending.result, pending.captured_at, pending.width, pending.height,
+                            'book_candidate', pending.quality)
 
     def log(self, result: TrackingResult, timestamp: float) -> None:
         """Log detailed diagnostics at debug level and a periodic camera table.
@@ -129,13 +156,10 @@ class CameraTracking:
             result: Completed tracking result.
             timestamp: Monotonic capture arrival time.
         """
-        assessment = self.latest_relevance if self.relevance_frame_id == result.frame_id else None
-        if assessment is not None:
-            logger.debug('camera_relevance frame=%s result=%s', result.frame_id, assessment.model_dump_json())
         if self.saved_path is not None:
             logger.debug('Evidence saved: %s | frame=%s | reason=%s',
                          self.saved_path, result.frame_id, self.saved_reason)
         logger.debug('camera_tracking %s', result.model_dump_json())
         self.summary.log(result, timestamp, quality=self.latest_quality,
-                         quality_at=self.last_quality_at, relevance=assessment,
+                         quality_at=self.last_quality_at, check=self.latest_check, check_at=self.latest_check_at,
                          saved=self.saved_path is not None)

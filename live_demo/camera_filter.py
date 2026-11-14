@@ -1,8 +1,8 @@
-"""Admit fresh, locally verified book frames to bounded remote image inference."""
+"""Admit fresh, Drex-checked book frames to bounded remote image inference."""
 from dataclasses import dataclass
 
-from library_claim.capture.relevance.classifier import RelevanceAssessment
 from library_claim.config import CONFIG
+from library_claim.decisions.frame_check import FrameCheck, is_book_candidate
 
 
 @dataclass(frozen=True)
@@ -27,18 +27,18 @@ class CameraFilter:
         self.submitted = 0
         self.rejected = 0
 
-    def offer(self, candidate: CameraCandidate, assessment: RelevanceAssessment | None) -> None:
-        """Retain only an assessed book frame that passed local quality admission.
+    def offer(self, candidate: CameraCandidate, check: FrameCheck | None) -> None:
+        """Retain only a frame in which Drex saw a book.
 
         Args:
-            candidate: Exact frame corresponding to the assessment.
-            assessment: Same-frame result, or None for unsampled/duplicate views.
+            candidate: Exact frame corresponding to the check.
+            check: Same-frame Drex result, or None for unchecked views.
         """
-        if assessment is None:
+        if check is None:
             self.reason = 'not_sampled_or_no_new_evidence'
             return
-        if assessment.status != 'assessed' or assessment.label != 'books':
-            self.reason = assessment.status if assessment.status != 'assessed' else 'below_book_threshold'
+        if not is_book_candidate(check):
+            self.reason = 'below_book_threshold'
             self.rejected += 1
             return
         if candidate.data == self.last_success_data:

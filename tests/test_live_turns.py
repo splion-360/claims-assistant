@@ -10,15 +10,28 @@ from unittest.mock import AsyncMock, patch
 from live_demo import server as s
 
 
+def unavailable_check(jpeg):
+    """Fail every D1 decision the way an unreachable Drex would.
+
+    Args:
+        jpeg: Frame bytes.
+
+    Raises:
+        DrexError: Always.
+    """
+    from library_claim.decisions.drex import DrexError
+    raise DrexError('Could not reach Drex.')
+
+
 class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
-    async def drive(self, receive, *, workflow=None, reply=None, relevance=None):
+    async def drive(self, receive, *, workflow=None, reply=None, frame_check=None):
         """Exercise live transport with isolated evidence storage.
 
         Args:
             receive: Async function supplying simulated browser messages.
             workflow: Optional background workflow implementation.
             reply: Optional conversation implementation.
-            relevance: Optional local relevance test double.
+            frame_check: Optional D1 decision double; by default every check fails.
 
         Returns:
             The session and emitted transport messages.
@@ -39,7 +52,7 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             async def close(self, **kwargs): pass
             async def send_json(self, payload): sent.append(payload)
             async def receive_text(self): return json.dumps(await receive(session, sent))
-        with patch.object(s, 'CameraRelevance', return_value=relevance), \
+        with patch.object(s, 'check_frame', side_effect=frame_check or unavailable_check), \
              patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name)), \
              patch.object(s, '_has_api_key', return_value=True), \
              patch.object(s, 'run_claim_workflow', side_effect=workflow or AsyncMock(return_value=s.build_initial_workflow_state())), \
@@ -110,11 +123,10 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
         import cv2
         from unittest.mock import Mock
         from test_tracking import textured_view
-        from library_claim.capture.relevance.classifier import decide
+        from test_frame_check import check
 
         _, image = cv2.imencode('.jpg', textured_view())
         jpeg = image.tobytes()
-        relevance = Mock(assess=Mock(return_value=decide({'books': .4}, 1)))
         count=0
         async def receive(session,sent):
             nonlocal count
@@ -129,7 +141,7 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
         clock=[100.0]
         # Override only server timing; do not change the asyncio event loop clock.
         with patch.object(s,'time',NS(monotonic=lambda:clock[0])),patch.object(s,'_pin_evidence_photo',side_effect=s.InferenceError('Temporary failure')) as capture:
-            await self.drive(receive, relevance=relevance)
+            await self.drive(receive, frame_check=lambda jpeg: check(0.9))
         self.assertEqual(capture.call_count,2)
 
     async def test_spoken_turn_dispatches_once_and_returns_audio(self):

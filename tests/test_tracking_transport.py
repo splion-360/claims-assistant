@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import cv2
 
 from library_claim.domain.models import Frame
-from library_claim.capture.relevance.classifier import decide
+from test_frame_check import check
 from library_claim.storage.repository import Repository
 from live_demo import server
 import test_live_turns
@@ -20,7 +20,6 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_tracking_reports_while_remote_capture_is_pending(self):
         """Produce a local reference before a blocked remote request completes."""
         _, encoded = cv2.imencode('.jpg', textured_view())
-        relevance = Mock(assess=Mock(return_value=decide(dict(books=.4), 12)))
         ready = asyncio.Event()
         records = []
         count = 0
@@ -63,21 +62,20 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
             with Repository(server.CAPTURE_DATA_DIR / 'claims.sqlite3') as repository:
                 saved = repository.get(Frame, session.last_frame_id)
                 self.assertEqual(saved.sweep_id, session.session_id)
-                self.assertEqual(saved.relevance_metadata['label'], 'books')
                 self.assertTrue((server.CAPTURE_DATA_DIR / 'frames' / saved.evidence_key).exists())
             return {'type': 'close'}
 
         with patch.object(server.CameraTracking, 'log', side_effect=log), \
              patch.object(server, '_pin_evidence_photo', side_effect=blocked):
-            await test_live_turns.LiveTurnTests.drive(self, receive, relevance=relevance)
+            await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=lambda jpeg: check(0.9))
         self.assertEqual(records[0].status, 'reference_created')
 
     async def test_below_threshold_frames_do_not_call_remote_capture(self):
-        """Run real tracking and quality while rejecting non-book relevance."""
+        """Run real tracking and quality while Drex sees no book."""
         _, encoded = cv2.imencode('.jpg', textured_view())
         ready = asyncio.Event()
         count = 0
-        relevance = Mock(assess=Mock(return_value=decide({'books': .1, 'empty_background': .5}, 1)))
+        checked = Mock(side_effect=lambda jpeg: check(0.1))
 
         async def receive(session, sent):
             """Supply a negative frame and close after its local decision.
@@ -94,14 +92,16 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
             if count == 1:
                 return {'type': 'video', 'data': base64.b64encode(encoded).decode()}
             await ready.wait()
-            await asyncio.sleep(0)
+            while not checked.called:
+                await asyncio.sleep(0.001)
+            await asyncio.sleep(0.01)
             return {'type': 'close'}
 
         with patch.object(server.CameraTracking, 'log', side_effect=lambda *args: ready.set()), \
              patch.object(server, '_pin_evidence_photo') as remote:
-            await test_live_turns.LiveTurnTests.drive(self, receive, relevance=relevance)
+            await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=checked)
         remote.assert_not_called()
-        relevance.assess.assert_called_once()
+        checked.assert_called_once()
 
     async def test_new_arrival_cannot_replace_locally_approved_image(self):
         """Dispatch approved bytes even when another frame arrives during assessment."""
@@ -116,18 +116,18 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
         count = 0
 
         def assess(*args):
-            """Pause local relevance to exercise the newer-frame arrival race.
+            """Pause the D1 check to exercise the newer-frame arrival race.
 
             Args:
-                *args: Image and quality supplied by real camera tracking.
+                *args: Frame bytes supplied by the checker.
 
             Returns:
                 A passing book assessment.
             """
             started.set()
             if not release.wait(2):
-                raise TimeoutError('Test did not release relevance')
-            return decide({'books': .4}, 1)
+                raise TimeoutError('Test did not release the frame check')
+            return check(0.9)
 
         async def remote(session, args, *, candidate):
             """Verify dispatch retains the assessed frame instead of the latest one.
@@ -170,5 +170,5 @@ class TrackingTransportTests(unittest.IsolatedAsyncioTestCase):
             return {'type': 'close'}
 
         with patch.object(server, '_pin_evidence_photo', new=AsyncMock(side_effect=remote)) as capture:
-            await test_live_turns.LiveTurnTests.drive(self, receive, relevance=Mock(assess=assess))
+            await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=assess)
         self.assertEqual(capture.call_count, 1)
