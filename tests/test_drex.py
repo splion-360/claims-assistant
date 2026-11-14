@@ -123,3 +123,13 @@ class DrexClientTests(unittest.TestCase):
         with patch('library_claim.decisions.drex.time.sleep'):
             decide({'book_visible': noul('?')}, state='x', client=client_for(handler))
         self.assertEqual(len(calls), 2)
+
+    def test_decision_reports_stage_and_answer_summary(self):
+        """A staged decision tells the flow view what Drex answered."""
+        from library_claim import telemetry
+        events = []
+        with telemetry.listening(events.append):
+            decide({'book_visible': noul('?'), 'issue': choice('?', {'none': 'a', 'no_books': 'b'})}, state='x',
+                   stage='d1', client=client_for(lambda request: httpx.Response(200, json=SMOKE_RESPONSE)))
+        self.assertEqual([(e['stage'], e['phase']) for e in events], [('d1', 'start'), ('d1', 'done')])
+        self.assertEqual(events[1]['detail'], 'book_visible 0.00 · issue no_books 0.99')

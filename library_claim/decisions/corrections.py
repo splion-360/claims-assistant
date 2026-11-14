@@ -33,7 +33,7 @@ def classify_intent(text: str, *, client: httpx.Client | None = None) -> str:
     """
     try:
         result = decide({'intent': choice('What does the user want the inventory agent to do?', INTENTS)},
-                        state={'utterance': text}, client=client)
+                        state={'utterance': text}, client=client, stage='d5')
     except DrexError:
         return 'question_or_chat'
     intent = result.answers['intent'].choice
@@ -65,7 +65,7 @@ def resolve_target(text: str, books: list[dict], *, allow_all: bool,
         criteria['all_visible'] = 'Every book currently in view'
     try:
         result = decide({'target': choice('Which book or books does the user mean?', criteria)},
-                        state={'utterance': text}, client=client)
+                        state={'utterance': text}, client=client, stage='d5')
     except DrexError:
         return None
     answer = result.answers['target']

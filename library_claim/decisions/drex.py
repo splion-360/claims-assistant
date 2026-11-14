@@ -10,6 +10,7 @@ import httpx
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+from library_claim import telemetry
 from library_claim.config import CONFIG, ROOT
 
 load_dotenv(Path(ROOT) / '.env')
@@ -37,6 +38,7 @@ class Answer(BaseModel):
     type: Literal['noul', 'choice', 'score']
     noul: float | None = None
     choice: str | None = None
+    score: float | None = None
     probabilities: dict[str, float] = Field(default_factory=dict)
     confidence: float | None = None
 
@@ -107,8 +109,28 @@ def _post(client: httpx.Client, payload: dict, key: str) -> httpx.Response:
     return response
 
 
+def summarize(result: DrexResult) -> str:
+    """Describe Drex's answers in one short line for the flow view.
+
+    Args:
+        result: A validated decision.
+
+    Returns:
+        Answers such as 'book_visible 0.91 · issue glare 0.80'.
+    """
+    parts = []
+    for question_id, answer in result.answers.items():
+        if answer.type == 'noul':
+            parts.append(f'{question_id} {answer.noul:.2f}')
+        elif answer.type == 'choice':
+            parts.append(f'{question_id} {answer.choice} {answer.probabilities.get(answer.choice, 0):.2f}')
+        else:
+            parts.append(f'{question_id} {answer.score}')
+    return ' · '.join(parts)
+
+
 def decide(questions: dict[str, dict], *, state: object, images: list[bytes] | None = None,
-           client: httpx.Client | None = None) -> DrexResult:
+           client: httpx.Client | None = None, stage: str | None = None) -> DrexResult:
     """Ask Drex typed questions about a state and optional JPEG images.
 
     Args:
@@ -116,9 +138,34 @@ def decide(questions: dict[str, dict], *, state: object, images: list[bytes] | N
         state: Any JSON-serialisable description of the situation.
         images: JPEG bytes; Drex Max accepts at most eight.
         client: Optional HTTP client, used by tests.
+        stage: Pipeline block reported to the flow view, e.g. 'd1'.
 
     Returns:
         Typed answers with model, request ID, input tokens and latency.
+
+    Raises:
+        DrexError: Credentials, transport, or the response are unusable.
+    """
+    if stage is None:
+        return _decide(questions, state, images, client)
+    with telemetry.span(stage) as reported:
+        result = _decide(questions, state, images, client)
+        reported.detail = summarize(result)
+    return result
+
+
+def _decide(questions: dict[str, dict], state: object, images: list[bytes] | None,
+            client: httpx.Client | None) -> DrexResult:
+    """Send one validated System One request; see `decide`.
+
+    Args:
+        questions: Question IDs mapped to question objects.
+        state: JSON-serialisable situation.
+        images: Optional JPEG bytes.
+        client: Optional HTTP client.
+
+    Returns:
+        Typed answers with provenance.
 
     Raises:
         DrexError: Credentials, transport, or the response are unusable.

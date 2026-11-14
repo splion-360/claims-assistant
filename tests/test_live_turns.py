@@ -329,3 +329,43 @@ class VoiceTurnStateTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(s.speech, 'enabled', return_value=True), patch.object(s.speech, 'listen', return_value=Connection()):
             session, _ = await LiveTurnTests.drive(self, receive)
         self.assertFalse(session.user_turn_open)
+
+
+class FlowViewTests(unittest.IsolatedAsyncioTestCase):
+    """The /flow page is served and live sessions report their steps to it."""
+
+    async def test_live_turn_reports_reply_stage(self):
+        """A typed turn shows up on the flow bus as a finished Qwen reply."""
+        s.FLOW.recent.clear()
+        count = 0
+
+        async def receive(session, sent):
+            """Send one turn and close after the reply.
+
+            Args:
+                session: Live session.
+                sent: Emitted messages.
+
+            Returns:
+                Next simulated browser message.
+            """
+            nonlocal count
+            count += 1
+            if count == 1:
+                return {'type': 'text', 'text': 'Hello', 'id': 'flow1'}
+            while not any(m['type'] == 'transcript' and m['speaker'] == 'Agent' for m in sent):
+                await asyncio.sleep(.001)
+            await asyncio.sleep(0)
+            return {'type': 'close'}
+
+        await LiveTurnTests.drive(self, receive)
+        stages = [(event['stage'], event['phase']) for event in s.FLOW.recent]
+        self.assertIn(('qwen_reply', 'start'), stages)
+        self.assertIn(('qwen_reply', 'done'), stages)
+
+    def test_flow_page_is_served(self):
+        """GET /flow returns the flow view."""
+        from fastapi.testclient import TestClient
+        response = TestClient(s.app, base_url='http://127.0.0.1:4177').get('/flow')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('live pipeline', response.text)

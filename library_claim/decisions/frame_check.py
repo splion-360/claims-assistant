@@ -52,7 +52,7 @@ def check_frame(jpeg: bytes, *, client: httpx.Client | None = None) -> FrameChec
     Raises:
         DrexError: The decision could not be obtained.
     """
-    result = decide(QUESTIONS, state=STATE, images=[jpeg], client=client)
+    result = decide(QUESTIONS, state=STATE, images=[jpeg], client=client, stage='d1')
     answers = result.answers
     return FrameCheck(book_visible=answers['book_visible'].noul, spine_legible=answers['spine_legible'].noul,
                       issue=answers['issue'].choice, issue_probabilities=answers['issue'].probabilities,

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline Flow</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171b21; --card: #1e232b; --line: #2c333d; --text: #e7ebf0; --muted: #8c96a3;
+    --drex: #b388ff; --qwen: #4fc3f7; --local: #9aa5b1; --deepgram: #ffb74d; --web: #81c784; --depth: #f06292;
+    --done: #4caf50; --error: #ef5350;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0 12px 0 0; }
+  .stat { color: var(--muted); }
+  .stat b { color: var(--text); font-variant-numeric: tabular-nums; }
+  #status { margin-left: auto; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--card); }
+  #status.live { color: var(--done); }
+  main { padding: 16px 20px 24px; display: grid; gap: 14px; }
+  .strip { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .strip h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .row { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding-bottom: 4px; }
+  .arrow { flex: 0 0 26px; display: flex; align-items: center; justify-content: center; color: var(--line); font-size: 18px; }
+  .card { flex: 1 0 150px; max-width: 240px; min-height: 108px; background: var(--card); border: 2px solid var(--line);
+          border-radius: 10px; padding: 9px 10px; display: flex; flex-direction: column; gap: 4px; transition: border-color .3s, box-shadow .3s, opacity .3s; }
+  .card .who { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .card .name { font-weight: 600; }
+  .card .detail { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; min-height: 2.6em; }
+  .card .meta { margin-top: auto; display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .card.drex { border-style: dashed; }
+  .card.active { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); animation: pulse 1s ease-in-out infinite; }
+  .card.done { border-color: var(--done); }
+  .card.error { border-color: var(--error); }
+  .card.error .detail { color: var(--error); }
+  .card.off { opacity: .35; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent) 10%, transparent); } }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  #log { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; max-height: 240px; overflow-y: auto;
+         font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #log .t { color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { .card.active { animation: none; } }
+  @media (max-width: 640px) { header, main { padding-left: 16px; padding-right: 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Library agent · live pipeline</h1>
+  <span class="stat">Drex calls <b id="drexCount">0</b></span>
+  <span class="stat">Drex avg <b id="drexAvg">–</b></span>
+  <span class="stat">Qwen calls <b id="qwenCount">0</b></span>
+  <span id="status">Connecting…</span>
+</header>
+<main id="strips"></main>
+<main><div id="log" aria-live="polite"></div></main>
+<script>
+// Who runs each step; colours match the CSS variables of the same name.
+const WHO = { drex: "Drex", qwen: "Qwen", local: "Local", deepgram: "Deepgram", web: "Open Library", depth: "Depth Pro" };
+const STRIPS = [
+  { title: "1 · Capture — every camera frame", blocks: [
+    ["camera", "local", "Browser camera"], ["tracking", "local", "Tracking (SIFT / optical flow)"],
+    ["gate", "local", "Local gate (sharpness, exposure)"], ["d1", "drex", "◆ D1 Frame check"], ["save", "local", "Evidence store (SQLite + JPEG)"]] },
+  { title: "2 · Identification — per frame where Drex sees books", blocks: [
+    ["qwen_vl", "qwen", "Spine reading (Qwen-VL)"], ["d2", "drex", "◆ D2 Same book?"], ["inventory", "local", "Inventory update"],
+    ["depth", "depth", "Spine measurement (depth)"], ["openlibrary", "web", "Open Library search"], ["d3", "drex", "◆ D3 Catalogue match"]] },
+  { title: "3 · Voice — what the user says", blocks: [
+    ["stt", "deepgram", "Speech to text"], ["d5", "drex", "◆ D5 Correction intent"], ["correction", "local", "Correction applied"],
+    ["qwen_reply", "qwen", "Reply (Qwen)"], ["tts", "deepgram", "Speech out"]] },
+  { title: "4 · Guidance — when the agent speaks up", blocks: [
+    ["d6", "drex", "◆ D6 Speak now? Which prompt?"], ["guidance", "local", "Prompt chosen → spoken via Speech out"]] },
+];
+const cards = {}, timers = {};
+const LABELS = {};
+
+// Build the strips once; each card is updated in place by stage events.
+const root = document.getElementById("strips");
+for (const strip of STRIPS) {
+  const section = document.createElement("section");
+  section.className = "strip";
+  section.innerHTML = `<h2>${strip.title}</h2><div class="row"></div>`;
+  const row = section.querySelector(".row");
+  strip.blocks.forEach(([id, who, name], index) => {
+    if (index) row.insertAdjacentHTML("beforeend", '<div class="arrow" aria-hidden="true">→</div>');
+    const card = document.createElement("div");
+    card.className = `card ${who === "drex" ? "drex" : ""}`;
+    card.style.setProperty("--accent", `var(--${who})`);
+    card.innerHTML = `<span class="who" style="color: var(--${who})">${WHO[who]}</span><span class="name"></span>
+      <span class="detail">idle</span><span class="meta"><span class="ms"></span><span class="count">0×</span></span>`;
+    card.querySelector(".name").textContent = name;
+    card.dataset.count = "0";
+    row.appendChild(card);
+    cards[id] = card;
+    LABELS[id] = name;
+  });
+  root.appendChild(section);
+}
+
+let drexCount = 0, drexTotalMs = 0, qwenCount = 0;
+function setState(card, state, holdMs) {
+  card.classList.remove("active", "done", "error");
+  if (state) card.classList.add(state);
+  clearTimeout(timers[card.dataset.timer]);
+  if (holdMs) {
+    const key = Math.random().toString(36).slice(2);
+    card.dataset.timer = key;
+    timers[key] = setTimeout(() => card.classList.remove("done", "error"), holdMs);
+  }
+}
+
+function apply(event, replay = false) {
+  const card = cards[event.stage];
+  if (!card) return;
+  const detail = card.querySelector(".detail");
+  if (event.phase === "start") {
+    setState(card, "active");
+    detail.textContent = event.detail || "running…";
+    return;
+  }
+  // A finished step keeps its last result visible after the highlight fades.
+  if (event.detail) detail.textContent = event.detail;
+  else if (event.phase === "done") detail.textContent = "done";
+  if (event.ms != null) card.querySelector(".ms").textContent = `${event.ms} ms`;
+  card.dataset.count = String(Number(card.dataset.count) + 1);
+  card.querySelector(".count").textContent = `${card.dataset.count}×`;
+  setState(card, event.phase === "error" ? "error" : event.phase === "done" ? "done" : null,
+           replay ? 0 : event.phase === "error" ? 4000 : 1200);
+  if (!replay && event.phase !== "start") log(event);
+  if (event.stage.startsWith("d") && /^d\d$/.test(event.stage) && event.phase === "done") {
+    drexCount += 1; drexTotalMs += event.ms || 0;
+    document.getElementById("drexCount").textContent = drexCount;
+    document.getElementById("drexAvg").textContent = `${Math.round(drexTotalMs / drexCount)} ms`;
+  }
+  if (event.stage.startsWith("qwen") && event.phase === "done") {
+    document.getElementById("qwenCount").textContent = ++qwenCount;
+  }
+}
+
+function log(event) {
+  // Camera and tracking fire several times a second; keep the log to meaningful steps.
+  if (event.stage === "camera" || event.stage === "tracking") return;
+  const box = document.getElementById("log");
+  const line = document.createElement("div");
+  const time = new Date(event.t * 1000).toLocaleTimeString();
+  const ms = event.ms != null ? ` · ${event.ms} ms` : "";
+  line.innerHTML = `<span class="t">${time}</span> `;
+  line.append(`${LABELS[event.stage]} — ${event.phase}${event.detail ? ": " + event.detail : ""}${ms}`);
+  box.prepend(line);
+  while (box.childElementCount > 80) box.lastElementChild.remove();
+}
+
+function connect() {
+  const status = document.getElementById("status");
+  const source = new EventSource("/api/flow/events");
+  source.addEventListener("setup", message => {
+    const setup = JSON.parse(message.data);
+    status.textContent = "Live"; status.className = "live";
+    if (!setup.measurement) {
+      cards.depth.classList.add("off");
+      cards.depth.querySelector(".detail").textContent = "off in config.yml";
+    }
+    setup.recent.forEach(event => apply(event, true));
+  });
+  source.onmessage = message => apply(JSON.parse(message.data));
+  source.onerror = () => { status.textContent = "Reconnecting…"; status.className = ""; };
+}
+connect();
+</script>
+</body>
+</html>

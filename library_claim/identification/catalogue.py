@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 
+from library_claim import telemetry
 from library_claim.config import CONFIG
 from library_claim.decisions.drex import DrexError, choice, decide
 from library_claim.domain.models import BookObservation, ReviewIssue
@@ -114,7 +115,7 @@ def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: http
                              f" ({item.first_publish_year or 'year unknown'})" for index, item in enumerate(candidates)}
     criteria['none'] = 'None of these works matches the spine'
     result = decide({'match': choice('Which catalogue work is the book whose spine was read?', criteria)},
-                    state={'spine_readings': readings}, client=client)
+                    state={'spine_readings': readings}, client=client, stage='d3')
     answer = result.answers['match']
     if answer.choice == 'none' or answer.choice not in criteria:
         return None
@@ -139,7 +140,10 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
     latest = book['observations'][-1]
     readings = {key: book.get(key) for key in ('title', 'author', 'publisher')}
     try:
-        work = choose_work(readings, search_works(book['title'], book.get('author'), client=http), client=drex)
+        with telemetry.span('openlibrary', book['title'][:40]) as reported:
+            candidates = search_works(book['title'], book.get('author'), client=http)
+            reported.detail = f'{len(candidates)} candidate work(s)'
+        work = choose_work(readings, candidates, client=drex)
         edition = matching_edition(work.key, book.get('publisher'), client=http) if work else None
     except (httpx.HTTPError, DrexError, ValueError, KeyError) as error:
         # A failed lookup is retried on the next reading change; nothing is recorded now.

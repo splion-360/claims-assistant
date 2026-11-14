@@ -30,7 +30,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 APP_DIR = Path(__file__).resolve().parents[1]
@@ -102,6 +102,8 @@ from live_demo.camera_filter import CameraCandidate
 from live_demo.camera_quality import log_scores
 from live_demo.camera_quality import logger as quality_logger
 from live_demo.frame_checker import FrameChecker
+from live_demo.flow import FlowBus
+from library_claim import telemetry
 from live_demo.guidance_decision import (QUALITY_PROMPTS, GuidanceSignals, QualityPromptLimiter,
                                          choose_prompt, edge_cut_count, gate_prompt, should_speak)
 from library_claim.decisions.frame_check import check_frame, is_book_candidate, save_frame_check
@@ -117,6 +119,8 @@ from provider import (
 
 LIVE_MODEL_ID = MODEL
 logger = logging.getLogger(__name__)
+# Single local demo: every live session reports its pipeline steps to the /flow view.
+FLOW = FlowBus()
 FRAME_MAX_AGE_SECONDS = CONFIG.capture.frame_max_age_s
 CAPTURE_DATA_DIR = APP_DIR / ".claim-data"
 
@@ -982,18 +986,20 @@ async def _pin_evidence_photo(
     captured_at = datetime.now().astimezone().isoformat()
     claimant_said = str(args.get("claimant_description", ""))[:1000]
     instruction = BOOK_INSTRUCTION
-    observation = await structured(
-        instruction,
-        [
-            {
-                "type": "text",
-                "text": "Statement to verify: " + json.dumps(claimant_said),
-            },
-            {"type": "image_url", "image_url": {"url": _data_url(frame, "image/jpeg")}},
-        ],
-        FrameObservation,
-        model=VISION_MODEL,
-    )
+    with telemetry.span("qwen_vl") as reported:
+        observation = await structured(
+            instruction,
+            [
+                {
+                    "type": "text",
+                    "text": "Statement to verify: " + json.dumps(claimant_said),
+                },
+                {"type": "image_url", "image_url": {"url": _data_url(frame, "image/jpeg")}},
+            ],
+            FrameObservation,
+            model=VISION_MODEL,
+        )
+        reported.detail = f"{len(observation.books)} book(s) read"
     if session.deleted:
         raise asyncio.CancelledError()
     if candidate is not None and (
@@ -1023,6 +1029,7 @@ async def _pin_evidence_photo(
         ):
             return {"pinned": False, "message": "Camera activation changed."}
         session.book_inventory = book_result["inventory"]
+        telemetry.emit("inventory", "done", f"{len(session.book_inventory)} book(s) in inventory")
     caption = observation.observation
     if book_result is not None:
         caption = f"{book_result['detected_count']} book(s) detected in this frame. "
@@ -1114,6 +1121,9 @@ async def live_voice(websocket: WebSocket) -> None:
         return
     session.live_socket = websocket
     session.live_model = MODEL
+    # Everything this connection starts, including worker threads, reports stage events to /flow.
+    FLOW.bind(asyncio.get_running_loop())
+    telemetry.attach(FLOW.publish)
     await websocket.accept()
     send_lock = asyncio.Lock()
     tasks = set()
@@ -1219,6 +1229,13 @@ async def live_voice(websocket: WebSocket) -> None:
                 and session.camera_enabled
                 and session.camera_mode_revision == revision
             ):
+                telemetry.emit("tracking", "done", result.status.replace("_", " "), result.elapsed_ms)
+                if stream.gate_failure is not None:
+                    telemetry.emit("gate", "error", stream.gate_failure.replace("_", " "))
+                elif stream.pending_check is not None:
+                    telemetry.emit("gate", "done", "pass")
+                if stream.saved_path is not None:
+                    telemetry.emit("save", "done", (stream.saved_reason or "").replace("_", " "))
                 note_gate(stream)
                 pending = stream.pending_check
                 if pending is not None:
@@ -1293,6 +1310,7 @@ async def live_voice(websocket: WebSocket) -> None:
             seconds_since_prompt=None if last_prompt_at is None else round(now - last_prompt_at, 1),
             phase=session.sweep_phase)
         label = await asyncio.to_thread(choose_prompt, signals)
+        telemetry.emit("guidance", "done", label.replace("_", " "))
         # The situation may have changed while Drex was deciding.
         if session.sweep_phase != "Sweeping" or not should_speak(
                 user_speaking=user_speaking(), agent_speaking=spoken_turn_id is not None):
@@ -1326,7 +1344,9 @@ async def live_voice(websocket: WebSocket) -> None:
             frame_id, jpeg = measure_next
             measure_next = None
             try:
-                depth = await asyncio.to_thread(estimate_depth, jpeg)
+                with telemetry.span("depth") as reported:
+                    depth = await asyncio.to_thread(estimate_depth, jpeg)
+                    reported.detail = f"focal {depth.fx:.0f} px"
             except DepthUnavailable as error:
                 quality_logger.warning("depth unavailable frame=%s reason=%s", frame_id, error)
                 continue
@@ -1405,6 +1425,7 @@ async def live_voice(websocket: WebSocket) -> None:
                 trigger_guidance()
             if is_book_candidate(check) and not pending.saved:
                 await asyncio.to_thread(stream.save_book_candidate, pending)
+                telemetry.emit("save", "done", "book candidate")
                 pending = dataclasses.replace(pending, saved=True)
             if pending.saved:
                 await asyncio.to_thread(save_frame_check, CAPTURE_DATA_DIR / "claims.sqlite3",
@@ -1501,9 +1522,11 @@ async def live_voice(websocket: WebSocket) -> None:
                 for t in session.transcript
                 if t["speaker"] in {"Claimant", "Agent"}
             )
-            reply = await complete(
-                messages, max_tokens=CONFIG.inference.conversation_max_tokens
-            )
+            with telemetry.span("qwen_reply") as reported:
+                reply = await complete(
+                    messages, max_tokens=CONFIG.inference.conversation_max_tokens
+                )
+                reported.detail = reply[:60]
             if epoch != text_epoch or session.deleted:
                 return
             turn_id = uuid.uuid4().hex
@@ -1520,6 +1543,7 @@ async def live_voice(websocket: WebSocket) -> None:
             if voice_on:
                 spoken_turn_id = turn_id
                 await send({"type": "audio_start", "epoch": epoch, "turn_id": turn_id})
+                telemetry.emit("tts", "start", reply[:60])
                 async for chunk in speech.synthesize(reply):
                     if epoch != text_epoch or not voice_on:
                         return
@@ -1531,6 +1555,7 @@ async def live_voice(websocket: WebSocket) -> None:
                         }
                     )
                 await send({"type": "audio_end", "epoch": epoch})
+                telemetry.emit("tts", "done")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1597,6 +1622,7 @@ async def live_voice(websocket: WebSocket) -> None:
                 # A failed correction must not cost the user their reply.
                 logger.error("correction failed: %s", type(error).__name__)
                 outcome = None
+            telemetry.emit("correction", "done" if outcome else "skipped", outcome or "no correction")
             if outcome == "asked":
                 return
             outcome = outcome or "No correction was applied this turn."
@@ -1663,6 +1689,7 @@ async def live_voice(websocket: WebSocket) -> None:
                             )
                             if name == "StartOfTurn":
                                 session.user_turn_open = True
+                                telemetry.emit("stt", "start", "listening")
                                 await interrupt()
                             if name in {"StartOfTurn", "Update"} and text:
                                 await send(
@@ -1676,6 +1703,7 @@ async def live_voice(websocket: WebSocket) -> None:
                                 )
                             elif name == "EndOfTurn":
                                 session.user_turn_open = False
+                                telemetry.emit("stt", "done", text[:60] or None)
                                 if text.strip():
                                     await submit(text[:8000], turn_id)
 
@@ -1734,12 +1762,14 @@ async def live_voice(websocket: WebSocket) -> None:
             if epoch != text_epoch or not voice_on:
                 return
             await send({"type": "audio_start", "epoch": epoch, "turn_id": turn_id})
+            telemetry.emit("tts", "start", text[:60])
             async for chunk in speech.synthesize(text):
                 if epoch != text_epoch or not voice_on:
                     return
                 await send({"type": "audio", "data": base64.b64encode(chunk).decode(), "epoch": epoch})
             if epoch == text_epoch and voice_on:
                 await send({"type": "audio_end", "epoch": epoch})
+                telemetry.emit("tts", "done")
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -1986,6 +2016,7 @@ async def live_voice(websocket: WebSocket) -> None:
                             "Camera frames must be JPEG images under 512 KB"
                         )
                     set_camera_mode(session, True)
+                    telemetry.emit("camera", "done", "with depth" if isinstance(message.get("depth"), dict) else None)
                     session.last_frame, session.last_frame_at = data, now
                     session.last_frame_id = uuid.uuid4().hex
                     # Drop excess tracking work rather than queueing obsolete frames.
@@ -2019,6 +2050,36 @@ async def live_voice(websocket: WebSocket) -> None:
         session.updated_at = time.monotonic()
         with contextlib.suppress(Exception):
             await websocket.close()
+
+
+@app.get("/flow")
+def flow_page() -> FileResponse:
+    return FileResponse(DEMO_DIR / "flow.html")
+
+
+@app.get("/api/flow/events")
+async def flow_events(request: Request) -> StreamingResponse:
+    """Stream pipeline stage events to the flow view as server-sent events."""
+    queue = FLOW.subscribe()
+
+    async def stream():
+        try:
+            setup = {"measurement": CONFIG.measurement.enabled, "drex_model": CONFIG.drex.model,
+                     "vision_model": VISION_MODEL, "recent": list(FLOW.recent)}
+            yield f"event: setup\ndata: {json.dumps(setup)}\n\n"
+            while not await request.is_disconnected():
+                try:
+                    event = await asyncio.wait_for(queue.get(), 10)
+                except asyncio.TimeoutError:
+                    # Keep proxies and the browser from closing an idle stream.
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            FLOW.unsubscribe(queue)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/")

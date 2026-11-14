@@ -73,7 +73,7 @@ def same_book_probabilities(detection_crop: bytes, detection: BookDetection, can
     questions = {f'same_{index + 1}': noul(f'Is the book in image 1 the same physical book as the book in image {index + 2}?')
                  for index in range(len(candidates))}
     result = decide(questions, state=state, images=[detection_crop, *(item.crop_jpeg for item in candidates)],
-                    client=client)
+                    client=client, stage='d2')
     return [result.answers[f'same_{index + 1}'].noul for index in range(len(candidates))]
 
 

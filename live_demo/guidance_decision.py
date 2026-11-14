@@ -53,7 +53,7 @@ def choose_prompt(signals: GuidanceSignals, *, client: httpx.Client | None = Non
         One of LABELS; 'stay_quiet' when Drex fails or answers outside LABELS.
     """
     try:
-        result = decide({'prompt': choice(INSTRUCTIONS, CRITERIA)}, state=asdict(signals), client=client)
+        result = decide({'prompt': choice(INSTRUCTIONS, CRITERIA)}, state=asdict(signals), client=client, stage='d6')
     except DrexError:
         return 'stay_quiet'
     label = result.answers['prompt'].choice
