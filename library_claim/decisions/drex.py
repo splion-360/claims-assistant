@@ -151,6 +151,7 @@ def decide(questions: dict[str, dict], *, state: object, images: list[bytes] | N
     with telemetry.span(stage) as reported:
         result = _decide(questions, state, images, client)
         reported.detail = summarize(result)
+        reported.model = result.model
     return result
 
 

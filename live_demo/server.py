@@ -103,6 +103,7 @@ from live_demo.camera_quality import log_scores
 from live_demo.camera_quality import logger as quality_logger
 from live_demo.frame_checker import FrameChecker
 from live_demo.flow import FlowBus
+from live_demo.announcements import announcement
 from library_claim import telemetry
 from live_demo.guidance_decision import (QUALITY_PROMPTS, GuidanceSignals, QualityPromptLimiter,
                                          choose_prompt, edge_cut_count, gate_prompt, should_speak)
@@ -986,7 +987,7 @@ async def _pin_evidence_photo(
     captured_at = datetime.now().astimezone().isoformat()
     claimant_said = str(args.get("claimant_description", ""))[:1000]
     instruction = BOOK_INSTRUCTION
-    with telemetry.span("qwen_vl") as reported:
+    with telemetry.span("spine_reading") as reported:
         observation = await structured(
             instruction,
             [
@@ -1149,6 +1150,8 @@ async def live_voice(websocket: WebSocket) -> None:
     resolved_titles = {}
     # Saved frames with detections and when they were read, for resolving "that" in corrections.
     detection_frames = deque(maxlen=20)
+    # Normalized titles already announced out loud this session.
+    announced_titles = set()
     voice_on = False
     spoken_turn_id = None
     audio_queue = asyncio.Queue(maxsize=25)
@@ -1356,6 +1359,20 @@ async def live_voice(websocket: WebSocket) -> None:
                 session.book_inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
                 await send({"type": "state", "state": _current_ui_state(session)})
 
+    async def announce_books():
+        """Say the names of newly read books, unless someone is already speaking."""
+        # During a guided capture the agent's own closing line takes priority; announce after resuming.
+        if session.sweep_phase != "Sweeping":
+            return
+        if not should_speak(user_speaking=user_speaking(), agent_speaking=spoken_turn_id is not None):
+            # Not marked as announced, so the next successful read tries again.
+            return
+        text, titles = announcement(session.book_inventory, announced_titles)
+        if text:
+            announced_titles.update(titles)
+            telemetry.emit("announce", "done", text)
+            await guide(text, instruction=False)
+
     def schedule_catalogue():
         """Look up books whose best title reading is new since their last lookup."""
         for book in session.book_inventory:
@@ -1522,7 +1539,7 @@ async def live_voice(websocket: WebSocket) -> None:
                 for t in session.transcript
                 if t["speaker"] in {"Claimant", "Agent"}
             )
-            with telemetry.span("qwen_reply") as reported:
+            with telemetry.span("reply") as reported:
                 reply = await complete(
                     messages, max_tokens=CONFIG.inference.conversation_max_tokens
                 )
@@ -1775,14 +1792,16 @@ async def live_voice(websocket: WebSocket) -> None:
         except Exception as error:
             await report_error(error)
 
-    async def guide(text):
+    async def guide(text, instruction=True):
         """Publish guidance and schedule speech only when voice is enabled.
 
         Args:
-            text: Evidence-focused instruction.
+            text: Evidence-focused instruction or announcement.
+            instruction: Whether the text also becomes the on-screen capture instruction.
         """
         nonlocal spoken_turn_id
-        session.capture_instruction = text
+        if instruction:
+            session.capture_instruction = text
         turn_id = uuid.uuid4().hex
         append_turn(session, "Agent", text, turn_id)
         await send({"type": "transcript", "speaker": "Agent", "text": text, "id": turn_id, "final": True})
@@ -1865,6 +1884,7 @@ async def live_voice(websocket: WebSocket) -> None:
                     detection_frames.append((candidate.frame_id, time.monotonic()))
                     schedule_measure(candidate.frame_id, candidate.data)
                 schedule_catalogue()
+                await announce_books()
             if success:
                 await send({"type": "state", "state": _current_ui_state(session)})
                 await update()
@@ -2064,8 +2084,12 @@ async def flow_events(request: Request) -> StreamingResponse:
 
     async def stream():
         try:
-            setup = {"measurement": CONFIG.measurement.enabled, "drex_model": CONFIG.drex.model,
-                     "vision_model": VISION_MODEL, "recent": list(FLOW.recent)}
+            # Default model per block; each finished call then reports the model that actually answered.
+            models = {"d1": CONFIG.drex.model, "d2": CONFIG.drex.model, "d3": CONFIG.drex.model,
+                      "d5": CONFIG.drex.model, "d6": CONFIG.drex.model, "spine_reading": VISION_MODEL,
+                      "reply": MODEL, "stt": CONFIG.speech.stt_model, "tts": CONFIG.speech.tts_model,
+                      "depth": CONFIG.measurement.depth_pro_model}
+            setup = {"measurement": CONFIG.measurement.enabled, "models": models, "recent": list(FLOW.recent)}
             yield f"event: setup\ndata: {json.dumps(setup)}\n\n"
             while not await request.is_disconnected():
                 try:

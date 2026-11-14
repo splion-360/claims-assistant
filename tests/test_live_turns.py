@@ -360,8 +360,8 @@ class FlowViewTests(unittest.IsolatedAsyncioTestCase):
 
         await LiveTurnTests.drive(self, receive)
         stages = [(event['stage'], event['phase']) for event in s.FLOW.recent]
-        self.assertIn(('qwen_reply', 'start'), stages)
-        self.assertIn(('qwen_reply', 'done'), stages)
+        self.assertIn(('reply', 'start'), stages)
+        self.assertIn(('reply', 'done'), stages)
 
     def test_flow_page_is_served(self):
         """GET /flow returns the flow view."""

@@ -158,3 +158,21 @@ class ProviderNeutralWordingTests(unittest.IsolatedAsyncioTestCase):
         for path in [*root.glob('*.py'), *root.glob('*.js'), *root.glob('*.html')]:
             with self.subTest(path=path.name):
                 self.assertNotIn('crusoe', path.read_text().lower())
+
+    async def test_stage_reports_the_model_that_answered(self):
+        """A stage wrapping a provider call reports the fallback model that actually answered."""
+        from library_claim import telemetry
+        events = []
+
+        def handler(request):
+            if json.loads(request.content)['model'] == provider.MODEL:
+                return httpx.Response(503)
+            return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': 'Hi'}}]})
+
+        mock = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        with patch.dict('os.environ', {'CRUSOE_API_KEY': 'k'}), patch.object(provider.httpx, 'AsyncClient', return_value=mock), \
+                telemetry.listening(events.append):
+            with telemetry.span('reply'):
+                await provider.complete([{'role': 'user', 'content': 'Hello'}])
+        done = [event for event in events if event['stage'] == 'reply' and event['phase'] == 'done'][0]
+        self.assertEqual(done['model'], provider.CONFIG.inference.fallback_models[0])

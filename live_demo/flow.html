@@ -7,7 +7,7 @@
 <style>
   :root {
     --bg: #0f1216; --panel: #171b21; --card: #1e232b; --line: #2c333d; --text: #e7ebf0; --muted: #8c96a3;
-    --drex: #b388ff; --qwen: #4fc3f7; --local: #9aa5b1; --deepgram: #ffb74d; --web: #81c784; --depth: #f06292;
+    --decision: #b388ff; --vision: #4fc3f7; --language: #4dd0e1; --local: #9aa5b1; --speech: #ffb74d; --web: #81c784; --depth: #f06292;
     --done: #4caf50; --error: #ef5350;
   }
   * { box-sizing: border-box; }
@@ -27,9 +27,10 @@
           border-radius: 10px; padding: 9px 10px; display: flex; flex-direction: column; gap: 4px; transition: border-color .3s, box-shadow .3s, opacity .3s; }
   .card .who { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
   .card .name { font-weight: 600; }
+  .card .model { font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); overflow-wrap: anywhere; }
   .card .detail { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; min-height: 2.6em; }
   .card .meta { margin-top: auto; display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .card.drex { border-style: dashed; }
+  .card.decision { border-style: dashed; }
   .card.active { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); animation: pulse 1s ease-in-out infinite; }
   .card.done { border-color: var(--done); }
   .card.error { border-color: var(--error); }
@@ -48,29 +49,31 @@
 <body>
 <header>
   <h1>Library agent · live pipeline</h1>
-  <span class="stat">Drex calls <b id="drexCount">0</b></span>
-  <span class="stat">Drex avg <b id="drexAvg">–</b></span>
-  <span class="stat">Qwen calls <b id="qwenCount">0</b></span>
+  <span class="stat">Decision model calls <b id="drexCount">0</b></span>
+  <span class="stat">Decision avg <b id="drexAvg">–</b></span>
+  <span class="stat">Vision/language model calls <b id="modelCount">0</b></span>
   <span class="stat">Model fallbacks <b id="fallbackCount">0</b></span>
   <span id="status">Connecting…</span>
 </header>
 <main id="strips"></main>
 <main><div id="log" aria-live="polite"></div></main>
 <script>
-// Who runs each step; colours match the CSS variables of the same name.
-const WHO = { drex: "Drex", qwen: "Qwen", local: "Local", deepgram: "Deepgram", web: "Open Library", depth: "Depth Pro" };
+// Each step is labelled by its role; the model line shows whichever model actually answered.
+const WHO = { decision: "Decision model", vision: "Vision model", language: "Language model", local: "Local",
+              speech: "Speech model", web: "Open Library", depth: "Depth model" };
 const STRIPS = [
   { title: "1 · Capture — every camera frame", blocks: [
     ["camera", "local", "Browser camera"], ["tracking", "local", "Tracking (SIFT / optical flow)"],
-    ["gate", "local", "Local gate (sharpness, exposure)"], ["d1", "drex", "◆ D1 Frame check"], ["save", "local", "Evidence store (SQLite + JPEG)"]] },
+    ["gate", "local", "Local gate (sharpness, exposure)"], ["d1", "decision", "◆ D1 Frame check"], ["save", "local", "Evidence store (SQLite + JPEG)"]] },
   { title: "2 · Identification — per frame where Drex sees books", blocks: [
-    ["qwen_vl", "qwen", "Spine reading (Qwen-VL)"], ["d2", "drex", "◆ D2 Same book?"], ["inventory", "local", "Inventory update"],
-    ["depth", "depth", "Spine measurement (depth)"], ["openlibrary", "web", "Open Library search"], ["d3", "drex", "◆ D3 Catalogue match"]] },
+    ["spine_reading", "vision", "Spine reading"], ["d2", "decision", "◆ D2 Same book?"], ["inventory", "local", "Inventory update"],
+    ["depth", "depth", "Spine measurement (depth)"], ["openlibrary", "web", "Open Library search"], ["d3", "decision", "◆ D3 Catalogue match"]] },
   { title: "3 · Voice — what the user says", blocks: [
-    ["stt", "deepgram", "Speech to text"], ["d5", "drex", "◆ D5 Correction intent"], ["correction", "local", "Correction applied"],
-    ["qwen_reply", "qwen", "Reply (Qwen)"], ["tts", "deepgram", "Speech out"]] },
+    ["stt", "speech", "Speech to text"], ["d5", "decision", "◆ D5 Correction intent"], ["correction", "local", "Correction applied"],
+    ["reply", "language", "Reply"], ["tts", "speech", "Speech out"]] },
   { title: "4 · Guidance — when the agent speaks up", blocks: [
-    ["d6", "drex", "◆ D6 Speak now? Which prompt?"], ["guidance", "local", "Prompt chosen → spoken via Speech out"]] },
+    ["d6", "decision", "◆ D6 Speak now? Which prompt?"], ["guidance", "local", "Prompt chosen → spoken via Speech out"],
+    ["announce", "local", "Book announced → spoken via Speech out"]] },
 ];
 const cards = {}, timers = {};
 const LABELS = { fallback: "Model fallback" };
@@ -86,10 +89,10 @@ for (const strip of STRIPS) {
   strip.blocks.forEach(([id, who, name], index) => {
     if (index) row.insertAdjacentHTML("beforeend", '<div class="arrow" aria-hidden="true">→</div>');
     const card = document.createElement("div");
-    card.className = `card ${who === "drex" ? "drex" : ""}`;
+    card.className = `card ${who === "decision" ? "decision" : ""}`;
     card.style.setProperty("--accent", `var(--${who})`);
     card.innerHTML = `<span class="who" style="color: var(--${who})">${WHO[who]}</span><span class="name"></span>
-      <span class="detail">idle</span><span class="meta"><span class="ms"></span><span class="count">0×</span></span>`;
+      <span class="model"></span><span class="detail">idle</span><span class="meta"><span class="ms"></span><span class="count">0×</span></span>`;
     card.querySelector(".name").textContent = name;
     card.dataset.count = "0";
     row.appendChild(card);
@@ -99,7 +102,7 @@ for (const strip of STRIPS) {
   root.appendChild(section);
 }
 
-let drexCount = 0, drexTotalMs = 0, qwenCount = 0;
+let drexCount = 0, drexTotalMs = 0, modelCount = 0;
 function setState(card, state, holdMs) {
   card.classList.remove("active", "done", "error");
   if (state) card.classList.add(state);
@@ -126,6 +129,7 @@ function apply(event, replay = false) {
     detail.textContent = event.detail || "running…";
     return;
   }
+  if (event.model) card.querySelector(".model").textContent = event.model;
   // A finished step keeps its last result visible after the highlight fades.
   if (event.detail) detail.textContent = event.detail;
   else if (event.phase === "done") detail.textContent = "done";
@@ -140,8 +144,8 @@ function apply(event, replay = false) {
     document.getElementById("drexCount").textContent = drexCount;
     document.getElementById("drexAvg").textContent = `${Math.round(drexTotalMs / drexCount)} ms`;
   }
-  if (event.stage.startsWith("qwen") && event.phase === "done") {
-    document.getElementById("qwenCount").textContent = ++qwenCount;
+  if ((event.stage === "spine_reading" || event.stage === "reply") && event.phase === "done") {
+    document.getElementById("modelCount").textContent = ++modelCount;
   }
 }
 
@@ -164,6 +168,9 @@ function connect() {
   source.addEventListener("setup", message => {
     const setup = JSON.parse(message.data);
     status.textContent = "Live"; status.className = "live";
+    for (const [stage, model] of Object.entries(setup.models || {})) {
+      if (cards[stage] && model) cards[stage].querySelector(".model").textContent = model;
+    }
     if (!setup.measurement) {
       cards.depth.classList.add("off");
       cards.depth.querySelector(".detail").textContent = "off in config.yml";

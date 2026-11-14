@@ -294,3 +294,69 @@ class DepthSchedulingTests(unittest.IsolatedAsyncioTestCase):
         off = CONFIG.model_copy(update={'measurement': CONFIG.measurement.model_copy(update={'enabled': False})})
         with patch.object(server, 'CONFIG', off):
             self.assertFalse((await self.run_capture(True)).called)
+
+
+class BookAnnouncementTests(unittest.IsolatedAsyncioTestCase):
+    """The agent names a newly read book once."""
+
+    async def test_new_title_is_announced_once(self):
+        """Two reads of the same book give one 'I found a book called …' line."""
+        _, first = cv2.imencode('.jpg', textured_view())
+        _, second = cv2.imencode('.jpg', textured_view(3))
+        reads = 0
+        count = 0
+
+        async def capture(session, args, *, candidate):
+            """Report a successful read that lists one titled book.
+
+            Args:
+                session: Live session.
+                args: Capture arguments.
+                candidate: Admitted frame.
+
+            Returns:
+                Successful pin result.
+            """
+            nonlocal reads
+            reads += 1
+            session.book_inventory = [{'id': 'b1', 'title': 'DID I SAY YOU COULD GO', 'frame_ids': [candidate.frame_id],
+                                       'observations': []}]
+            return {'pinned': True}
+
+        def agent_lines(sent):
+            """Collect agent transcript lines.
+
+            Args:
+                sent: Emitted messages.
+
+            Returns:
+                Agent texts.
+            """
+            return [m['text'] for m in sent if m['type'] == 'transcript' and m['speaker'] == 'Agent']
+
+        async def receive(session, sent):
+            """Send two frames during a sweep and close after both reads.
+
+            Args:
+                session: Live session.
+                sent: Emitted messages.
+
+            Returns:
+                Next simulated browser message.
+            """
+            nonlocal count
+            count += 1
+            if count == 1:
+                session.library_sweep = True
+                return {'type': 'video', 'data': base64.b64encode(first).decode()}
+            if count == 2:
+                while not any('I found' in line for line in agent_lines(sent)):
+                    await asyncio.sleep(.001)
+                return {'type': 'video', 'data': base64.b64encode(second).decode()}
+            await asyncio.sleep(0.3)
+            return {'type': 'close'}
+
+        with patch.object(server, '_pin_evidence_photo', side_effect=capture):
+            _, sent = await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=lambda jpeg: check(0.9))
+        announcements = [line for line in agent_lines(sent) if line.startswith('I found')]
+        self.assertEqual(announcements, ['I found a book called Did I Say You Could Go.'])

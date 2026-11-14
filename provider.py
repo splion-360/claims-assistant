@@ -136,7 +136,9 @@ async def _run(messages: list[dict], schema: type[BaseModel] | None, model: str 
                 telemetry.emit('fallback', 'done', f'{models[index - 1]} failed → {candidate}')
             try:
                 text = await _attempt(client, messages, schema, candidate, max_tokens)
-                return validate(text) if validate else text
+                result = validate(text) if validate else text
+                telemetry.record_model(candidate)
+                return result
             except InferenceError as failure:
                 error = failure
     raise error
