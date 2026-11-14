@@ -19,18 +19,22 @@ class SameBookDecisionTests(unittest.TestCase):
     """Exercise the D2 request and threshold rule."""
 
     def test_choose_same_book_thresholds(self):
-        """Reuse at ≥0.8, create a new book when all ≤0.2, otherwise stay unresolved."""
-        self.assertEqual(choose_same_book([0.9, 0.3]), 0)
-        self.assertIsNone(choose_same_book([0.1, 0.15]))
-        self.assertEqual(choose_same_book([0.5]), 'unresolved')
+        """Reuse at or above same_book_min, create a new book below different_book_max.
+
+        The band between the two is where measured same-book and different-book
+        scores do not overlap, so a value inside it stays unresolved.
+        """
+        self.assertEqual(choose_same_book([0.9, 0.05]), 0)
+        self.assertIsNone(choose_same_book([0.01, 0.1]))
+        self.assertEqual(choose_same_book([0.2]), 'unresolved')
         self.assertEqual(choose_same_book([0.85, 0.82]), 'unresolved')
 
     def test_strong_evidence_merges_unless_drex_objects(self):
-        """One exact-title, image-verified candidate merges at Drex 0.76 (replayed sweep), not at ≤0.2."""
-        self.assertEqual(choose_same_book([0.76], strong=[True]), 0)
-        self.assertEqual(choose_same_book([0.76], strong=[False]), 'unresolved')
-        self.assertIsNone(choose_same_book([0.15], strong=[True]))
-        self.assertEqual(choose_same_book([0.76, 0.5], strong=[True, True]), 'unresolved')
+        """One exact-title, image-verified candidate merges unless Drex says different."""
+        self.assertEqual(choose_same_book([0.2], strong=[True]), 0)
+        self.assertEqual(choose_same_book([0.2], strong=[False]), 'unresolved')
+        self.assertIsNone(choose_same_book([0.05], strong=[True]))
+        self.assertEqual(choose_same_book([0.76, 0.3], strong=[True, True]), 'unresolved')
 
     def test_request_sends_crops_and_one_question_per_candidate(self):
         """Send the detection crop first and ask one yes/no per candidate."""
@@ -94,8 +98,8 @@ class DrexAssociationTests(unittest.TestCase):
     def test_exact_title_with_verified_match_merges_at_borderline_drex(self):
         """Reuse the book when the code evidence is strong and Drex does not object."""
         self.save_frame('second', [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-        self.persist('reference', [detection(title='Did I Say You Could Go')], lambda crop, det, cands: [0.76] * len(cands))
-        self.persist('second', [detection(title='Did I Say You Could Go')], lambda crop, det, cands: [0.76] * len(cands))
+        self.persist('reference', [detection(title='Did I Say You Could Go')], lambda crop, det, cands: [0.2] * len(cands))
+        self.persist('second', [detection(title='Did I Say You Could Go')], lambda crop, det, cands: [0.2] * len(cands))
         self.assertEqual(self.methods()[-1], 'evidence_with_drex')
         with Repository(self.store.database) as repo:
             self.assertEqual(len(repo.list_for_sweep(Book, 'sweep')), 1)
@@ -103,8 +107,8 @@ class DrexAssociationTests(unittest.TestCase):
     def test_partial_title_at_borderline_drex_stays_unresolved(self):
         """Without an exact title, a borderline Drex answer still goes to review."""
         self.save_frame('second', [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-        self.persist('reference', [detection(title='Did I Say You Could Go')], lambda crop, det, cands: [0.76] * len(cands))
-        self.persist('second', [detection(title='Did I Say You')], lambda crop, det, cands: [0.76] * len(cands))
+        self.persist('reference', [detection(title='Did I Say You Could Go')], lambda crop, det, cands: [0.2] * len(cands))
+        self.persist('second', [detection(title='Did I Say You')], lambda crop, det, cands: [0.2] * len(cands))
         self.assertEqual(self.methods()[-1], 'unresolved')
 
     def test_drex_failure_leaves_unresolved(self):

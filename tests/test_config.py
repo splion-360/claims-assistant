@@ -100,6 +100,6 @@ print(json.dumps(dict(drex=drex.CONFIG.drex.model, dimension=assessor.max_dimens
 
     def test_drex_thresholds_loaded(self):
         """Expose Drex decision thresholds from config.yml."""
-        self.assertEqual(CONFIG.drex.same_book_min, 0.8)
-        self.assertEqual(CONFIG.drex.different_book_max, 0.2)
+        self.assertEqual(CONFIG.drex.same_book_min, 0.25)
+        self.assertEqual(CONFIG.drex.different_book_max, 0.15)
         self.assertEqual(CONFIG.measurement.depth_inset, 0.15)
