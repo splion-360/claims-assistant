@@ -139,3 +139,21 @@ measurement:
   thickness_range_cm: [0.3, 15]
   depth_pro_model: apple/DepthPro-hf
 
+pricing:
+  # Locale is configuration: adding a country is a markets entry, not a code change.
+  default_country: US
+  condition_assumed: Used, good condition
+  appraisal_threshold: 250.0
+  appraisal_keywords: [signed, inscribed, first edition, limited edition, rare, antiquarian, folio society]
+  # Markets tried for a converted figure when the local market has no price.
+  convert_from: [GB]
+  fx_base_url: https://api.frankfurter.app
+  timeout_s: 15
+  connect_timeout_s: 10
+  markets:
+    US:
+      currency: USD
+      providers: [google_books]
+    GB:
+      currency: GBP
+      providers: [google_books]

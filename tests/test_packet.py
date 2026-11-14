@@ -7,6 +7,9 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import httpx
+
+from library_claim.config import CONFIG
 from library_claim.domain.models import Book, BookObservation, Box, Frame, ReviewIssue, Sweep
 from library_claim.packet import build_packet, packet_archive, render_report
 from library_claim.storage.evidence import EvidenceStore
@@ -85,7 +88,7 @@ class PacketTests(unittest.TestCase):
     def test_packet_keeps_every_contract_field(self):
         """Emit the sweep, room, book, totals and review sections the contract fixes."""
         self.seed_one_identified_book()
-        packet = build_packet(self.database, self.sweep_id)
+        packet = build_packet(self.database, self.sweep_id, price=False)
         self.assertEqual(set(packet), {'sweep', 'room', 'books', 'items', 'totals', 'review_queue'})
         self.assertLessEqual({'id', 'captured_at', 'device', 'duration_s', 'country', 'currency'}, set(packet['sweep']))
         self.assertLessEqual(CONTRACT_ROOM_FIELDS, set(packet['room']))
@@ -95,7 +98,7 @@ class PacketTests(unittest.TestCase):
     def test_frame_ref_names_a_saved_frame(self):
         """Point every frame reference at the stored JPEG for that frame."""
         self.seed_one_identified_book()
-        packet = build_packet(self.database, self.sweep_id)
+        packet = build_packet(self.database, self.sweep_id, price=False)
         line = packet['books'][0]
         self.assertEqual(line['frame_ref'], f'frames/{"a" * 64}.jpg')
         self.assertEqual(line['frame_refs'], [f'frames/{"a" * 64}.jpg', f'frames/{"b" * 64}.jpg'])
@@ -103,7 +106,7 @@ class PacketTests(unittest.TestCase):
     def test_unpriced_books_stay_empty_and_leave_the_totals(self):
         """Leave an unknown price empty rather than writing a figure with no source."""
         self.seed_one_identified_book()
-        packet = build_packet(self.database, self.sweep_id)
+        packet = build_packet(self.database, self.sweep_id, price=False)
         line = packet['books'][0]
         self.assertIsNone(line['replacement_cost']['amount'])
         self.assertEqual(line['replacement_cost']['source'], '')
@@ -120,7 +123,7 @@ class PacketTests(unittest.TestCase):
             self.observation('b1', 'f1', title='READ SPINE', spine_height_cm=20, spine_thickness_cm=2.5),
             self.observation('b2', 'f2', spine_height_cm=18, spine_thickness_cm=4.5),
         ])
-        totals = build_packet(self.database, self.sweep_id)['totals']
+        totals = build_packet(self.database, self.sweep_id, price=False)['totals']
         self.assertEqual(totals['book_count'], 2)
         self.assertEqual(totals['books_identified'], 1)
         self.assertEqual(totals['books_unidentified'], 1)
@@ -134,7 +137,7 @@ class PacketTests(unittest.TestCase):
             self.frame('f1', 'a'), Book(id='b1', sweep_id=self.sweep_id),
             self.observation('b1', 'f1', spine_height_cm=21, spine_thickness_cm=3),
         ])
-        line = build_packet(self.database, self.sweep_id)['books'][0]
+        line = build_packet(self.database, self.sweep_id, price=False)['books'][0]
         self.assertEqual(line['status'], 'unidentified')
         self.assertEqual(line['title'], '')
         self.assertEqual(line['spine_height_cm'], 21)
@@ -144,7 +147,7 @@ class PacketTests(unittest.TestCase):
         self.seed_one_identified_book()
         self.write([ReviewIssue(sweep_id=self.sweep_id, book_id='b1', field='catalogue',
                                 reason='No confident catalogue match')])
-        queue = build_packet(self.database, self.sweep_id)['review_queue']
+        queue = build_packet(self.database, self.sweep_id, price=False)['review_queue']
         self.assertEqual(len(queue), len({(entry['ref_id'], entry['reason']) for entry in queue}))
         reasons = {entry['reason'] for entry in queue}
         self.assertIn('No confident catalogue match', reasons)
@@ -155,7 +158,7 @@ class PacketTests(unittest.TestCase):
     def test_unmeasured_room_and_items_stay_empty(self):
         """Leave the room and item sections unfilled while no pass measures them."""
         self.seed_one_identified_book()
-        packet = build_packet(self.database, self.sweep_id)
+        packet = build_packet(self.database, self.sweep_id, price=False)
         self.assertEqual(packet['items'], [])
         self.assertTrue(all(packet['room'][field] is None for field in
                             ('length_m', 'width_m', 'height_m', 'floor_area_m2', 'wall_area_m2')))
@@ -164,18 +167,18 @@ class PacketTests(unittest.TestCase):
     def test_duration_spans_the_saved_frames(self):
         """Report the sweep duration as the span of its retained frames."""
         self.seed_one_identified_book()
-        self.assertEqual(build_packet(self.database, self.sweep_id)['sweep']['duration_s'], 42.0)
+        self.assertEqual(build_packet(self.database, self.sweep_id, price=False)['sweep']['duration_s'], 42.0)
 
     def test_packet_is_json_serialisable(self):
         """Keep the packet free of values that cannot be written to the structured file."""
         self.seed_one_identified_book()
-        restored = json.loads(json.dumps(build_packet(self.database, self.sweep_id)))
+        restored = json.loads(json.dumps(build_packet(self.database, self.sweep_id, price=False)))
         self.assertEqual(restored['books'][0]['title'], 'THE GOOD PEOPLE')
 
     def test_missing_sweep_is_reported(self):
         """Raise rather than invent a packet for an unknown sweep."""
         with self.assertRaises(KeyError):
-            build_packet(self.database, 'absent')
+            build_packet(self.database, 'absent', price=False)
 
 
 class ReportTests(unittest.TestCase):
@@ -251,7 +254,7 @@ class ArchiveTests(unittest.TestCase):
 
     def test_archive_holds_the_packet_report_and_cited_frames(self):
         """Write both deliverable files and every frame the packet references."""
-        archive = packet_archive(self.database, self.frames, 'sweep1')
+        archive = packet_archive(self.database, self.frames, 'sweep1', price=False)
         with zipfile.ZipFile(io.BytesIO(archive)) as opened:
             names = set(opened.namelist())
             packet = json.loads(opened.read('claim_packet.json'))
@@ -265,4 +268,81 @@ class ArchiveTests(unittest.TestCase):
     def test_missing_sweep_is_reported(self):
         """Raise rather than return an archive for an unknown sweep."""
         with self.assertRaises(KeyError):
-            packet_archive(self.database, self.frames, 'absent')
+            packet_archive(self.database, self.frames, 'absent', price=False)
+
+
+class PricedPacketTests(unittest.TestCase):
+    """Check priced lines, their sources and the totals summed from them."""
+
+    def setUp(self):
+        """Save a sweep holding one readable book."""
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.database = Path(self.directory.name) / 'claims.sqlite3'
+        start = datetime(2026, 11, 14, 9, 0, tzinfo=timezone.utc)
+        with Repository(self.database) as repo:
+            repo.add_many([
+                Sweep(id='sweep1', captured_at=start, device='browser camera', country='US', currency='USD'),
+                Frame(id='f1', sweep_id='sweep1', captured_at=start, evidence_key=f'{"a" * 64}.jpg',
+                      width_px=640, height_px=480),
+                Book(id='b1', sweep_id='sweep1'),
+                BookObservation(sweep_id='sweep1', book_id='b1', frame_id='f1',
+                                bbox=Box(x_min=.1, y_min=.1, x_max=.5, y_max=.9),
+                                association_method='new_provisional', title='The Good People',
+                                author='Hannah Kent'),
+            ])
+
+    @staticmethod
+    def priced_client(amount=18.99, currency='USD'):
+        """Build an HTTP client answering every price lookup with one figure.
+
+        Args:
+            amount: Retail amount returned.
+            currency: Currency of that amount.
+
+        Returns:
+            A client making no network calls.
+        """
+        item = {'volumeInfo': {'title': 'The Good People', 'infoLink': 'https://books.example/info'},
+                'saleInfo': {'buyLink': 'https://books.example/buy',
+                             'retailPrice': {'amount': amount, 'currencyCode': currency}}}
+        return httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={'items': [item]})))
+
+    def test_priced_line_carries_its_source_and_joins_the_totals(self):
+        """Report the figure with its source and sum it into the packet totals."""
+        with self.priced_client() as http:
+            packet = build_packet(self.database, 'sweep1', client=http)
+        line = packet['books'][0]
+        self.assertEqual(line['replacement_cost']['amount'], 18.99)
+        self.assertEqual(line['replacement_cost']['source'], 'Google Books')
+        self.assertEqual(line['replacement_cost']['url'], 'https://books.example/buy')
+        self.assertTrue(line['replacement_cost']['retrieved_at'])
+        self.assertEqual(packet['totals']['books_replacement_cost'], 18.99)
+        self.assertEqual(packet['totals']['excluded_from_totals'], 0)
+
+    def test_unreachable_source_leaves_the_line_empty_and_flagged(self):
+        """Keep an unpriced line out of the totals and name the reason."""
+        with httpx.Client(transport=httpx.MockTransport(
+                lambda request: httpx.Response(429, json={'error': {}}))) as http:
+            packet = build_packet(self.database, 'sweep1', client=http)
+        self.assertIsNone(packet['books'][0]['replacement_cost']['amount'])
+        self.assertEqual(packet['totals']['books_replacement_cost'], 0)
+        self.assertEqual(packet['totals']['excluded_from_totals'], 1)
+        self.assertTrue(any('quota' in entry['reason'] for entry in packet['review_queue']))
+
+    def test_appraisal_line_is_never_auto_priced(self):
+        """Withhold a figure above the threshold and mark the line for appraisal."""
+        with self.priced_client(amount=CONFIG.pricing.appraisal_threshold + 50) as http:
+            packet = build_packet(self.database, 'sweep1', client=http)
+        line = packet['books'][0]
+        self.assertEqual(line['status'], 'needs_appraisal')
+        self.assertIsNone(line['replacement_cost']['amount'])
+        self.assertEqual(packet['totals']['books_replacement_cost'], 0)
+
+    def test_country_override_prices_the_same_books_elsewhere(self):
+        """Price the same sweep in a second market to show locale is a setting."""
+        with self.priced_client(amount=9.99, currency='GBP') as http:
+            packet = build_packet(self.database, 'sweep1', price=True, country='GB', client=http)
+        self.assertEqual(packet['books'][0]['replacement_cost']['amount'], 9.99)
+        self.assertEqual(packet['books'][0]['replacement_cost']['currency'], 'GBP')

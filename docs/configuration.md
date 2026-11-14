@@ -16,6 +16,7 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 | `speech` | Deepgram STT/TTS models, speech request chunk length and timeouts |
 | `drex` | Drex model, endpoint, client name, timeouts, decision probability thresholds and guidance cooldowns |
 | `measurement` | Depth sampling inset/window and Depth Pro model (the AR depth-grid size is under `capture.browser`) |
+| `pricing` | Default country, per-country currency and price providers, appraisal keywords and threshold, conversion markets, exchange-rate endpoint and request timeouts |
 
 For quieter console output, change `capture.summary_log_interval_s` (default 5
 seconds). It controls the combined Rich table only; scoring, tracking, and image
@@ -81,3 +82,28 @@ adb reverse tcp:4177 tcp:4177
 .venv/bin/python -m uvicorn live_demo.server:app --host 127.0.0.1 --port 4177
 # then open http://localhost:4177 in Chrome on the phone
 ```
+
+## Pricing locale
+
+`pricing.markets` maps a country code to its currency and the price providers
+tried for it, in order. Adding a country is a configuration entry, not a code
+change; `pricing.default_country` picks the market used when a sweep has no
+confirmed country. The same books can be priced for another market by passing a
+country to `build_packet`, which is how the packet shows one sweep valued in two
+locales.
+
+Prices come only from a source that answers with a retrievable URL. The Google
+Books provider sends the market's country code, so the figure and its currency
+are that market's own. Set `GOOGLE_BOOKS_API_KEY` in `.env`; without it the
+shared anonymous quota refuses most requests and the book is reported unpriced
+in the review queue rather than given a figure with nothing behind it.
+
+When no local price exists, `pricing.convert_from` names the markets tried next.
+A figure taken from another market is converted at a dated European Central Bank
+reference rate and labelled `converted`, keeping the original currency and the
+rate's source on the line.
+
+Books whose readings contain `pricing.appraisal_keywords` (signed, first
+edition, rare and so on) are never priced automatically, and a figure above
+`pricing.appraisal_threshold` is withheld for a human appraiser. Both outcomes
+leave the money fields empty and put the line in the review queue.

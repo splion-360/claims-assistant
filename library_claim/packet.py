@@ -6,8 +6,11 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
+from library_claim.config import CONFIG
 from library_claim.domain.models import Frame, Sweep
 from library_claim.identification.storage import inventory, inventory_totals
+from library_claim.pricing.models import Valuation
+from library_claim.pricing.service import price_book
 from library_claim.storage.repository import Repository
 
 # Empty money blocks: the keys stay so the contract holds, the amounts stay unknown.
@@ -31,22 +34,28 @@ def _duration_s(frames: list[Frame]) -> float:
     return round((times[-1] - times[0]).total_seconds(), 1)
 
 
-def _book_line(book: dict, evidence: dict[str, str]) -> dict:
+def _book_line(book: dict, evidence: dict[str, str], valuation: Valuation | None = None) -> dict:
     """Convert one inventory entry into a claim packet book line.
 
     Catalogue fields fill edition and ISBN only where a catalogue answered, so a
-    line never carries an identity the sweep did not establish.
+    line never carries an identity the sweep did not establish. Prices come from
+    the valuation and stay empty when no source answered.
 
     Args:
         book: Inventory entry from `inventory`.
         evidence: Saved frame path indexed by frame ID.
+        valuation: Pricing outcome for this book, or None when pricing did not run.
 
     Returns:
         A book line holding only values backed by evidence.
     """
     catalogue = book.get('catalogue') or {}
     frame_ids = book.get('frame_ids') or []
-    status = 'needs_appraisal' if book.get('needs_appraisal') else ('identified' if book.get('title') else 'unidentified')
+    appraisal = book.get('needs_appraisal') or (valuation is not None and valuation.needs_appraisal)
+    status = 'needs_appraisal' if appraisal else ('identified' if book.get('title') else 'unidentified')
+    # A book withheld for appraisal keeps its figure out of the packet's money lines.
+    replacement = None if appraisal or valuation is None else valuation.replacement
+    used = None if appraisal or valuation is None else valuation.used
     return {
         'id': book['id'],
         # Shelf and position are not yet derived from the sweep; an empty field is the honest value.
@@ -64,8 +73,8 @@ def _book_line(book: dict, evidence: dict[str, str]) -> dict:
         'id_confidence': None,
         'catalogue_url': catalogue.get('url') or '',
         'observation_count': book.get('observation_count', 0),
-        'replacement_cost': dict(NO_REPLACEMENT_COST),
-        'used_value': dict(NO_USED_VALUE),
+        'replacement_cost': replacement.as_replacement_block() if replacement else dict(NO_REPLACEMENT_COST),
+        'used_value': used.as_used_block() if used else dict(NO_USED_VALUE),
     }
 
 
@@ -96,13 +105,15 @@ def _totals(books: list[dict], lines: list[dict], items: list[dict]) -> dict:
     }
 
 
-def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep) -> list[dict]:
+def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep,
+                  valuations: dict[str, Valuation]) -> list[dict]:
     """List every line the sweep is not confident in, with its reason.
 
     Args:
         books: Inventory entries carrying their review reasons.
         lines: Book lines of the packet.
         sweep: The sweep record, checked for the locale pricing needs.
+        valuations: Pricing outcomes indexed by book ID.
 
     Returns:
         Review entries referencing a book, the room, the item list or the sweep.
@@ -113,12 +124,17 @@ def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep) -> list[di
         for reason in book.get('review_reasons') or []:
             queue.append({'ref_id': book['id'], 'reason': reason})
     for line in lines:
+        # Pricing says in its own words why a figure is missing or withheld.
+        for reason in (valuations.get(line['id']).reasons if valuations.get(line['id']) else ()):
+            queue.append({'ref_id': line['id'], 'reason': reason})
         if line['replacement_cost']['amount'] is None:
             queue.append({'ref_id': line['id'], 'reason': UNPRICED_REASON})
     queue.append({'ref_id': 'room', 'reason': 'Room dimensions and areas were not measured during this sweep'})
     queue.append({'ref_id': 'items', 'reason': 'Non-book contents were not detected during this sweep'})
     if not sweep.country or not sweep.currency:
-        queue.append({'ref_id': 'sweep', 'reason': 'Country and currency were not confirmed; prices cannot be localised'})
+        queue.append({'ref_id': 'sweep',
+                      'reason': 'Country and currency were not confirmed by the policyholder; '
+                                'the configured default market was used for pricing'})
     # One line per distinct concern; the same reason from two sightings is one review item.
     seen, unique = set(), []
     for entry in queue:
@@ -129,16 +145,21 @@ def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep) -> list[di
     return unique
 
 
-def build_packet(database: Path, sweep_id: str) -> dict:
+def build_packet(database: Path, sweep_id: str, *, price: bool = True,
+                 country: str | None = None, client=None) -> dict:
     """Build the claim packet for one sweep from its saved evidence.
 
-    Every value comes from a stored record: identities from spine readings and
-    accepted catalogue matches, dimensions from measured depth, and totals from
+    Every value comes from a stored record or a retrievable source: identities
+    from spine readings and accepted catalogue matches, dimensions from measured
+    depth, prices from a named source with its retrieval date, and totals from
     the lines in this packet. Unknowns stay empty and reach the review queue.
 
     Args:
         database: Capture SQLite path.
         sweep_id: Owning sweep.
+        price: Whether to value the books; False builds the packet without lookups.
+        country: Market to price in, overriding the sweep's own country.
+        client: Optional HTTP client passed to the price sources, used by tests.
 
     Returns:
         The claim packet as the output contract defines it.
@@ -153,18 +174,22 @@ def build_packet(database: Path, sweep_id: str) -> dict:
     # frame_ref must resolve to a file an adjuster can open, so it names the saved JPEG.
     evidence = {frame.id: f'frames/{frame.evidence_key}' for frame in frames}
     kept = [book for book in books if not book.get('excluded')]
-    lines = [_book_line(book, evidence) for book in kept]
+    chosen = country or sweep.country or CONFIG.pricing.default_country
+    valuations = {book['id']: price_book(book, chosen, client=client) for book in kept} if price else {}
+    lines = [_book_line(book, evidence, valuations.get(book['id'])) for book in kept]
     items: list[dict] = []
+    currency = sweep.currency or next((value.currency for value in valuations.values() if value.currency), '')
     return {
         'sweep': {'id': sweep.id, 'captured_at': sweep.captured_at.isoformat(), 'device': sweep.device,
-                  'duration_s': _duration_s(frames), 'country': sweep.country, 'currency': sweep.currency,
+                  'duration_s': _duration_s(frames), 'country': (sweep.country or chosen).upper(),
+                  'currency': currency,
                   'frames_saved': len(frames), 'generated_at': datetime.now(sweep.captured_at.tzinfo).isoformat()},
         'room': {'length_m': None, 'width_m': None, 'height_m': None, 'floor_area_m2': None,
                  'wall_area_m2': None, 'shelved_wall_area_m2': None, 'scale_method': '', 'confidence': 0},
         'books': lines,
         'items': items,
         'totals': _totals(kept, lines, items),
-        'review_queue': _review_queue(kept, lines, sweep),
+        'review_queue': _review_queue(kept, lines, sweep, valuations),
     }
 
 
@@ -265,7 +290,8 @@ def render_report(packet: dict) -> str:
 </body></html>'''
 
 
-def packet_archive(database: Path, frames_root: Path, sweep_id: str) -> bytes:
+def packet_archive(database: Path, frames_root: Path, sweep_id: str, *, price: bool = True,
+                   country: str | None = None, client=None) -> bytes:
     """Build the deliverable archive: the packet, its report and every frame cited.
 
     Shipping the cited frames alongside the packet keeps each `frame_ref`
@@ -275,6 +301,9 @@ def packet_archive(database: Path, frames_root: Path, sweep_id: str) -> bytes:
         database: Capture SQLite path.
         frames_root: Directory holding saved frame JPEGs.
         sweep_id: Owning sweep.
+        price: Whether to value the books; False builds the archive without lookups.
+        country: Market to price in, overriding the sweep's own country.
+        client: Optional HTTP client passed to the price sources, used by tests.
 
     Returns:
         Zip archive bytes.
@@ -284,7 +313,7 @@ def packet_archive(database: Path, frames_root: Path, sweep_id: str) -> bytes:
     """
     from library_claim.storage.evidence import EvidenceStore
 
-    packet = build_packet(database, sweep_id)
+    packet = build_packet(database, sweep_id, price=price, country=country, client=client)
     evidence = EvidenceStore(frames_root)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:

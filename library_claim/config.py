@@ -219,6 +219,40 @@ class MeasurementConfig(Settings):
     depth_pro_model: Text
 
 
+class MarketConfig(Settings):
+    """One country's currency and the price providers tried for it, in order."""
+    currency: Text
+    providers: list[Text]
+
+
+class PricingConfig(Settings):
+    """Pricing locale, provider behaviour and the bar for human appraisal."""
+    default_country: Text
+    condition_assumed: Text
+    # A book worth more than this in the sweep currency is withheld for appraisal.
+    appraisal_threshold: PositiveFloat
+    appraisal_keywords: list[Text]
+    convert_from: list[Text]
+    fx_base_url: Text
+    timeout_s: PositiveFloat
+    connect_timeout_s: PositiveFloat
+    markets: dict[Text, MarketConfig]
+
+    @model_validator(mode='after')
+    def default_country_is_configured(self):
+        """Require a market for the default country.
+
+        Returns:
+            The validated settings.
+
+        Raises:
+            ValueError: The default country has no configured market.
+        """
+        if self.default_country and self.default_country.upper() not in self.markets:
+            raise ValueError(f'No market configured for default_country {self.default_country}')
+        return self
+
+
 class AppConfig(Settings):
     """Collect the independently owned setting groups."""
     identification: IdentificationConfig
@@ -231,6 +265,7 @@ class AppConfig(Settings):
     speech: SpeechConfig
     drex: DrexConfig
     measurement: MeasurementConfig
+    pricing: PricingConfig
 
 
 def load_config(path: Path = ROOT / 'config.yml') -> AppConfig:
