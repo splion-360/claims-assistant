@@ -1,9 +1,11 @@
-"""Resolve legible spine readings to catalogue entries (Open Library, then Google Books), with Drex choosing the match."""
+"""Resolve legible spine readings to catalogue entries (Open Library, Library of Congress, Google Books), with Drex choosing."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 import os
 from pathlib import Path
+import re
+from xml.etree import ElementTree
 
 import httpx
 
@@ -16,6 +18,8 @@ from .matching import normalize
 
 OPEN_LIBRARY = 'https://openlibrary.org'
 GOOGLE_BOOKS = 'https://www.googleapis.com/books/v1/volumes'
+LIBRARY_OF_CONGRESS = 'https://lx2.loc.gov/sru/lcdb'
+MODS = {'m': 'http://www.loc.gov/mods/v3'}
 # Generic client name only; no user or project details go to either catalogue.
 HEADERS = {'User-Agent': 'library-claim/1'}
 logger = logging.getLogger(__name__)
@@ -29,10 +33,12 @@ class WorkCandidate:
     authors: list[str]
     first_publish_year: int | None
     source: str = 'openlibrary'
-    # Google Books volumes carry their own link, publisher and ISBN; Open Library editions are fetched separately.
+    # Library of Congress and Google Books records carry their own link, publisher, edition and ISBN;
+    # Open Library editions are fetched separately.
     url: str | None = None
     publisher: str | None = None
     isbn: str | None = None
+    edition: str | None = None
 
 
 def _get(path: str, params: dict | None, client: httpx.Client | None, base: str = OPEN_LIBRARY) -> dict:
@@ -132,6 +138,99 @@ def search_google_books(title: str, author: str | None, *, client: httpx.Client 
     return candidates
 
 
+def search_library_of_congress(title: str, author: str | None, *,
+                               client: httpx.Client | None = None) -> list[WorkCandidate]:
+    """Search the Library of Congress catalogue (SRU, MODS records) by title and, when read, author.
+
+    Args:
+        title: Title read from the spine.
+        author: Author read from the spine, if any.
+        client: Optional HTTP client, used by tests.
+
+    Returns:
+        Up to five catalogue records.
+
+    Raises:
+        ValueError: The catalogue returned something other than MODS XML.
+    """
+    # Quotes would end the CQL phrase early, so they are dropped from spine readings.
+    query = f'dc.title="{title.replace(chr(34), "")}"'
+    if author:
+        query += f' and dc.creator="{author.replace(chr(34), "")}"'
+    params = {'version': '1.1', 'operation': 'searchRetrieve', 'maximumRecords': 5, 'recordSchema': 'mods', 'query': query}
+    owned = client is None
+    client = client or httpx.Client(timeout=15)
+    try:
+        response = client.get(LIBRARY_OF_CONGRESS, params=params, headers=HEADERS)
+        response.raise_for_status()
+        root = ElementTree.fromstring(response.text)
+    except ElementTree.ParseError:
+        raise ValueError('Library of Congress returned invalid XML') from None
+    finally:
+        if owned:
+            client.close()
+
+    def text(node, path):
+        """First matching text, with trailing catalogue punctuation removed.
+
+        Args:
+            node: MODS element.
+            path: Namespaced XPath.
+
+        Returns:
+            Cleaned text, or None.
+        """
+        found = node.find(path, MODS)
+        return found.text.strip().rstrip(',:;/ ').strip() if found is not None and found.text else None
+
+    candidates = []
+    for record in root.iter('{http://www.loc.gov/mods/v3}mods'):
+        lccn = text(record, "m:identifier[@type='lccn']")
+        isbn = text(record, "m:identifier[@type='isbn']")
+        primary = record.find("m:name[@usage='primary']/m:namePart", MODS)
+        year = re.search(r'\d{4}', text(record, 'm:originInfo/m:dateIssued') or '')
+        # Catalogues file leading articles ("The") separately so they do not affect sorting.
+        title = ' '.join(part for part in (text(record, 'm:titleInfo/m:nonSort'), text(record, 'm:titleInfo/m:title')) if part)
+        candidates.append(WorkCandidate(
+            key=lccn or title, title=title,
+            authors=[primary.text.strip().rstrip(',. ')] if primary is not None and primary.text else [],
+            first_publish_year=int(year.group()) if year else None, source='loc',
+            url=f'https://lccn.loc.gov/{lccn}' if lccn else None,
+            publisher=_publisher(record),
+            isbn=isbn.split()[0] if isbn else None, edition=text(record, 'm:originInfo/m:edition')))
+    return candidates[:5]
+
+
+def _publisher(record) -> str | None:
+    """Publisher of a MODS record, from a publisher agent or the older publisher element.
+
+    Args:
+        record: MODS record element.
+
+    Returns:
+        Publisher name without trailing catalogue punctuation, or None.
+    """
+    for agent in record.iterfind('m:originInfo/m:agent', MODS):
+        role = agent.find('m:role/m:roleTerm', MODS)
+        name = agent.find('m:namePart', MODS)
+        if role is not None and (role.text or '').strip().lower() == 'publisher' and name is not None and name.text:
+            return name.text.strip().rstrip(',:;/ ').strip()
+    found = record.find('m:originInfo/m:publisher', MODS)
+    return found.text.strip().rstrip(',:;/ ').strip() if found is not None and found.text else None
+
+
+def catalogue_sources() -> list[tuple[str, object]]:
+    """Catalogues to try, in order; Google Books only with a key, since it throttles anonymous use.
+
+    Returns:
+        (stage name, search function) pairs.
+    """
+    sources = [('openlibrary', search_works), ('loc', search_library_of_congress)]
+    if os.getenv('GOOGLE_BOOKS_API_KEY'):
+        sources.append(('googlebooks', search_google_books))
+    return sources
+
+
 def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: httpx.Client | None = None) -> WorkCandidate | None:
     """Let Drex pick the work the spine shows, or none.
 
@@ -172,9 +271,9 @@ def _edition(work: WorkCandidate, publisher: str | None, http: httpx.Client | No
     Returns:
         Edition label and ISBN, or None.
     """
-    if work.source == 'googlebooks':
+    if work.source != 'openlibrary':
         if publisher and work.publisher and normalize(publisher) == normalize(work.publisher):
-            return {'edition': f'{work.title} ({work.publisher})', 'isbn': work.isbn}
+            return {'edition': work.edition or f'{work.title} ({work.publisher})', 'isbn': work.isbn}
         return None
     return matching_edition(work.key, publisher, client=http)
 
@@ -195,8 +294,8 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
     latest = book['observations'][-1]
     readings = {key: book.get(key) for key in ('title', 'author', 'publisher')}
     work, answered = None, False
-    # Open Library first; Google Books when it fails, returns nothing, or Drex finds no match there.
-    for stage, search in (('openlibrary', search_works), ('googlebooks', search_google_books)):
+    # Each catalogue is tried in turn until Drex accepts a match; a failing catalogue is skipped.
+    for stage, search in catalogue_sources():
         try:
             with telemetry.span(stage, book['title'][:40]) as reported:
                 candidates = search(book['title'], book.get('author'), client=http)

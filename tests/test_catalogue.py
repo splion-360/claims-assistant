@@ -203,7 +203,8 @@ class GoogleBooksFallbackTests(unittest.TestCase):
             criteria = json.loads(request.content)['questions']['match']['criteria']
             return httpx.Response(200, json=drex_choice('c0' if 'Melanie Gideon' in criteria.get('c0', '') else 'none', 0.9))
 
-        with patch.dict(os.environ, {'DREX_API_KEY': 'k'}):
+        # Library of Congress has no match here, so Google Books (with a key) is reached.
+        with patch.dict(os.environ, {'DREX_API_KEY': 'k', 'GOOGLE_BOOKS_API_KEY': 'key'}):
             resolve_book(self.store.database, 'sweep', book, http=client(http), drex=client(drex))
         with Repository(self.store.database) as repo:
             rows = [row for row in repo.list_for_sweep(BookObservation, 'sweep') if row.provenance == 'catalogue']
@@ -227,3 +228,90 @@ class GoogleBooksFallbackTests(unittest.TestCase):
         rows, _ = self.resolve(lambda request: httpx.Response(200, json=SEARCH), publisher='BERKLEY')
         self.assertEqual(rows[0].isbn, '9780593546994')
         self.assertEqual(rows[0].edition, 'Did I Say You Could Go (Berkley)')
+
+
+LOC_RECORD = '''<?xml version="1.0"?>
+<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:numberOfRecords>1</zs:numberOfRecords><zs:records><zs:record><zs:recordData>
+<mods xmlns="http://www.loc.gov/mods/v3">
+  <titleInfo><title>Did I say you could go</title></titleInfo>
+  <name type="personal" usage="primary"><namePart>Gideon, Melanie,</namePart><role><roleTerm type="text">author</roleTerm></role></name>
+  <originInfo><dateIssued encoding="marc">2023</dateIssued><edition>First edition.</edition></originInfo>
+  <originInfo eventType="publication"><agent><namePart>Berkley,</namePart><role><roleTerm>publisher</roleTerm></role></agent></originInfo>
+  <identifier type="isbn">9780593546994 (hardcover)</identifier>
+  <identifier type="lccn">2022036391</identifier>
+</mods></zs:recordData></zs:record></zs:records></zs:searchRetrieveResponse>'''
+
+
+class LibraryOfCongressFallbackTests(unittest.TestCase):
+    """The Library of Congress catalogue is the keyless fallback after Open Library."""
+
+    setUp = fixtures.BookObservationTests.setUp
+    save_frame = fixtures.BookObservationTests.save_frame
+    persist = fixtures.BookObservationTests.persist
+
+    def test_search_parses_catalogue_records(self):
+        """Query the catalogue by title and author and keep link, publisher, edition and ISBN."""
+        from library_claim.identification.catalogue import search_library_of_congress
+
+        def handler(request):
+            self.assertEqual(request.url.host, 'lx2.loc.gov')
+            self.assertEqual(request.url.params['query'], 'dc.title="Did I Say You Could Go" and dc.creator="Gideon"')
+            return httpx.Response(200, text=LOC_RECORD)
+
+        [candidate] = search_library_of_congress('Did I Say You Could Go', 'Gideon', client=client(handler))
+        self.assertEqual((candidate.source, candidate.title, candidate.authors, candidate.first_publish_year),
+                         ('loc', 'Did I say you could go', ['Gideon, Melanie'], 2023))
+        self.assertEqual((candidate.url, candidate.publisher, candidate.isbn, candidate.edition),
+                         ('https://lccn.loc.gov/2022036391', 'Berkley', '9780593546994', 'First edition.'))
+
+    def resolve(self, publisher=None, google_key=''):
+        """Resolve one legible book when Open Library has no match.
+
+        Args:
+            publisher: Publisher read from the spine.
+            google_key: Value for GOOGLE_BOOKS_API_KEY.
+
+        Returns:
+            Catalogue observations written and the hosts that were queried.
+        """
+        hosts = []
+        book = self.persist(books=[detection(title='Did I Say You Could Go')])['inventory'][0]
+        book['publisher'] = publisher
+
+        def http(request):
+            hosts.append(request.url.host)
+            if request.url.host == 'lx2.loc.gov':
+                return httpx.Response(200, text=LOC_RECORD)
+            if request.url.host == 'www.googleapis.com':
+                return httpx.Response(200, json=GOOGLE)
+            return httpx.Response(200, json=SEARCH)
+
+        def drex(request):
+            criteria = json.loads(request.content)['questions']['match']['criteria']
+            return httpx.Response(200, json=drex_choice('c0' if 'Gideon' in criteria.get('c0', '') else 'none', 0.9))
+
+        with patch.dict(os.environ, {'DREX_API_KEY': 'k', 'GOOGLE_BOOKS_API_KEY': google_key}):
+            resolve_book(self.store.database, 'sweep', book, http=client(http), drex=client(drex))
+        with Repository(self.store.database) as repo:
+            rows = [row for row in repo.list_for_sweep(BookObservation, 'sweep') if row.provenance == 'catalogue']
+        return rows, hosts
+
+    def test_library_of_congress_answers_when_open_library_has_no_match(self):
+        """Library of Congress matches before Google Books is ever asked."""
+        rows, hosts = self.resolve()
+        self.assertEqual(rows[0].catalogue_url, 'https://lccn.loc.gov/2022036391')
+        self.assertNotIn('www.googleapis.com', hosts)
+        self.assertIsNone(rows[0].isbn)
+
+    def test_catalogue_edition_and_isbn_need_matching_spine_publisher(self):
+        """Edition and ISBN come from the record only when the spine's publisher matches."""
+        rows, _ = self.resolve(publisher='Berkley')
+        self.assertEqual((rows[0].edition, rows[0].isbn), ('First edition.', '9780593546994'))
+
+    def test_google_books_is_skipped_without_a_key(self):
+        """Without GOOGLE_BOOKS_API_KEY the throttled anonymous Google search is not attempted."""
+        from library_claim.identification.catalogue import catalogue_sources
+        with patch.dict(os.environ, {'GOOGLE_BOOKS_API_KEY': ''}):
+            self.assertEqual([name for name, _ in catalogue_sources()], ['openlibrary', 'loc'])
+        with patch.dict(os.environ, {'GOOGLE_BOOKS_API_KEY': 'key'}):
+            self.assertEqual([name for name, _ in catalogue_sources()], ['openlibrary', 'loc', 'googlebooks'])
