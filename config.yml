@@ -110,6 +110,9 @@ drex:
   connect_timeout_s: 10
   # Probability thresholds; the band between the two same-book bounds stays unresolved.
   book_visible_min: 0.5
+  # A frame whose main issue is a capture defect is read only if its title looks legible.
+  legible_min: 0.5
+  capture_defects: [blur, glare, dark]
   same_book_min: 0.8
   different_book_max: 0.2
   catalogue_min: 0.7

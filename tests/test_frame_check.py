@@ -78,3 +78,20 @@ class FrameCheckTests(unittest.TestCase):
                 jobs = [job for job in repo.list_for_sweep(ProcessingJob, 'sweep1') if job.task == 'frame_check']
             self.assertEqual(len(jobs), 1)
             self.assertEqual(jobs[0].result['book_visible'], 0.9)
+
+    def test_blurry_unreadable_frame_is_not_admitted(self):
+        """The real frame from the sweep: book visible, title unreadable, main issue blur."""
+        real = check(0.935).model_copy(update={'spine_legible': 0.022, 'issue': 'blur'})
+        self.assertFalse(is_book_candidate(real))
+        for defect in ('glare', 'dark'):
+            self.assertFalse(is_book_candidate(real.model_copy(update={'issue': defect})))
+
+    def test_clear_but_unreadable_spine_is_still_admitted(self):
+        """A sharp frame of a spine with no readable text is logged as an unidentified book."""
+        clear = check(0.9).model_copy(update={'spine_legible': 0.1, 'issue': 'none'})
+        self.assertTrue(is_book_candidate(clear))
+
+    def test_legible_title_overrides_a_minor_defect(self):
+        """A readable title is admitted even if Drex names slight blur as the main issue."""
+        legible = check(0.9).model_copy(update={'spine_legible': 0.7, 'issue': 'blur'})
+        self.assertTrue(is_book_candidate(legible))

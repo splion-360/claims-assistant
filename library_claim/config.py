@@ -180,6 +180,8 @@ class DrexConfig(Settings):
     timeout_s: PositiveFloat
     connect_timeout_s: PositiveFloat
     book_visible_min: Unit
+    legible_min: Unit
+    capture_defects: list[Text]
     same_book_min: Unit
     different_book_max: Unit
     catalogue_min: Unit

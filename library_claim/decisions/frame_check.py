@@ -61,7 +61,10 @@ def check_frame(jpeg: bytes, *, client: httpx.Client | None = None) -> FrameChec
 
 
 def is_book_candidate(check: FrameCheck | None) -> bool:
-    """Admit a frame to spine reading only when Drex sees a book.
+    """Admit a frame to spine reading when Drex sees a book that a better capture would not improve.
+
+    A blurred, glaring or dark frame of an unreadable title waits for a better frame (guidance asks
+    for one); a clear frame of a genuinely unreadable spine is still read and logged as unidentified.
 
     Args:
         check: The frame's D1 result, or None when no decision exists.
@@ -69,7 +72,9 @@ def is_book_candidate(check: FrameCheck | None) -> bool:
     Returns:
         Whether the frame should go to text extraction.
     """
-    return check is not None and check.book_visible >= CONFIG.drex.book_visible_min
+    if check is None or check.book_visible < CONFIG.drex.book_visible_min:
+        return False
+    return check.spine_legible >= CONFIG.drex.legible_min or check.issue not in CONFIG.drex.capture_defects
 
 
 def save_frame_check(database: Path, sweep_id: str, frame_id: str, check: FrameCheck) -> None:

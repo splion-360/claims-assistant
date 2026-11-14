@@ -33,8 +33,9 @@ read. `.env` retains API credentials and the optional `CRUSOE_BASE_URL` endpoint
 No credentials are exposed through the health response or config file.
 
 A Drex frame check (`library_claim/decisions/frame_check.py`) decides which frames
-go to Crusoe spine reading: `drex.book_visible_min` is the probability a book must
-reach. Drex is called at most once per `capture.quality_interval_s`, with one
+go to spine reading: `drex.book_visible_min` is the probability a book must
+reach. A frame whose main issue is in `drex.capture_defects` (blur, glare, dark) is read only
+when its title looks legible (`drex.legible_min`); otherwise the agent asks for a better view. Drex is called at most once per `capture.quality_interval_s`, with one
 request in flight and only the newest frame waiting.
 `capture.remote_interval_s` and `capture.frame_max_age_s` bound dispatch and pending
 frame lifetime; inference retains one pending candidate and one in-flight job.
