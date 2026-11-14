@@ -299,7 +299,7 @@ function renderBookInventory() {
       ${book.excluded ? "<small>Excluded by you · not counted</small>" : ""}
       ${book.needs_appraisal ? "<small>Needs human appraisal</small>" : ""}
       ${book.catalogue ? `<small>Google Books: ${escapeHtml(book.catalogue.title)}${book.catalogue.edition ? ` · ${escapeHtml(book.catalogue.edition)}` : ""}</small>` : ""}
-      <small>${group.length > 1 ? `${group.length} sightings to compare · not a copy count` : `${Number(book.observation_count)} observation(s)`}</small>
+      <small>${group.length > 1 ? `${group.length} sightings to compare` : `${Number(book.observation_count)} observation(s)`}</small>
       ${book.status === "unresolved" ? "<small>Association unresolved</small>" : ""}</span></button>`;
   }).join("") : `<p class="empty">${bookTab === "review" ? "No books need review yet." : "No identified books yet."}</p>`;
   renderBookDetail();
@@ -316,7 +316,7 @@ function renderBookDetail() {
   compareBookId = other?.id || null;
   const panel = item => `<article class="comparison-card">${cropImage(item, "book-best")}<h3>${escapeHtml(item.title || "Title unreadable")}</h3><p>${escapeHtml(item.author || "Author unreadable")}</p><p>${escapeHtml(bookSize(item))}</p>${item.catalogue?.url ? `<p><a href="${escapeHtml(item.catalogue.url)}" target="_blank" rel="noopener">Google Books: ${escapeHtml(item.catalogue.title)}</a>${item.catalogue.isbn ? ` · ISBN ${escapeHtml(item.catalogue.isbn)}` : ""}</p>` : ""}<small>${Number(item.observation_count)} observation(s)</small></article>`;
   detail.innerHTML = `<h3>${other ? "Compare these sightings" : "Book details"}</h3>
-    <p>${other ? "These may show the same book. Compare the visible design and text; similar titles alone do not establish identity." : "Visual reading only; not catalogue verification."}</p>
+    ${other ? "<p>Do these show the same copy? Compare the design and the text on each spine.</p>" : ""}
     <div class="book-comparison">${panel(book)}${other ? panel(other) : ""}</div>
     ${others.length ? `<label>Compare another sighting <select id="compareBook"><option value="">Select a sighting</option>${others.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === compareBookId ? "selected" : ""}>${escapeHtml(item.title || "Unidentified book")} · ${escapeHtml(item.id.slice(0,6))}</option>`).join("")}</select></label>` : ""}
     ${other ? `<div class="review-actions"><button type="button" data-book-action="same" ${reviewBusy ? "disabled" : ""}>Same book</button><button type="button" data-book-action="separate" ${reviewBusy ? "disabled" : ""}>Separate books</button></div>` : ""}
@@ -341,7 +341,7 @@ async function reviewBook(action) {
       const result = await api(`/api/sessions/${sessionId}/books/review`, {method:"POST", body:JSON.stringify({source_id:selectedBookId,target_id:target,action})});
       selectedBookId = action === "same" ? target : selectedBookId;
       applyServerState(result.state);
-      status.textContent = action === "same" ? "Observations combined. Original evidence retained." : "Books marked as separate.";
+      status.textContent = action === "same" ? "Combined into one book." : "Kept as separate books.";
     }
   } catch (error) { status.textContent = error.message; }
   finally { reviewBusy = false; renderBookDetail(); }

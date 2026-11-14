@@ -251,9 +251,13 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
         status = 'unresolved' if evidence and all(row.association_method == 'unresolved' for row in evidence) else 'provisional'
         if any(book.id in pair for pair in separate) or len({row.book_id for row in evidence}) > 1:
             status = 'provisional'
-        # Visual issues matter only while no sighting of the book is clean; one clear reading settles it.
-        needs_review = (status == 'unresolved' or not readings['title']
-                        or bool(evidence and all(row.visual_issues for row in evidence)))
+        # Visual issues matter only while no sighting of the book is clean; one clear
+        # reading settles it, and so does a catalogue match, which corroborates the
+        # reading independently of how good the crop was.
+        unclear = bool(evidence and all(row.visual_issues for row in evidence)) and catalogue is None
+        needs_review = status == 'unresolved' or not readings['title'] or unclear
+        # Those same defects stop being review reasons once a catalogue has confirmed the reading.
+        settled = {issue for row in evidence for issue in row.visual_issues} if catalogue else set()
         result.append({'needs_review': needs_review, 'id': book.id, **readings, 'status': status,
                        'observation_count': len(evidence),
                        'spine_height_cm': dimensions[0] if dimensions else None,
@@ -270,7 +274,8 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
                                          'title': row.title, 'issues': row.visual_issues,
                                          'sharpness': row.quality.sharpness} for row in evidence],
                        'review_reasons': list(dict.fromkeys(
-                           [issue.reason for issue in issues if issue.book_id == book.id and issue.status == 'open']
+                           [issue.reason for issue in issues if issue.book_id == book.id
+                            and issue.status == 'open' and issue.reason not in settled]
                            + ([] if dimensions else ['No metric depth for this frame'])))})
     for book in result:
         book['candidates'] = [other['id'] for other in result if other['id'] != book['id']

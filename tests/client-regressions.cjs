@@ -107,7 +107,7 @@ test('possible duplicates form a visual group without changing records',()=>{
  assert.equal(e.run('state.book_inventory.length'),2);
  assert.equal(e.run('bookGroups(state.book_inventory).length'),1);
  assert.ok(e.run('document.querySelector("#bookInventory").innerHTML').includes('Possible same book'));
- assert.ok(e.run('document.querySelector("#bookInventory").innerHTML').includes('not a copy count'));
+ assert.ok(e.run('document.querySelector("#bookInventory").innerHTML').includes('2 sightings to compare'));
  e.run('state.book_inventory[1].frame_ids=["f1"]');
  assert.equal(e.run('bookGroups(state.book_inventory).length'),2);
 });
