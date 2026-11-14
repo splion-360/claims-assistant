@@ -171,11 +171,3 @@ node tests/voice-regressions.cjs                 #   5 — microphone and playba
 
 No test makes network calls; external services are stubbed with `httpx.MockTransport` or
 injected callables.
-
-## Limitations
-
-- Used-market book values are not populated; no keyless source is available.
-- Non-book pricing requires a retail provider in `pricing.item_providers`, which ships empty.
-  Art is routed to appraisal; other objects report no price source.
-- Room geometry uses a convex hull, so alcoves are measured as filled.
-- Country and currency are not confirmed during the sweep; pricing uses the default market.
