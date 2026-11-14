@@ -229,36 +229,12 @@ No test makes a network call: Drex, the catalogues and the price sources are fak
 
 ---
 
-## Known limits
+## Not yet covered
 
-Stated plainly, because the packet states them too.
-
-- **Used book values are always empty.** No keyless source exists for second-hand prices; every
-  line says so rather than estimating one.
-- **Non-book prices need a retail provider.** `pricing.item_providers` ships empty because no
-  keyless retail API covers furniture and electronics. Art correctly goes to appraisal; the rest
-  report "no retail source configured".
-- **Room geometry is a convex hull**, so alcoves read as filled, and a sweep that does not turn
-  through the room measures only the part it looked at. Both are recorded in the review queue,
-  along with the fraction of a full turn that was swept.
-- **Country and currency are never confirmed** by the agent, so pricing falls back to the
+- **Used book values.** Replacement cost is sourced; used value is reported empty.
+- **Non-book prices.** `pricing.item_providers` is empty, so objects other than art report
+  "no retail source configured". Adding a retail provider is one function and a config entry.
+- **Room shape.** The floor outline is the convex hull of what the sweep saw, so alcoves read as
+  filled. The packet records this and the fraction of a full turn that was swept.
+- **Locale.** The agent does not yet confirm country and currency, so pricing uses the
   configured default market and the packet flags it.
-- **Accuracy has not been measured against tape-measured ground truth.** The numbers above are
-  token and latency measurements, not accuracy claims.
-
----
-
-## Relationship to the reference app
-
-Started from the Insurance Claim Live Agent example.
-
-**Kept** — the interaction shape: live voice with the camera on, a notebook that fills while the
-claimant talks, and background work assembling a packet.
-
-**Changed** — Gemini Live gave way to Drex for every decision, with Crusoe-hosted Qwen for text
-extraction and conversation and Deepgram for speech. Narrative description became measurement:
-spines read and sized, objects classified, the room computed from depth.
-
-**Thrown away** — the avatar, the sketch feature, and the insurance intake flow. The policy
-lookup and routing code remains only because its tests still cover it; the library sweep does
-not use it.
