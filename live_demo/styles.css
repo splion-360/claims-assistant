@@ -1031,3 +1031,5 @@ body:has(.books-drawer[open]) { overflow: hidden; }
 .detail-placeholder { color: #6b6051; padding: 30px; text-align: center; }
 .missing-crop { display: grid; place-items: center; min-height: 140px; color: #6b6051; }
 @media (max-width: 760px) { .books-drawer { width: 100vw; } .library-layout { grid-template-columns: 1fr; } .book-best { height: 190px; } }
+
+.book-card.excluded { opacity: 0.5; }

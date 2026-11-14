@@ -85,6 +85,8 @@ from library_claim.identification.models import BookFrameAnalysis
 from library_claim.identification.storage import save_analysis as save_book_analysis
 from library_claim.identification.storage import current_inventory, inventory_totals, save_measurements
 from library_claim.identification.catalogue import resolve_book
+from library_claim.identification.corrections import apply_correction
+from library_claim.decisions.corrections import classify_intent, extract_stated_title, resolve_target, target_frame
 from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
 from library_claim.storage.depth import load_depth, parse_depth_payload
 from library_claim.storage.live_capture import LiveCaptureStore
@@ -714,6 +716,16 @@ def book_evidence(session_id: str, observation_id: str, request: Request):
         raise HTTPException(404, "Book evidence not found")
 
 
+def invalidate_capture_context(session: IntakeSession) -> None:
+    """Invalidate in-flight results after a spoken correction changed the inventory.
+
+    Args:
+        session: Live sweep session.
+    """
+    with Repository(CAPTURE_DATA_DIR / 'claims.sqlite3') as repo:
+        SweepController(repo, session.session_id).invalidate_context()
+
+
 def transition_capture(session: IntakeSession, state: str, target: str | None = None) -> None:
     """Persist one transition in the locked sweep cycle.
 
@@ -1104,6 +1116,8 @@ async def live_voice(websocket: WebSocket) -> None:
     measure_next = None
     # Last title sent to the catalogue per book, so a lookup repeats only when the reading changes.
     resolved_titles = {}
+    # Saved frames with detections and when they were read, for resolving "that" in corrections.
+    detection_frames = deque(maxlen=20)
     voice_on = False
     spoken_turn_id = None
     audio_queue = asyncio.Queue(maxsize=25)
@@ -1539,7 +1553,52 @@ async def live_voice(websocket: WebSocket) -> None:
         )
         if workflow_task is None or workflow_task.done():
             workflow_task = track(refresh())
-        text_task = track(respond(text_epoch))
+        text_task = track(handle_turn(text, text_epoch))
+
+    async def handle_turn(text, epoch):
+        """Apply a spoken correction during a sweep, then reply unless the agent had to ask.
+
+        Args:
+            text: Final user utterance.
+            epoch: Conversation epoch the reply belongs to.
+        """
+        if session.library_sweep and await apply_spoken_correction(text) == "asked":
+            return
+        await respond(epoch)
+
+    async def apply_spoken_correction(text):
+        """Let Drex classify a correction and resolve its target, then record it.
+
+        Args:
+            text: Final user utterance.
+
+        Returns:
+            'applied', 'asked' when the agent asked which books were meant, or None for conversation.
+        """
+        intent = await asyncio.to_thread(classify_intent, text)
+        if intent == "question_or_chat":
+            return None
+        frame_id = target_frame(list(detection_frames), time.monotonic())
+        if frame_id is None:
+            await guide("Which books do you mean? Point the camera at them.")
+            return "asked"
+        visible = [book for book in session.book_inventory if frame_id in book.get("frame_ids", [])]
+        book_ids = await asyncio.to_thread(resolve_target, text, visible, allow_all=intent == "exclude_books")
+        if not book_ids:
+            await guide("Which book do you mean?")
+            return "asked"
+        stated = None
+        if intent == "correct_title":
+            try:
+                stated = await extract_stated_title(text)
+            except InferenceError:
+                stated = None
+        database = CAPTURE_DATA_DIR / "claims.sqlite3"
+        await asyncio.to_thread(apply_correction, database, session.session_id, intent, book_ids, frame_id, text, stated)
+        await asyncio.to_thread(invalidate_capture_context, session)
+        session.book_inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
+        await send({"type": "state", "state": _current_ui_state(session)})
+        return "applied"
 
     async def listen_voice():
         nonlocal voice_on
@@ -1733,6 +1792,8 @@ async def live_voice(websocket: WebSocket) -> None:
             )
             success = bool(result.get("pinned"))
             if success and session.library_sweep:
+                if any(candidate.frame_id in book.get("frame_ids", []) for book in session.book_inventory):
+                    detection_frames.append((candidate.frame_id, time.monotonic()))
                 schedule_measure(candidate.frame_id, candidate.data)
                 schedule_catalogue()
             if success:

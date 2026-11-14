@@ -290,12 +290,14 @@ function renderBookInventory() {
   inventoryEl.hidden = false;
   inventoryEl.innerHTML = visible.length ? visible.map(group => {
     const book = group[0];
-    return `<button class="book-card" data-book-id="${escapeHtml(book.id)}" type="button">
+    return `<button class="book-card${book.excluded ? " excluded" : ""}" data-book-id="${escapeHtml(book.id)}" type="button">
       <span class="group-crops">${group.map(item => cropImage(item)).join("")}</span>
       <span class="book-card-copy"><small class="book-badge">${group.length > 1 ? "Possible same book" : bookNeedsReview(book) ? "Needs review" : "Title read"}</small>
       <strong>${escapeHtml(book.title || "Unidentified book")}</strong>
       <span>${escapeHtml(book.author || "Author unreadable")}</span>
       <small>${escapeHtml(bookSize(book))}</small>
+      ${book.excluded ? "<small>Excluded by you · not counted</small>" : ""}
+      ${book.needs_appraisal ? "<small>Needs human appraisal</small>" : ""}
       ${book.catalogue ? `<small>Open Library: ${escapeHtml(book.catalogue.title)}${book.catalogue.edition ? ` · ${escapeHtml(book.catalogue.edition)}` : ""}</small>` : ""}
       <small>${group.length > 1 ? `${group.length} sightings to compare · not a copy count` : `${Number(book.observation_count)} observation(s)`}</small>
       ${book.status === "unresolved" ? "<small>Association unresolved</small>" : ""}</span></button>`;
