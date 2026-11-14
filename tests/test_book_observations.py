@@ -307,3 +307,66 @@ class LiveBookExtractionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(state['evidence_photos'][0]['book_count'], 1)
             with Repository(store.database) as repo:
                 self.assertEqual(len(repo.list_for_sweep(BookObservation, 'session')), 1)
+
+
+class BookMeasurementTests(unittest.TestCase):
+    """Exercise metric measurements stored with observations and inventory totals."""
+
+    # Reuse the fixture helpers without re-running the inherited association tests.
+    setUp = BookObservationTests.setUp
+    save_frame = BookObservationTests.save_frame
+    persist = BookObservationTests.persist
+
+    def depth(self):
+        """Build a constant 1 m depth map for the 480×360 test frame.
+
+        Returns:
+            A depth map with a 500-pixel focal length.
+        """
+        from library_claim.measurement.spine import DepthMap
+        return DepthMap(depth_m=np.ones((360, 480), np.float32), fx=500, fy=500, cx=240, cy=180,
+                        image_width=480, image_height=360, method='depth_pro')
+
+    def test_save_analysis_stores_measurements(self):
+        """A 216×96 px spine at 1 m with f=500 px measures 43.2×19.2 cm."""
+        result = save_analysis(self.store.database, 'sweep', 'reference',
+                               BookFrameAnalysis(books=[detection()], complete=True), self.jpeg, 'test-model',
+                               depth=self.depth())
+        with Repository(self.store.database) as repo:
+            row = repo.list_for_sweep(BookObservation, 'sweep')[0]
+        self.assertAlmostEqual(row.spine_height_cm, 43.2, delta=0.5)
+        self.assertAlmostEqual(row.spine_thickness_cm, 19.2, delta=0.3)
+        self.assertEqual(row.scale_method, 'depth_pro')
+        book = result['inventory'][0]
+        self.assertAlmostEqual(book['spine_height_cm'], 43.2, delta=0.5)
+        self.assertEqual(book['scale_method'], 'depth_pro')
+        self.assertNotIn('No metric depth for this frame', book['review_reasons'])
+
+    def test_missing_depth_adds_review_reason(self):
+        """Save books without dimensions and say why when no depth exists."""
+        book = self.persist()['inventory'][0]
+        self.assertIsNone(book['spine_height_cm'])
+        self.assertIn('No metric depth for this frame', book['review_reasons'])
+
+    def test_background_measurement_fills_dimensions(self):
+        """A later measure job adds dimensions and clears the missing-depth reason."""
+        from library_claim.identification.storage import inventory, save_measurements
+        self.persist()
+        save_measurements(self.store.database, 'sweep', 'reference', self.depth())
+        save_measurements(self.store.database, 'sweep', 'reference', self.depth())
+        with Repository(self.store.database) as repo:
+            book = inventory(repo, 'sweep')[0]
+            jobs = [job for job in repo.list_for_sweep(ProcessingJob, 'sweep') if job.task == 'measure']
+        self.assertEqual(len(jobs), 1)
+        self.assertAlmostEqual(book['spine_height_cm'], 43.2, delta=0.5)
+        self.assertNotIn('No metric depth for this frame', book['review_reasons'])
+
+    def test_inventory_totals_exclude_excluded_books(self):
+        """Count and sum shelf run only over books the user has not excluded."""
+        from library_claim.identification.storage import inventory_totals
+        books = [{'excluded': False, 'title': 'A', 'spine_thickness_cm': 3.0},
+                 {'excluded': False, 'title': None, 'spine_thickness_cm': 2.0},
+                 {'excluded': False, 'title': None, 'spine_thickness_cm': None},
+                 {'excluded': True, 'title': 'B', 'spine_thickness_cm': 5.0}]
+        self.assertEqual(inventory_totals(books), {'book_count': 3, 'books_identified': 1,
+                                                   'books_unidentified': 2, 'shelf_run_m': 0.05})

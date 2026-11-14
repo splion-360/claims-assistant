@@ -83,6 +83,9 @@ from library_claim.config import CONFIG
 from library_claim.identification.models import INSTRUCTION as BOOK_INSTRUCTION
 from library_claim.identification.models import BookFrameAnalysis
 from library_claim.identification.storage import save_analysis as save_book_analysis
+from library_claim.identification.storage import current_inventory, inventory_totals, save_measurements
+from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
+from library_claim.storage.depth import load_depth
 from library_claim.storage.live_capture import LiveCaptureStore
 from library_claim.storage.repository import Repository
 from library_claim.storage.evidence import EvidenceStore
@@ -467,6 +470,7 @@ def _ui_state(
         "evidence_photos": session.evidence_photos,
         "camera_notes": session.camera_notes,
         "book_inventory": session.book_inventory,
+        "inventory_totals": inventory_totals(session.book_inventory),
         "severity": classification.severity,
         "claim_type": classification.claim_type.replace("_", " "),
         "handoff": {
@@ -975,6 +979,8 @@ async def _pin_evidence_photo(
                 BookFrameAnalysis(books=observation.books, complete=observation.complete),
                 frame,
                 VISION_MODEL,
+                # WebXR depth captured with the frame measures books immediately.
+                load_depth(CAPTURE_DATA_DIR, frame_id),
             )
         if (
             session.deleted
@@ -1092,6 +1098,9 @@ async def live_voice(websocket: WebSocket) -> None:
     user_turn_open = False
     last_prompt, last_prompt_at = None, None
     last_capture_frame_id = None
+    # Depth Pro is slow on CPU: one measurement runs, only the newest frame waits.
+    measure_task = None
+    measure_next = None
     voice_on = False
     spoken_turn_id = None
     audio_queue = asyncio.Queue(maxsize=25)
@@ -1233,6 +1242,37 @@ async def live_voice(websocket: WebSocket) -> None:
                 await request_capture(book)
         elif label in QUALITY_PROMPTS:
             await speak_quality(label)
+
+    def schedule_measure(frame_id, jpeg):
+        """Queue background metric measurement for a frame without WebXR depth.
+
+        Args:
+            frame_id: Saved frame with book observations.
+            jpeg: Its encoded bytes.
+        """
+        nonlocal measure_task, measure_next
+        if load_depth(CAPTURE_DATA_DIR, frame_id) is not None:
+            return
+        measure_next = (frame_id, jpeg)
+        if measure_task is None or measure_task.done():
+            measure_task = track(run_measure())
+
+    async def run_measure():
+        """Estimate depth, store measurements and refresh the inventory, newest frame first."""
+        nonlocal measure_next
+        while measure_next is not None:
+            frame_id, jpeg = measure_next
+            measure_next = None
+            try:
+                depth = await asyncio.to_thread(estimate_depth, jpeg)
+            except DepthUnavailable as error:
+                quality_logger.warning("depth unavailable frame=%s reason=%s", frame_id, error)
+                continue
+            database = CAPTURE_DATA_DIR / "claims.sqlite3"
+            await asyncio.to_thread(save_measurements, database, session.session_id, frame_id, depth)
+            if not session.deleted:
+                session.book_inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
+                await send({"type": "state", "state": _current_ui_state(session)})
 
     def dispatch(stream, revision):
         """Start spine reading for the filter's admitted or retried candidate, if any.
@@ -1645,6 +1685,8 @@ async def live_voice(websocket: WebSocket) -> None:
                 lambda: _pin_evidence_photo(session, {}, candidate=candidate),
             )
             success = bool(result.get("pinned"))
+            if success and session.library_sweep:
+                schedule_measure(candidate.frame_id, candidate.data)
             if success:
                 await send({"type": "state", "state": _current_ui_state(session)})
                 await update()

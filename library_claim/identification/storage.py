@@ -10,6 +10,7 @@ from library_claim.capture.quality import QualityAssessor
 from library_claim.capture.tracking.geometry import transform
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.domain.models import Book, BookObservation, Frame, FrameAssociation, ProcessingJob, Quality, ReviewIssue
+from library_claim.measurement.spine import DepthMap, book_dimensions, measure_spine, shelf_run_m
 from library_claim.storage.repository import Repository
 from library_claim.storage.evidence import EvidenceStore
 from .matching import crop_features, visual_match, text_relation, preferred_reading, normalize
@@ -189,6 +190,13 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
     """
     observations = repo.list_for_sweep(BookObservation, sweep_id)
     issues = repo.list_for_sweep(ReviewIssue, sweep_id)
+    # Background measure jobs add sizes to observations saved before depth was available.
+    measured = {}
+    for job in repo.list_for_sweep(ProcessingJob, sweep_id):
+        if job.task == 'measure' and job.result:
+            measured.update(job.result['measurements'])
+    observations = [row.model_copy(update=measured[row.id]) if row.id in measured and row.spine_height_cm is None else row
+                    for row in observations]
     result = []
     roots, separate = identities(repo, sweep_id)
     for book in repo.list_for_sweep(Book, sweep_id):
@@ -198,6 +206,7 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
         readings = {}
         for field in ('title', 'author', 'publisher'):
             readings[field] = preferred_reading([getattr(row, field) for row in evidence if getattr(row, field)])
+        dimensions = book_dimensions(evidence)
         status = 'unresolved' if evidence and all(row.association_method == 'unresolved' for row in evidence) else 'provisional'
         if any(book.id in pair for pair in separate) or len({row.book_id for row in evidence}) > 1:
             status = 'provisional'
@@ -205,13 +214,18 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
         needs_review = status == 'unresolved' or not readings['title'] or bool(latest and latest.visual_issues)
         result.append({'needs_review': needs_review, 'id': book.id, **readings, 'status': status,
                        'observation_count': len(evidence),
+                       'spine_height_cm': dimensions[0] if dimensions else None,
+                       'spine_thickness_cm': dimensions[1] if dimensions else None,
+                       'scale_method': dimensions[2] if dimensions else None,
+                       'excluded': book.excluded, 'needs_appraisal': book.needs_appraisal,
                        'member_ids': [key for key, root in roots.items() if root == book.id],
                        'frame_ids': list(dict.fromkeys(row.frame_id for row in evidence)),
                        'observations': [{'id': row.id, 'frame_id': row.frame_id, 'bbox': row.bbox.model_dump(),
                                          'title': row.title, 'issues': row.visual_issues,
                                          'sharpness': row.quality.sharpness} for row in evidence],
-                       'review_reasons': list(dict.fromkeys(issue.reason for issue in issues
-                                                           if issue.book_id == book.id and issue.status == 'open'))})
+                       'review_reasons': list(dict.fromkeys(
+                           [issue.reason for issue in issues if issue.book_id == book.id and issue.status == 'open']
+                           + ([] if dimensions else ['No metric depth for this frame'])))})
     for book in result:
         book['candidates'] = [other['id'] for other in result if other['id'] != book['id']
                               and not set(book['frame_ids']) & set(other['frame_ids'])
@@ -225,8 +239,67 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
     return result
 
 
+def inventory_totals(books: list[dict]) -> dict:
+    """Compute inventory totals in code from the inventory lines.
+
+    Args:
+        books: Inventory entries from `inventory`.
+
+    Returns:
+        Book counts and shelf run over books the user has not excluded.
+    """
+    kept = [book for book in books if not book.get('excluded')]
+    identified = sum(1 for book in kept if book.get('title'))
+    return {'book_count': len(kept), 'books_identified': identified, 'books_unidentified': len(kept) - identified,
+            'shelf_run_m': round(shelf_run_m([book['spine_thickness_cm'] for book in kept
+                                              if book.get('spine_thickness_cm')]), 3)}
+
+
+def current_inventory(database: Path, sweep_id: str) -> list[dict]:
+    """Read the provisional inventory in its own connection.
+
+    Args:
+        database: Capture SQLite path.
+        sweep_id: Owning sweep.
+
+    Returns:
+        Inventory entries as produced by `inventory`.
+    """
+    with Repository(database) as repo:
+        return inventory(repo, sweep_id)
+
+
+def save_measurements(database: Path, sweep_id: str, frame_id: str, depth: DepthMap) -> None:
+    """Measure a frame's saved spine observations from depth that arrived after extraction.
+
+    Args:
+        database: SQLite database holding the observations.
+        sweep_id: Owning sweep.
+        frame_id: Frame whose observations to measure.
+        depth: Metric depth for that exact frame.
+    """
+    job_id = f'measure_{frame_id}'
+    with Repository(database) as repo:
+        try:
+            repo.get(ProcessingJob, job_id)
+            return
+        except KeyError:
+            pass
+        measurements = {}
+        for row in repo.list_for_sweep(BookObservation, sweep_id):
+            if row.frame_id != frame_id or row.provenance != 'visual':
+                continue
+            size = measure_spine(row.bbox, row.view, row.visual_issues, depth)
+            if size:
+                measurements[row.id] = {'spine_height_cm': size.height_cm, 'spine_thickness_cm': size.thickness_cm,
+                                        'scale_method': size.method}
+        repo.add(ProcessingJob(id=job_id, sweep_id=sweep_id, frame_id=frame_id, task='measure', status='succeeded',
+                               created_at=datetime.now(timezone.utc), model=depth.method,
+                               configuration_version=CONFIG_DIGEST, result={'measurements': measurements}))
+
+
 def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFrameAnalysis,
-                  jpeg: bytes, model: str) -> dict:
+                  jpeg: bytes, model: str, depth: DepthMap | None = None) -> dict:
     """Append a frame's readings atomically and return its provisional inventory.
 
     Args:
@@ -236,6 +309,7 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
         analysis: Validated structured extraction.
         jpeg: Original frame for local per-book quality measurements.
         model: Provider model used for extraction.
+        depth: Metric depth for this frame; without it books are saved unmeasured.
 
     Returns:
         Frame detection count, completion flag, and provisional inventory.
@@ -289,12 +363,17 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
             except (ValueError, cv2.error):
                 reasons.append('Book region too small or invalid for quality assessment')
             unresolved = [field for field in ('title', 'author', 'publisher') if getattr(detection, field) is None]
+            # Dimensions come only from measured depth, never from a model's guess.
+            size = measure_spine(detection.bbox, detection.view, detection.issues, depth) if depth else None
             observation = BookObservation(sweep_id=sweep_id, book_id=book_id, frame_id=frame_id,
                                           bbox=detection.bbox, view=detection.view, visible_text=detection.visible_text,
                                           title=detection.title, author=detection.author, publisher=detection.publisher,
                                           quality=signals, quality_metadata=metadata, visual_issues=detection.issues,
                                           association_method=method,
-                                          source_model=model, unresolved_fields=unresolved)
+                                          source_model=model, unresolved_fields=unresolved,
+                                          spine_height_cm=size.height_cm if size else None,
+                                          spine_thickness_cm=size.thickness_cm if size else None,
+                                          scale_method=size.method if size else None)
             records.append(observation)
             for reason in reasons:
                 records.append(ReviewIssue(sweep_id=sweep_id, book_id=book_id, field='visual_evidence', reason=reason))

@@ -144,9 +144,10 @@ class BookGuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(session.sweep_phase, 'Approaching')
                 _, encoded = cv2.imencode('.jpg', textured_view())
                 return {'type':'video', 'data':base64.b64encode(encoded).decode()}
-            while session.sweep_phase != 'Sweeping':
+            # finish_capture reaches Sweeping before it speaks, so wait for the closing line itself.
+            while session.sweep_phase != 'Sweeping' or not any(
+                    'continue your sweep' in message.get('text', '') for message in sent):
                 await asyncio.sleep(.001)
-            self.assertTrue(any('continue your sweep' in message.get('text', '') for message in sent))
             self.assertFalse(any('tap' in message.get('text', '').lower() for message in sent))
             return {'type':'close'}
 

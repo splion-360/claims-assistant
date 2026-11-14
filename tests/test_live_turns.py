@@ -67,6 +67,7 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             async def receive_text(self): return json.dumps(await receive(session, sent))
         with patch.object(s, 'check_frame', side_effect=frame_check or unavailable_check), \
              patch.object(s, 'choose_prompt', side_effect=prompt or title_prompt), \
+             patch.object(s, 'estimate_depth', side_effect=s.DepthUnavailable('test')), \
              patch.dict('os.environ', {'DREX_API_KEY': ''}), \
              patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name)), \
              patch.object(s, '_has_api_key', return_value=True), \

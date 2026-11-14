@@ -267,12 +267,21 @@ function cropImage(book, className = "") {
   return image ? `<img class="${className}" src="${observationUrl(image)}" alt="Observed crop: ${escapeHtml(book.title || "unreadable book")}" loading="lazy">` : '<span class="missing-crop">No clear image yet</span>';
 }
 
+function bookSize(book) {
+  // Sizes come only from measured depth; say so when a book has none yet.
+  if (!book.spine_height_cm) return "Not measured yet";
+  const source = book.scale_method === "webxr_depth" ? "AR depth" : "Depth Pro";
+  return `${Number(book.spine_height_cm).toFixed(1)} × ${Number(book.spine_thickness_cm).toFixed(1)} cm · ${source}`;
+}
+
 function renderBookInventory() {
   const books = state.book_inventory || [];
   const groups = bookGroups(books);
   const requiresReview = group => group.length > 1 || group.some(bookNeedsReview);
   const reviewCount = groups.filter(requiresReview).length;
-  document.querySelector("#openBooks").textContent = `Books · ${groups.length - reviewCount} identified · ${reviewCount} need review`;
+  const totals = state.inventory_totals || {};
+  const run = totals.shelf_run_m ? ` · shelf run ${Number(totals.shelf_run_m).toFixed(2)} m` : "";
+  document.querySelector("#openBooks").textContent = `Books · ${groups.length - reviewCount} identified · ${reviewCount} need review${run}`;
   document.querySelector("#reviewTab").setAttribute?.("aria-pressed", String(bookTab === "review"));
   document.querySelector("#identifiedTab").setAttribute?.("aria-pressed", String(bookTab === "identified"));
   const visible = groups.filter(group => requiresReview(group) === (bookTab === "review"));
@@ -285,6 +294,7 @@ function renderBookInventory() {
       <span class="book-card-copy"><small class="book-badge">${group.length > 1 ? "Possible same book" : bookNeedsReview(book) ? "Needs review" : "Title read"}</small>
       <strong>${escapeHtml(book.title || "Unidentified book")}</strong>
       <span>${escapeHtml(book.author || "Author unreadable")}</span>
+      <small>${escapeHtml(bookSize(book))}</small>
       <small>${group.length > 1 ? `${group.length} sightings to compare · not a copy count` : `${Number(book.observation_count)} observation(s)`}</small>
       ${book.status === "unresolved" ? "<small>Association unresolved</small>" : ""}</span></button>`;
   }).join("") : `<p class="empty">${bookTab === "review" ? "No books need review yet." : "No identified books yet."}</p>`;
@@ -300,7 +310,7 @@ function renderBookDetail() {
   const others = books.filter(item => item.id !== book.id && !(item.frame_ids || []).some(id => (book.frame_ids || []).includes(id)));
   const other = others.find(item => item.id === compareBookId) || others.find(item => (book.candidates || []).includes(item.id));
   compareBookId = other?.id || null;
-  const panel = item => `<article class="comparison-card">${cropImage(item, "book-best")}<h3>${escapeHtml(item.title || "Title unreadable")}</h3><p>${escapeHtml(item.author || "Author unreadable")}</p><small>${Number(item.observation_count)} observation(s)</small></article>`;
+  const panel = item => `<article class="comparison-card">${cropImage(item, "book-best")}<h3>${escapeHtml(item.title || "Title unreadable")}</h3><p>${escapeHtml(item.author || "Author unreadable")}</p><p>${escapeHtml(bookSize(item))}</p><small>${Number(item.observation_count)} observation(s)</small></article>`;
   detail.innerHTML = `<h3>${other ? "Compare these sightings" : "Book details"}</h3>
     <p>${other ? "These may show the same book. Compare the visible design and text; similar titles alone do not establish identity." : "Visual reading only; not catalogue verification."}</p>
     <div class="book-comparison">${panel(book)}${other ? panel(other) : ""}</div>
