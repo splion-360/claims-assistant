@@ -148,14 +148,17 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
         material = next((row.material for row in reversed(rows) if row.material), item.material)
         reasons = [reason for row in rows for reason in row.review_reasons]
         result.append({
-            # An object needs review when a sighting flagged it or nothing described it.
-            'needs_review': bool(reasons) or not description,
+            # A settled object leaves the review list; its recorded reasons stay.
+            'needs_review': not item.reviewed and (bool(reasons) or not description),
+            'reviewed': item.reviewed,
             'id': item.id, 'category': item.category, 'description': description,
             'material': material, 'brand_model': brand,
             'needs_appraisal': item.needs_appraisal and not item.stated_print,
             'stated_print': item.stated_print, 'excluded': item.excluded,
             'observation_count': len(rows),
             'frame_ids': list(dict.fromkeys(row.frame_id for row in rows)),
+            # Sighting IDs so a reviewer can see the crop each reading came from.
+            'observation_ids': [row.id for row in rows],
             'review_reasons': list(dict.fromkeys(reasons)),
         })
     return result

@@ -369,7 +369,7 @@ class BookMeasurementTests(unittest.TestCase):
         """Save books without dimensions and say why when no depth exists."""
         book = self.persist()['inventory'][0]
         self.assertIsNone(book['spine_height_cm'])
-        self.assertIn('No metric depth for this frame', book['review_reasons'])
+        self.assertIn('No depth was captured for this frame', book['review_reasons'])
 
     def test_background_measurement_fills_dimensions(self):
         """A later measure job adds dimensions and clears the missing-depth reason."""

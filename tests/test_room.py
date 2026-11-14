@@ -207,3 +207,50 @@ class RoomStorageTests(unittest.TestCase):
                                      bbox=Box(x_min=.3, y_min=.3, x_max=.7, y_max=.7),
                                      category='seating', description='armchair'))
             self.assertEqual(shelved_wall_area_m2(repo, self.root, 's1'), 0.0)
+
+
+class SizeRefusalTests(unittest.TestCase):
+    """Check a book left unmeasured says which evidence was missing."""
+
+    @staticmethod
+    def box():
+        """Build a detection box covering the middle of the frame.
+
+        Returns:
+            A normalized box.
+        """
+        return Box(x_min=.3, y_min=.2, x_max=.6, y_max=.8)
+
+    def test_no_depth_at_all_is_named(self):
+        """Say that no depth reached the frame when none did."""
+        from library_claim.measurement.spine import size_refusal
+        self.assertEqual(size_refusal(self.box(), 'spine', [], None),
+                         'No depth was captured for this frame')
+
+    def test_a_cover_sighting_is_named(self):
+        """Say that only spines are measured when the sighting shows a cover."""
+        from library_claim.measurement.spine import size_refusal
+        reason = size_refusal(self.box(), 'cover', [], room_frame(0.0))
+        self.assertIn('spines only', reason)
+        self.assertIn('cover', reason)
+
+    def test_an_occluded_spine_is_named(self):
+        """Say that the spine was obscured rather than that depth was missing."""
+        from library_claim.measurement.spine import size_refusal
+        self.assertIn('occlusion', size_refusal(self.box(), 'spine', ['occlusion'], room_frame(0.0)))
+
+    def test_an_implausible_reading_names_the_background(self):
+        """Say the depth sampled past the book when the size cannot be a book."""
+        from library_claim.measurement.spine import size_refusal
+        # The synthetic room's walls are metres away, so this box measures far too large.
+        reason = size_refusal(self.box(), 'spine', [], room_frame(0.0))
+        self.assertIn('implausible', reason)
+
+    def test_a_measurable_spine_has_no_refusal(self):
+        """Report no reason when the sighting does produce a size."""
+        from library_claim.measurement.spine import measure_spine, size_refusal
+        # A close, small box against the room's near surfaces measures as a book.
+        frame = room_frame(0.0)
+        small = Box(x_min=.49, y_min=.46, x_max=.51, y_max=.54)
+        if measure_spine(small, 'spine', [], frame) is not None:
+            self.assertIsNone(size_refusal(small, 'spine', [], frame))

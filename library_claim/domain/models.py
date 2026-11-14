@@ -128,6 +128,8 @@ class BookObservation(Record):
     spine_height_cm: Centimetres | None = None
     spine_thickness_cm: Centimetres | None = None
     scale_method: Literal['webxr_depth', 'depth_pro'] | None = None
+    # Why this sighting produced no size, when it produced none.
+    size_reason: str | None = None
     # Where a catalogue observation came from and when it was fetched.
     catalogue_url: str | None = None
     retrieved_at: AwareDatetime | None = None
@@ -145,6 +147,8 @@ class Item(Record):
     # Art and mirrors wait for a person unless the policyholder says the piece is a print.
     needs_appraisal: bool = False
     stated_print: bool = False
+    # True once a person has settled this object's review.
+    reviewed: bool = False
 
 
 class ItemObservation(Record):

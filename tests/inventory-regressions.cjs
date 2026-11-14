@@ -4,15 +4,16 @@ const src=fs.readFileSync(path.join(__dirname,'../live_demo/inventory.js'),'utf8
   .replace(/\nrefresh\(\);\s*\nwindow\.setInterval[^\n]*\n?$/,'\n');
 function env(state){
  const elements=new Map();
- const el=()=>({textContent:'',innerHTML:''});
+ const el=()=>({textContent:'',innerHTML:'',addEventListener(){}});
  const ctx=vm.createContext({console,
   document:{querySelector(k){if(!elements.has(k))elements.set(k,el());return elements.get(k)}},
   window:{location:{origin:'http://127.0.0.1:4177',search:'?session=abcdef1234'},setInterval(){return 1}},
+  encodeURIComponent,
   URLSearchParams,Date,Number,String,
   sessionStorage:{getItem:()=>null},
   fetch:async()=>({ok:true,status:200,json:async()=>({state})})});
  vm.runInContext(src,ctx);
- return {run:x=>vm.runInContext(x,ctx),html:k=>elements.get(k)?.innerHTML??'',text:k=>elements.get(k)?.textContent??''};
+ return {ctx,run:x=>vm.runInContext(x,ctx),html:k=>elements.get(k)?.innerHTML??'',text:k=>elements.get(k)?.textContent??''};
 }
 const tests=[];const test=(name,fn)=>tests.push([name,fn]);
 
@@ -24,7 +25,7 @@ test('a priced book shows its amount and links the source',async()=>{
  const html=e.html('#books');
  assert.ok(html.includes('USD 17.99'));
  assert.ok(html.includes('https://books.example/buy'));
- assert.ok(html.includes('19.5 cm'));
+ assert.ok(html.includes('19.5')&&html.includes('3.2'));
 });
 test('an unmeasured, unpriced book says so rather than showing zero',async()=>{
  const e=env({book_inventory:[{id:'b1',title:'NO PRICE',observation_count:1}],item_inventory:[]});
@@ -64,6 +65,44 @@ test('an object with no provider says no retail source is configured',async()=>{
    observation_count:1,needs_appraisal:false,review_reasons:[]}]});
  await e.run('refresh()');
  assert.ok(e.html('#items').includes('no retail source configured'));
+});
+test('each line shows a crop of the sighting it came from',async()=>{
+ const e=env({book_inventory:[{id:'b1',title:'A BOOK',observation_count:1,observations:[{id:'obs-1'}]}],
+   item_inventory:[{id:'i1',category:'lighting',description:'lamp',observation_count:1,
+     observation_ids:['obs-2'],review_reasons:[]}]});
+ await e.run('refresh()');
+ assert.ok(e.html('#books').includes('/api/sessions/abcdef1234/books/evidence/obs-1'));
+ assert.ok(e.html('#items').includes('/api/sessions/abcdef1234/items/evidence/obs-2'));
+});
+test('a line with no sighting shows no broken image',async()=>{
+ const e=env({book_inventory:[{id:'b1',title:'A BOOK',observation_count:0,observations:[]}],item_inventory:[]});
+ await e.run('refresh()');
+ assert.ok(!e.html('#books').includes('<img'));
+});
+test('every object offers the three review decisions',async()=>{
+ const e=env({book_inventory:[],item_inventory:[{id:'i1',category:'seating',description:'chair',
+   observation_count:1,needs_review:true,review_reasons:['possible duplicate'],observation_ids:[]}]});
+ await e.run('refresh()');
+ const html=e.html('#items');
+ for (const action of ['confirm','appraise','exclude']) {
+   assert.ok(html.includes(`data-action="${action}"`),`missing ${action}`);
+ }
+ assert.ok(html.includes('data-item="i1"'));
+});
+test('settling a review posts the decision and redraws from the answer',async()=>{
+ const e=env({book_inventory:[],item_inventory:[{id:'i1',category:'seating',description:'chair',
+   observation_count:1,needs_review:true,review_reasons:['possible duplicate'],observation_ids:[]}]});
+ await e.run('refresh()');
+ const sent=[];
+ e.ctx.fetch=async(url,options)=>{sent.push({url,body:JSON.parse(options.body)});
+   return {ok:true,status:200,json:async()=>({state:{item_inventory:[{id:'i1',category:'seating',
+     description:'chair',observation_count:1,needs_review:false,review_reasons:[],observation_ids:[]}]}})}};
+ await e.run('settleItem("abcdef1234","i1","confirm",{disabled:false})');
+ assert.equal(sent.length,1);
+ assert.ok(sent[0].url.endsWith('/items/i1/review'));
+ assert.deepEqual(sent[0].body,{action:'confirm'});
+ // The redraw comes from the server's answer, not from a guess.
+ assert.ok(e.html('#items').includes('recorded'));
 });
 test('model-supplied text is escaped',async()=>{
  const e=env({book_inventory:[{id:'b1',title:'<script>bad</script>',observation_count:1}],

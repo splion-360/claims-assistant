@@ -109,6 +109,37 @@ def _axis_length_m(depth: DepthMap, start: tuple[float, float], end: tuple[float
     return float(np.linalg.norm(points[0] - points[1]))
 
 
+def spine_refusal(bbox: Box, view: str | None, issues: list[str], depth: DepthMap | None) -> str | None:
+    """Name why a detection cannot be measured, or None when it can be.
+
+    A book left unmeasured should say which evidence was missing, rather than
+    reporting that no depth reached the frame when depth did reach it.
+
+    Args:
+        bbox: Normalized detection box in the source image.
+        view: Visible view reported for the detection.
+        issues: Readability issues reported for the detection.
+        depth: Metric depth for the same image, or None when none was captured.
+
+    Returns:
+        The reason a measurement was not taken, or None when one can be.
+    """
+    if depth is None:
+        return 'No depth was captured for this frame'
+    if view != 'spine':
+        return f'Measured from spines only; this sighting shows the {view or "book"}'
+    blocking = {'cut_off', 'occlusion'} & set(issues)
+    if blocking:
+        return f'Spine is {" and ".join(sorted(blocking)).replace("cut_off", "cut off")} in this sighting'
+    x0, x1 = bbox.x_min * depth.image_width, bbox.x_max * depth.image_width
+    y0, y1 = bbox.y_min * depth.image_height, bbox.y_max * depth.image_height
+    cu, cv = (x0 + x1) / 2, (y0 + y1) / 2
+    if _median_depth(depth, cu - (x1 - x0) / 4, cv - (y1 - y0) / 4,
+                     cu + (x1 - x0) / 4, cv + (y1 - y0) / 4) is None:
+        return 'Depth sensing returned nothing where the spine was seen'
+    return None
+
+
 def measure_spine(bbox: Box, view: str | None, issues: list[str], depth: DepthMap) -> SpineMeasurement | None:
     """Measure one detected spine, or refuse when the evidence cannot support it.
 
@@ -125,7 +156,7 @@ def measure_spine(bbox: Box, view: str | None, issues: list[str], depth: DepthMa
     Returns:
         Height (long axis) and thickness (short axis) in centimetres, or None.
     """
-    if view != 'spine' or {'cut_off', 'occlusion'} & set(issues):
+    if spine_refusal(bbox, view, issues, depth) is not None:
         return None
     x0, x1 = bbox.x_min * depth.image_width, bbox.x_max * depth.image_width
     y0, y1 = bbox.y_min * depth.image_height, bbox.y_max * depth.image_height
@@ -143,6 +174,7 @@ def measure_spine(bbox: Box, view: str | None, issues: list[str], depth: DepthMa
     low_h, high_h = CONFIG.measurement.height_range_cm
     low_t, high_t = CONFIG.measurement.thickness_range_cm
     if not (low_h <= height <= high_h and low_t <= thickness <= high_t):
+        # Implausible sizes mean the depth sampled past the book, onto whatever is behind it.
         return None
     return SpineMeasurement(height_cm=height, thickness_cm=thickness, method=depth.method)
 
@@ -173,3 +205,23 @@ def shelf_run_m(thicknesses_cm: list[float]) -> float:
         Shelf run in metres.
     """
     return sum(thicknesses_cm) / 100
+
+
+def size_refusal(bbox: Box, view: str | None, issues: list[str], depth: DepthMap | None) -> str | None:
+    """Name why a detection produced no size, including an implausible reading.
+
+    Args:
+        bbox: Normalized detection box in the source image.
+        view: Visible view reported for the detection.
+        issues: Readability issues reported for the detection.
+        depth: Metric depth for the same image, or None when none was captured.
+
+    Returns:
+        The reason no size was recorded, or None when one was.
+    """
+    refusal = spine_refusal(bbox, view, issues, depth)
+    if refusal is not None:
+        return refusal
+    if measure_spine(bbox, view, issues, depth) is not None:
+        return None
+    return 'Depth gave an implausible size, so it sampled past the spine onto what is behind it'

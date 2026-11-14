@@ -10,7 +10,8 @@ from library_claim.capture.quality import QualityAssessor
 from library_claim.capture.tracking.geometry import intersection_area, transform
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.domain.models import Book, BookObservation, Frame, FrameAssociation, ProcessingJob, Quality, ReviewIssue
-from library_claim.measurement.spine import DepthMap, book_dimensions, measure_spine, shelf_run_m
+from library_claim.measurement.spine import (DepthMap, book_dimensions, measure_spine,
+                                             shelf_run_m, size_refusal)
 from library_claim.pricing.storage import stored_valuations
 from library_claim.decisions.drex import DrexError
 from library_claim.decisions.same_book import SameBookCandidate, choose_same_book, crop_jpeg, same_book_probabilities
@@ -217,6 +218,21 @@ def association_choices(frame: Frame, analysis: BookFrameAnalysis, frames: dict,
     return choices, methods
 
 
+def _size_reason(evidence: list[BookObservation]) -> str:
+    """Say why a book has no measured size, from its own sightings.
+
+    Args:
+        evidence: The book's visual observations.
+
+    Returns:
+        The newest recorded refusal, or a general reason when none was recorded.
+    """
+    for row in reversed(evidence):
+        if row.size_reason:
+            return row.size_reason
+    return 'No depth was captured for this book'
+
+
 def inventory(repo: Repository, sweep_id: str) -> list[dict]:
     """Build a provisional inventory from nonconflicting visual readings.
 
@@ -280,7 +296,7 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
                        'review_reasons': list(dict.fromkeys(
                            [issue.reason for issue in issues if issue.book_id == book.id
                             and issue.status == 'open' and issue.reason not in settled]
-                           + ([] if dimensions else ['No metric depth for this frame'])))})
+                           + ([] if dimensions else [_size_reason(evidence)])))})
     for book in result:
         book['candidates'] = [other['id'] for other in result if other['id'] != book['id']
                               and not set(book['frame_ids']) & set(other['frame_ids'])
@@ -424,6 +440,8 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
             unresolved = [field for field in ('title', 'author', 'publisher') if getattr(detection, field) is None]
             # Dimensions come only from measured depth, never from a model's guess.
             size = measure_spine(detection.bbox, detection.view, detection.issues, depth) if depth else None
+            # A book left unmeasured records which evidence was missing, not a blanket reason.
+            size_reason = size_refusal(detection.bbox, detection.view, detection.issues, depth)
             observation = BookObservation(sweep_id=sweep_id, book_id=book_id, frame_id=frame_id,
                                           bbox=detection.bbox, view=detection.view, visible_text=detection.visible_text,
                                           title=detection.title, author=detection.author, publisher=detection.publisher,
@@ -432,7 +450,8 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
                                           source_model=model, unresolved_fields=unresolved,
                                           spine_height_cm=size.height_cm if size else None,
                                           spine_thickness_cm=size.thickness_cm if size else None,
-                                          scale_method=size.method if size else None)
+                                          scale_method=size.method if size else None,
+                                          size_reason=size_reason)
             records.append(observation)
             for reason in reasons:
                 records.append(ReviewIssue(sweep_id=sweep_id, book_id=book_id, field='visual_evidence', reason=reason))

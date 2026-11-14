@@ -19,7 +19,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import (
     FastAPI,
@@ -108,7 +108,7 @@ from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
 from library_claim.measurement.room_storage import measure_room
 from library_claim.items.models import INSTRUCTION as ITEM_INSTRUCTION
 from library_claim.items.models import ItemFrameAnalysis
-from library_claim.items.storage import save_items
+from library_claim.items.storage import current_items, save_items
 from library_claim.packet import packet_archive
 from library_claim.pricing.storage import value_book
 from library_claim.storage.depth import load_depth, parse_depth_payload
@@ -116,7 +116,7 @@ from library_claim.storage.prune import prune_finished, prune_sweep
 from library_claim.storage.live_capture import LiveCaptureStore
 from library_claim.storage.repository import Repository
 from library_claim.storage.evidence import EvidenceStore
-from library_claim.domain.models import BookObservation, Frame
+from library_claim.domain.models import BookObservation, Frame, Item, ItemObservation
 from library_claim.identification.review import review_books
 from library_claim.orchestration.state_machine import SweepController
 from live_demo.book_guidance import capture_instruction, needs_capture, GuidancePolicy
@@ -757,6 +757,90 @@ def book_evidence(session_id: str, observation_id: str, request: Request):
         return Response(encoded.tobytes(), media_type='image/jpeg')
     except (KeyError, ValueError, OSError, cv2.error, AttributeError):
         raise HTTPException(404, "Book evidence not found")
+
+
+@app.get("/api/sessions/{session_id}/items/evidence/{observation_id}")
+def item_evidence(session_id: str, observation_id: str, request: Request):
+    """Serve an authorized object crop without exposing filesystem paths.
+
+    Args:
+        session_id: Owning live session.
+        observation_id: Immutable item observation ID.
+        request: Request carrying the owner cookie.
+
+    Returns:
+        JPEG crop of the original observed object.
+
+    Raises:
+        HTTPException: Evidence is missing or belongs to another session.
+    """
+    owned_session(session_id, request.cookies.get("intake_owner"))
+    try:
+        with Repository(CAPTURE_DATA_DIR / "claims.sqlite3") as repo:
+            observation = repo.get(ItemObservation, observation_id)
+            frame = repo.get(Frame, observation.frame_id)
+            if observation.sweep_id != session_id or frame.sweep_id != session_id:
+                raise KeyError(observation_id)
+            data = EvidenceStore(CAPTURE_DATA_DIR / "frames").read(frame.evidence_key)
+        image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        h, w = image.shape[:2]
+        box = observation.bbox
+        crop = image[int(box.y_min * h):int(np.ceil(box.y_max * h)),
+                     int(box.x_min * w):int(np.ceil(box.x_max * w))]
+        ok, encoded = cv2.imencode(".jpg", crop)
+        if not ok:
+            raise ValueError("Invalid crop")
+        return Response(encoded.tobytes(), media_type="image/jpeg")
+    except (KeyError, ValueError, OSError, cv2.error, AttributeError):
+        raise HTTPException(404, "Object evidence not found")
+
+
+class ItemReview(BaseModel):
+    action: Literal["confirm", "exclude", "appraise"]
+
+
+@app.post("/api/sessions/{session_id}/items/{item_id}/review")
+async def review_item(session_id: str, item_id: str, decision: ItemReview, request: Request):
+    """Settle an object's review: accept it, drop it, or send it for appraisal.
+
+    Confirming clears the reasons that held the object in review; the sightings
+    that raised them stay as they were recorded.
+
+    Args:
+        session_id: Owning sweep.
+        item_id: Object being reviewed.
+        decision: What the reviewer decided.
+        request: Request carrying the owner cookie.
+
+    Returns:
+        The refreshed sweep state.
+
+    Raises:
+        HTTPException: The object does not belong to this sweep.
+    """
+    session = owned_session(session_id, request.cookies.get("intake_owner"))
+    database = CAPTURE_DATA_DIR / "claims.sqlite3"
+
+    def settle():
+        """Apply the decision to the stored object and its sightings."""
+        with Repository(database) as repo:
+            item = repo.get(Item, item_id)
+            if item.sweep_id != session_id:
+                raise KeyError(item_id)
+            repo.update(item.model_copy(update={
+                "excluded": decision.action == "exclude",
+                "needs_appraisal": decision.action == "appraise",
+                "association_status": "confirmed" if decision.action == "confirm" else item.association_status,
+                "reviewed": True,
+            }))
+
+    try:
+        await asyncio.to_thread(settle)
+    except KeyError:
+        raise HTTPException(404, "Object not found in this sweep")
+    session.item_inventory = await asyncio.to_thread(current_items, database, session_id)
+    session.revision += 1
+    return {"state": _current_ui_state(session)}
 
 
 def drex_failure_message(error, consecutive: int) -> str | None:

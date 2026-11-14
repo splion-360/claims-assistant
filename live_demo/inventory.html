@@ -13,7 +13,18 @@
   h1 { font-size: 1.35rem; margin: 0; }
   a.back { color: var(--accent); font-size: .9rem; }
   .meta { color: var(--muted); font-size: .9rem; margin: 0 0 22px; }
-  h2 { font-size: 1.05rem; margin: 30px 0 10px; display: flex; align-items: baseline; gap: 10px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; display: flex; align-items: baseline; gap: 10px; }
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+  @media (max-width: 1100px) { .panels { grid-template-columns: 1fr; } }
+  .panel { min-width: 0; }
+  td.shot { width: 76px; }
+  td.shot img { width: 68px; height: 68px; object-fit: cover; border-radius: 6px;
+                background: #ece8de; display: block; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .actions button { font: inherit; font-size: 11.5px; padding: 3px 9px; border-radius: 999px;
+                    border: 1px solid var(--rule); background: #fff; cursor: pointer; }
+  .actions button:hover { background: #f2efe7; }
+  .actions button[disabled] { opacity: .5; cursor: default; }
   h2 .count { font-weight: 400; color: var(--muted); font-size: .85rem; }
   .scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; background: #fff; }
   table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
@@ -39,18 +50,24 @@
   <a class="back" href="/">Back to sweep</a>
 </header>
 <p class="meta" id="meta">Loading…</p>
-<h2>Books <span class="count" id="bookCount"></span></h2>
-<div class="scroll"><table>
-  <thead><tr><th>Status</th><th>Title</th><th>Author</th><th>ISBN</th><th>Height</th>
-    <th>Thickness</th><th>Replacement</th><th>Sightings</th><th>Review</th></tr></thead>
-  <tbody id="books"></tbody>
-</table></div>
-<h2>Non-book contents <span class="count" id="itemCount"></span></h2>
-<div class="scroll"><table>
-  <thead><tr><th>Status</th><th>Category</th><th>Description</th><th>Material</th>
-    <th>Brand / model</th><th>Replacement</th><th>Sightings</th><th>Review</th></tr></thead>
-  <tbody id="items"></tbody>
-</table></div>
+<div class="panels">
+  <section class="panel">
+    <h2>Books <span class="count" id="bookCount"></span></h2>
+    <div class="scroll"><table>
+      <thead><tr><th></th><th>Status</th><th>Title</th><th>Size</th>
+        <th>Replacement</th><th>Review</th></tr></thead>
+      <tbody id="books"></tbody>
+    </table></div>
+  </section>
+  <section class="panel">
+    <h2>Non-book contents <span class="count" id="itemCount"></span></h2>
+    <div class="scroll"><table>
+      <thead><tr><th></th><th>Status</th><th>Object</th>
+        <th>Replacement</th><th>Review</th></tr></thead>
+      <tbody id="items"></tbody>
+    </table></div>
+  </section>
+</div>
 <script src="/inventory.js"></script>
 </body>
 </html>
