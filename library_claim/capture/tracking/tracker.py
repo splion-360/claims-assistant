@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from pydantic import BaseModel, ConfigDict
 
-from .geometry import corners, normalized_mapping, transform, verify
+from .geometry import corners, intersection_area, normalized_mapping, transform, verify
 from .keyframes import Keyframes
 from library_claim.config import CONFIG
 
@@ -171,7 +171,7 @@ class FrameTracker:
                 reference_corners = corners(self.reference.gray.shape)
                 if not cv2.isContourConvex(polygon) or cv2.contourArea(polygon, oriented=True) <= 0:
                     raise ValueError('Invalid mapped view')
-                area, _ = cv2.intersectConvexConvex(polygon, reference_corners)
+                area = intersection_area(polygon, reference_corners)
                 overlap = float(np.clip(area / cv2.contourArea(polygon), 0, 1))
                 if overlap < SETTINGS.min_reference_overlap:
                     raise ValueError('Insufficient reference overlap')

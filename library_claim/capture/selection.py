@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from .quality import QualityAssessment
 from library_claim.config import CONFIG
 
+from .tracking.geometry import intersection_area
 from .tracking.tracker import TrackingResult
 
 SETTINGS = CONFIG.selection
@@ -49,7 +50,7 @@ def compare_evidence(current: TrackingResult, quality: QualityAssessment,
         now = np.float32(current.map_polygon(unit))
         before = np.float32(previous.map_polygon(unit))
         area = cv2.contourArea(now)
-        intersection, _ = cv2.intersectConvexConvex(now, before)
+        intersection = intersection_area(now, before)
         new_fraction = 1 - min(1, intersection / area)
     except (ValueError, cv2.error, ZeroDivisionError):
         return EvidenceDecision(action='review_association', reason='invalid_footprint')

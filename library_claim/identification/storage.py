@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 from library_claim.capture.quality import QualityAssessor
-from library_claim.capture.tracking.geometry import transform
+from library_claim.capture.tracking.geometry import intersection_area, transform
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.domain.models import Book, BookObservation, Frame, FrameAssociation, ProcessingJob, Quality, ReviewIssue
 from library_claim.measurement.spine import DepthMap, book_dimensions, measure_spine, shelf_run_m
@@ -72,7 +72,7 @@ def overlap(first: np.ndarray, second: np.ndarray) -> float:
     a, b = np.float32(first), np.float32(second)
     if not cv2.isContourConvex(a) or not cv2.isContourConvex(b):
         return 0.0
-    intersection, _ = cv2.intersectConvexConvex(a, b)
+    intersection = intersection_area(a, b)
     union = cv2.contourArea(a) + cv2.contourArea(b) - intersection
     return max(0.0, min(1.0, float(intersection / union))) if union > 0 else 0.0
 

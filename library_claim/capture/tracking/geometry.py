@@ -102,3 +102,84 @@ def normalized_mapping(matrix: np.ndarray, source_shape: tuple, reference_shape:
     source_scale = np.diag([source_shape[1] - 1, source_shape[0] - 1, 1])
     reference_scale = np.diag([1 / (reference_shape[1] - 1), 1 / (reference_shape[0] - 1), 1])
     return reference_scale @ matrix @ source_scale
+
+
+def _vertices(polygon: np.ndarray) -> np.ndarray:
+    """Validate polygon corners and return them as finite float pairs.
+
+    Args:
+        polygon: Vertices as an N-by-2 array, or an OpenCV N-by-1-by-2 contour.
+
+    Returns:
+        An N-by-2 float array of vertices.
+
+    Raises:
+        ValueError: Fewer than three vertices, or a nonfinite or misshaped array.
+    """
+    points = np.asarray(polygon, dtype=float)
+    if points.ndim == 3 and points.shape[1] == 1:
+        points = points.reshape(-1, 2)
+    if points.ndim != 2 or points.shape[1] != 2 or len(points) < 3 or not np.isfinite(points).all():
+        raise ValueError('Expected at least three finite two-dimensional vertices')
+    return points
+
+
+def _signed_area(polygon: np.ndarray) -> float:
+    """Measure polygon area by the shoelace formula, keeping the winding sign.
+
+    Args:
+        polygon: An N-by-2 array of vertices; fewer than three gives zero.
+
+    Returns:
+        Positive area for anticlockwise winding, negative for clockwise.
+    """
+    if len(polygon) < 3:
+        return 0.0
+    x, y = polygon[:, 0], polygon[:, 1]
+    return float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))) / 2
+
+
+def intersection_area(subject: np.ndarray, clip: np.ndarray) -> float:
+    """Measure the area two convex polygons share.
+
+    Sutherland-Hodgman clipping replaces `cv2.intersectConvexConvex`, which
+    reports an arbitrary wedge when the two outlines coincide to within
+    floating-point noise. Clipping never looks for a crossing point: it only
+    asks which side of an edge a vertex falls on, so a vertex lying exactly on
+    an edge yields a duplicate corner that contributes no area.
+
+    Args:
+        subject: Convex polygon vertices as an N-by-2 array.
+        clip: Convex polygon vertices as an M-by-2 array, in the same basis.
+
+    Returns:
+        The shared area in squared input units; zero when the polygons are
+        disjoint or meet only along an edge.
+
+    Raises:
+        ValueError: Either polygon has fewer than three finite 2-D vertices.
+    """
+    polygon = _vertices(subject)
+    window = _vertices(clip)
+    # Clip anticlockwise so "inside" is one consistent sign for every edge.
+    if _signed_area(window) < 0:
+        window = window[::-1]
+    for index in range(len(window)):
+        if len(polygon) < 3:
+            return 0.0
+        start, end = window[index], window[(index + 1) % len(window)]
+        edge = end - start
+        # Cross products are positive inside an anticlockwise edge and zero on it.
+        side = edge[0] * (polygon[:, 1] - start[1]) - edge[1] * (polygon[:, 0] - start[0])
+        kept = []
+        for position, current in enumerate(polygon):
+            previous, current_side = polygon[position - 1], side[position]
+            previous_side = side[position - 1]
+            # A sign change means the edge is crossed between these two corners.
+            if (current_side >= 0) != (previous_side >= 0):
+                ratio = previous_side / (previous_side - current_side)
+                kept.append(previous + ratio * (current - previous))
+            if current_side >= 0:
+                kept.append(current)
+        polygon = np.asarray(kept, dtype=float).reshape(-1, 2)
+    return abs(_signed_area(polygon))
