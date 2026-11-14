@@ -155,3 +155,11 @@ is available in the download only, not the browsing interface.
 New browser sessions bypass the legacy insurance background workflow and use
 library guidance. Legacy insurance routines remain available for their existing
 tests; the downloaded library summary is evidence, not the final assignment packet.
+
+## Catalogue lookup
+
+A legible title is searched on Open Library first. When Open Library fails, returns nothing,
+or Drex finds no confident match among its works, Google Books is searched and Drex chooses
+among its volumes the same way. Edition and ISBN are filled only when the publisher read on
+the spine matches exactly one Open Library edition, or the matched Google Books volume's
+publisher. Google Books throttles anonymous requests; set `GOOGLE_BOOKS_API_KEY` in `.env`.

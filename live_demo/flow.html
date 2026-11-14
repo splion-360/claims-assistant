@@ -11,39 +11,44 @@
     --done: #4caf50; --error: #ef5350;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
-  header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--line); }
-  h1 { font-size: 18px; margin: 0 12px 0 0; }
-  .stat { color: var(--muted); }
+  html, body { height: 100%; }
+  /* The whole view fits the window: strips take their natural height, the log takes the rest. */
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.35 system-ui, -apple-system, Segoe UI, sans-serif;
+         display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
+  header { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 15px; margin: 0 8px 0 0; }
+  .stat { color: var(--muted); font-size: 12px; }
   .stat b { color: var(--text); font-variant-numeric: tabular-nums; }
-  #status { margin-left: auto; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--card); }
+  #status { margin-left: auto; font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--card); }
   #status.live { color: var(--done); }
-  main { padding: 16px 20px 24px; display: grid; gap: 14px; }
-  .strip { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
-  .strip h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-  .row { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding-bottom: 4px; }
-  .arrow { flex: 0 0 26px; display: flex; align-items: center; justify-content: center; color: var(--line); font-size: 18px; }
-  .card { flex: 1 0 150px; max-width: 240px; min-height: 108px; background: var(--card); border: 2px solid var(--line);
-          border-radius: 10px; padding: 9px 10px; display: flex; flex-direction: column; gap: 4px; transition: border-color .3s, box-shadow .3s, opacity .3s; }
-  .card .who { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-  .card .name { font-weight: 600; }
-  .card .model { font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); overflow-wrap: anywhere; }
-  .card .detail { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; min-height: 2.6em; }
-  .card .meta { margin-top: auto; display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #strips { padding: 8px 16px 0; display: grid; gap: 8px; }
+  .strip { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px 8px; }
+  .strip h2 { margin: 0 0 5px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .row { display: flex; align-items: stretch; }
+  .arrow { flex: 0 0 16px; display: flex; align-items: center; justify-content: center; color: var(--line); font-size: 14px; }
+  .card { flex: 1 1 0; min-width: 0; background: var(--card); border: 2px solid var(--line); border-radius: 8px; padding: 5px 8px;
+          display: flex; flex-direction: column; gap: 1px; transition: border-color .3s, box-shadow .3s, opacity .3s; }
+  .card .who { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .card .name { font-weight: 600; font-size: 12px; }
+  .card .model { font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+  .card .detail { color: var(--muted); font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .model { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .meta { margin-top: auto; display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .card.decision { border-style: dashed; }
-  .card.active { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); animation: pulse 1s ease-in-out infinite; }
+  .card.active { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); animation: pulse 1s ease-in-out infinite; }
   .card.done { border-color: var(--done); }
   .card.error { border-color: var(--error); }
   .card.error .detail { color: var(--error); }
   .card.off { opacity: .35; }
-  @keyframes pulse { 50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent) 10%, transparent); } }
-  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
-  #log { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; max-height: 240px; overflow-y: auto;
-         font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 10%, transparent); } }
+  #logWrap { padding: 8px 16px 10px; min-height: 0; display: flex; }
+  #log { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; overflow-y: auto;
+         font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
   #log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #log .t { color: var(--muted); }
   @media (prefers-reduced-motion: reduce) { .card.active { animation: none; } }
-  @media (max-width: 640px) { header, main { padding-left: 16px; padding-right: 16px; } }
+  @media (max-width: 900px) { body { overflow: auto; } .row { flex-wrap: wrap; gap: 6px; } .arrow { display: none; } .card { flex-basis: 140px; } }
 </style>
 </head>
 <body>
@@ -56,24 +61,27 @@
   <span id="status">Connecting…</span>
 </header>
 <main id="strips"></main>
-<main><div id="log" aria-live="polite"></div></main>
+<div id="logWrap"><div id="log" aria-live="polite"></div></div>
 <script>
 // Each step is labelled by its role; the model line shows whichever model actually answered.
 const WHO = { decision: "Decision model", vision: "Vision model", language: "Language model", local: "Local",
-              speech: "Speech model", web: "Open Library", depth: "Depth model" };
+              speech: "Speech model", web: "Catalogue", depth: "Depth model" };
 const STRIPS = [
   { title: "1 · Capture — every camera frame", blocks: [
     ["camera", "local", "Browser camera"], ["tracking", "local", "Tracking (SIFT / optical flow)"],
-    ["gate", "local", "Local gate (sharpness, exposure)"], ["d1", "decision", "◆ D1 Frame check"], ["save", "local", "Evidence store (SQLite + JPEG)"]] },
-  { title: "2 · Identification — per frame where Drex sees books", blocks: [
-    ["spine_reading", "vision", "Spine reading"], ["d2", "decision", "◆ D2 Same book?"], ["inventory", "local", "Inventory update"],
-    ["depth", "depth", "Spine measurement (depth)"], ["openlibrary", "web", "Open Library search"], ["d3", "decision", "◆ D3 Catalogue match"]] },
+    ["gate", "local", "Local gate (sharpness, exposure)"], ["d1", "decision", "Book visible? What's wrong?"],
+    ["save", "local", "Evidence store"]] },
+  { title: "2 · Identification — per frame with books", blocks: [
+    ["spine_reading", "vision", "Spine reading"], ["d2", "decision", "Same book as one seen before?"],
+    ["inventory", "local", "Inventory update"], ["depth", "depth", "Spine measurement"],
+    ["openlibrary", "web", "Open Library search"], ["googlebooks", "web", "Google Books search (fallback)"],
+    ["d3", "decision", "Which catalogue entry matches?"]] },
   { title: "3 · Voice — what the user says", blocks: [
-    ["stt", "speech", "Speech to text"], ["d5", "decision", "◆ D5 Correction intent"], ["correction", "local", "Correction applied"],
-    ["reply", "language", "Reply"], ["tts", "speech", "Speech out"]] },
+    ["stt", "speech", "Speech to text"], ["d5", "decision", "What did the user mean?"],
+    ["correction", "local", "Correction applied"], ["reply", "language", "Reply"], ["tts", "speech", "Speech out"]] },
   { title: "4 · Guidance — when the agent speaks up", blocks: [
-    ["d6", "decision", "◆ D6 Speak now? Which prompt?"], ["guidance", "local", "Prompt chosen → spoken via Speech out"],
-    ["announce", "local", "Book announced → spoken via Speech out"]] },
+    ["d6", "decision", "Speak now? Which prompt?"], ["guidance", "local", "Prompt chosen → Speech out"],
+    ["announce", "local", "Book announced → Speech out"]] },
 ];
 const cards = {}, timers = {};
 const LABELS = { fallback: "Model fallback" };
@@ -94,10 +102,11 @@ for (const strip of STRIPS) {
     card.innerHTML = `<span class="who" style="color: var(--${who})">${WHO[who]}</span><span class="name"></span>
       <span class="model"></span><span class="detail">idle</span><span class="meta"><span class="ms"></span><span class="count">0×</span></span>`;
     card.querySelector(".name").textContent = name;
+    card.title = `${WHO[who]} — ${name}`;
     card.dataset.count = "0";
     row.appendChild(card);
     cards[id] = card;
-    LABELS[id] = name;
+    LABELS[id] = who === "decision" ? `Decision model — ${name}` : name;
   });
   root.appendChild(section);
 }
@@ -138,8 +147,8 @@ function apply(event, replay = false) {
   card.querySelector(".count").textContent = `${card.dataset.count}×`;
   setState(card, event.phase === "error" ? "error" : event.phase === "done" ? "done" : null,
            replay ? 0 : event.phase === "error" ? 4000 : 1200);
-  if (!replay && event.phase !== "start") log(event);
-  if (event.stage.startsWith("d") && /^d\d$/.test(event.stage) && event.phase === "done") {
+  if (!replay) log(event);
+  if (/^d\d$/.test(event.stage) && event.phase === "done") {
     drexCount += 1; drexTotalMs += event.ms || 0;
     document.getElementById("drexCount").textContent = drexCount;
     document.getElementById("drexAvg").textContent = `${Math.round(drexTotalMs / drexCount)} ms`;
@@ -156,8 +165,9 @@ function log(event) {
   const line = document.createElement("div");
   const time = new Date(event.t * 1000).toLocaleTimeString();
   const ms = event.ms != null ? ` · ${event.ms} ms` : "";
+  const model = event.model ? ` · ${event.model}` : "";
   line.innerHTML = `<span class="t">${time}</span> `;
-  line.append(`${LABELS[event.stage]} — ${event.phase}${event.detail ? ": " + event.detail : ""}${ms}`);
+  line.append(`${LABELS[event.stage]} — ${event.phase}${event.detail ? ": " + event.detail : ""}${ms}${model}`);
   box.prepend(line);
   while (box.childElementCount > 80) box.lastElementChild.remove();
 }

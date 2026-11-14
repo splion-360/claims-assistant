@@ -153,3 +153,77 @@ class ResolveBookTests(unittest.TestCase):
             reasons = [issue.reason for issue in repo.list_for_sweep(ReviewIssue, 'sweep')]
         self.assertEqual(len(rows), 1)
         self.assertNotIn('No confident catalogue match', reasons)
+
+
+GOOGLE = {'items': [{'id': 'gb1', 'volumeInfo': {
+    'title': 'Did I Say You Could Go', 'authors': ['Melanie Gideon'], 'publisher': 'Berkley',
+    'publishedDate': '2023-03-07', 'infoLink': 'https://books.google.com/books?id=gb1',
+    'industryIdentifiers': [{'type': 'ISBN_10', 'identifier': '0593546997'},
+                            {'type': 'ISBN_13', 'identifier': '9780593546994'}]}}]}
+
+
+class GoogleBooksFallbackTests(unittest.TestCase):
+    """Google Books is searched when Open Library gives no confident match."""
+
+    setUp = fixtures.BookObservationTests.setUp
+    save_frame = fixtures.BookObservationTests.save_frame
+    persist = fixtures.BookObservationTests.persist
+
+    def test_search_google_books_parses_volumes(self):
+        """Query by title and author and keep source, link, publisher and ISBN."""
+        from library_claim.identification.catalogue import search_google_books
+
+        def handler(request):
+            self.assertEqual(request.url.host, 'www.googleapis.com')
+            self.assertEqual(request.url.params['q'], 'intitle:"Did I Say You Could Go" inauthor:"Melanie Gideon"')
+            self.assertEqual(request.headers['User-Agent'], 'library-claim/1')
+            return httpx.Response(200, json=GOOGLE)
+
+        [candidate] = search_google_books('Did I Say You Could Go', 'Melanie Gideon', client=client(handler))
+        self.assertEqual((candidate.source, candidate.url, candidate.publisher, candidate.isbn, candidate.first_publish_year),
+                         ('googlebooks', 'https://books.google.com/books?id=gb1', 'Berkley', '9780593546994', 2023))
+
+    def resolve(self, open_library, publisher=None):
+        """Resolve one legible book with Open Library and Google Books handlers.
+
+        Args:
+            open_library: Response factory for Open Library requests.
+            publisher: Publisher read from the spine, if any.
+
+        Returns:
+            Catalogue observations and review reasons written.
+        """
+        book = self.persist(books=[detection(title='Did I Say You Could Go')])['inventory'][0]
+        book['publisher'] = publisher
+
+        def http(request):
+            return httpx.Response(200, json=GOOGLE) if request.url.host == 'www.googleapis.com' else open_library(request)
+
+        def drex(request):
+            criteria = json.loads(request.content)['questions']['match']['criteria']
+            return httpx.Response(200, json=drex_choice('c0' if 'Melanie Gideon' in criteria.get('c0', '') else 'none', 0.9))
+
+        with patch.dict(os.environ, {'DREX_API_KEY': 'k'}):
+            resolve_book(self.store.database, 'sweep', book, http=client(http), drex=client(drex))
+        with Repository(self.store.database) as repo:
+            rows = [row for row in repo.list_for_sweep(BookObservation, 'sweep') if row.provenance == 'catalogue']
+            reasons = [issue.reason for issue in repo.list_for_sweep(ReviewIssue, 'sweep')]
+        return rows, reasons
+
+    def test_no_open_library_match_falls_back_to_google_books(self):
+        """When Drex rejects every Open Library work, a Google Books volume can match."""
+        rows, reasons = self.resolve(lambda request: httpx.Response(200, json=SEARCH))
+        self.assertEqual(rows[0].catalogue_url, 'https://books.google.com/books?id=gb1')
+        self.assertIsNone(rows[0].isbn)
+        self.assertNotIn('No confident catalogue match', reasons)
+
+    def test_open_library_outage_falls_back_to_google_books(self):
+        """An Open Library failure still lets Google Books answer."""
+        rows, _ = self.resolve(lambda request: httpx.Response(503))
+        self.assertEqual(rows[0].catalogue_url, 'https://books.google.com/books?id=gb1')
+
+    def test_google_isbn_only_with_matching_spine_publisher(self):
+        """Fill edition and ISBN from Google Books only when the spine's publisher matches."""
+        rows, _ = self.resolve(lambda request: httpx.Response(200, json=SEARCH), publisher='BERKLEY')
+        self.assertEqual(rows[0].isbn, '9780593546994')
+        self.assertEqual(rows[0].edition, 'Did I Say You Could Go (Berkley)')
