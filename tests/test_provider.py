@@ -52,7 +52,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FallbackTests(unittest.IsolatedAsyncioTestCase):
-    """A failed Crusoe call is retried on the configured fallback model."""
+    """A failed provider call is retried on the configured fallback model."""
 
     def client(self, handler):
         """Route every request to a handler through one reusable mock client.
@@ -127,3 +127,34 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
             await provider.complete([{'role': 'user', 'content': 'Hello'}])
         self.assertEqual(events[0]['stage'], 'fallback')
         self.assertIn(provider.CONFIG.inference.fallback_models[0], events[0]['detail'])
+
+
+class ProviderNeutralWordingTests(unittest.IsolatedAsyncioTestCase):
+    """User-facing text names 'the model provider', never a specific vendor."""
+
+    async def test_errors_do_not_name_the_vendor(self):
+        """Every provider failure message uses neutral wording."""
+        cases = [lambda request: httpx.Response(503),
+                 lambda request: httpx.Response(200, json={'choices': [{'finish_reason': 'length', 'message': {'content': 'x'}}]}),
+                 lambda request: httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': ''}}]}),
+                 lambda request: httpx.Response(200, text='not json')]
+        for handler in cases:
+            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            with self.subTest(handler=handler), patch.dict('os.environ', {'CRUSOE_API_KEY': 'k'}), \
+                    patch.object(provider.httpx, 'AsyncClient', return_value=client):
+                with self.assertRaises(provider.InferenceError) as caught:
+                    await provider.complete([{'role': 'user', 'content': 'Hello'}])
+                self.assertNotIn('crusoe', str(caught.exception).lower())
+                self.assertIn('provider', str(caught.exception).lower())
+        with patch.dict('os.environ', {'CRUSOE_API_KEY': ''}):
+            with self.assertRaises(provider.InferenceError) as caught:
+                await provider.complete([])
+        self.assertNotIn('crusoe', str(caught.exception).lower())
+
+    def test_app_and_frontend_never_name_the_vendor(self):
+        """No server, browser or page file in live_demo mentions the vendor."""
+        from pathlib import Path
+        root = Path(provider.__file__).parent / 'live_demo'
+        for path in [*root.glob('*.py'), *root.glob('*.js'), *root.glob('*.html')]:
+            with self.subTest(path=path.name):
+                self.assertNotIn('crusoe', path.read_text().lower())

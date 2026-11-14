@@ -63,7 +63,7 @@ class CameraSummary:
             table.add_row('Last Drex check', 'Not checked', '')
         if self.remote_filter is not None:
             gate = self.remote_filter
-            table.add_row('Crusoe filter', gate.reason.replace('_', ' '),
+            table.add_row('Spine-reading filter', gate.reason.replace('_', ' '),
                           f'Submitted {gate.submitted} · Rejected {gate.rejected} (activation totals)')
         table.add_row('Evidence saved', str(self.saved_count), 'Since previous summary')
         # Render through the existing logger so Uvicorn levels and handlers still apply.

@@ -262,7 +262,7 @@ def _join(items: list[str], fallback: str) -> str:
 
 
 def _field(
-    label: str, value: Any, source: str = "Crusoe extraction", urgent: bool = False
+    label: str, value: Any, source: str = "Model extraction", urgent: bool = False
 ) -> dict[str, str]:
     status = _status(value, urgent=urgent)
     display = value if status != "missing" else f"Missing: {label.lower()}"
@@ -292,7 +292,7 @@ def _events(
     events: list[dict[str, str]] = [
         {
             "tone": "success",
-            "title": "Crusoe extraction complete",
+            "title": "Model extraction complete",
             "detail": f"Updated structured claim facts using {MODEL}.",
             "rule": "LLM-001",
         }
@@ -401,7 +401,7 @@ def _ui_state(
             _field(
                 "Injuries",
                 injury_text,
-                source="Crusoe extraction + safety gate",
+                source="Model extraction + safety gate",
                 urgent=bool(positive_safety_items),
             )
         ),
@@ -1895,7 +1895,7 @@ async def live_voice(websocket: WebSocket) -> None:
             await send(
                 {
                     "type": "error",
-                    "message": "Set CRUSOE_API_KEY in .env and restart the server.",
+                    "message": "Set the model provider API key in .env and restart the server.",
                 }
             )
             return

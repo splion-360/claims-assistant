@@ -1,4 +1,4 @@
-"""Small Crusoe inference boundary shared by conversation, extraction, and vision."""
+"""Small model-provider inference boundary shared by conversation, extraction, and vision."""
 from __future__ import annotations
 
 import logging
@@ -91,20 +91,20 @@ async def _attempt(client: httpx.AsyncClient, messages: list[dict], schema: type
         response = await client.post(BASE_URL + '/chat/completions',
             headers={'Authorization': 'Bearer ' + os.environ['CRUSOE_API_KEY']}, json=payload)
         if response.status_code != 200:
-            raise InferenceError(f'Crusoe request failed (HTTP {response.status_code}). Check model access, credits, or rate limits.')
+            raise InferenceError(f'Model provider request failed (HTTP {response.status_code}). Check model access, credits, or rate limits.')
         body = response.json()
         choice = body['choices'][0]
         if choice.get('finish_reason') == 'length':
-            raise InferenceError('Crusoe response exceeded the output limit. Please retry with a shorter request.')
+            raise InferenceError('Model provider response exceeded the output limit. Please retry with a shorter request.')
         content = choice['message'].get('content')
         if not isinstance(content, str) or not content.strip():
-            raise InferenceError('Crusoe returned no usable answer. Please retry.')
-        logger.info('Crusoe model=%s latency_s=%.2f usage=%s', model, time.monotonic() - started, body.get('usage', {}))
+            raise InferenceError('Model provider returned no usable answer. Please retry.')
+        logger.info('Provider model=%s latency_s=%.2f usage=%s', model, time.monotonic() - started, body.get('usage', {}))
         return content
     except httpx.RequestError:
-        raise InferenceError('Could not reach Crusoe. Please retry.') from None
+        raise InferenceError('Could not reach the model provider (timed out or offline). Please retry.') from None
     except (ValueError, KeyError, IndexError, TypeError):
-        raise InferenceError('Crusoe returned an invalid response. Please retry.') from None
+        raise InferenceError('Model provider returned an invalid response. Please retry.') from None
 
 
 async def _run(messages: list[dict], schema: type[BaseModel] | None, model: str | None, max_tokens: int,
@@ -125,14 +125,14 @@ async def _run(messages: list[dict], schema: type[BaseModel] | None, model: str 
         InferenceError: Credentials are missing or every model failed.
     """
     if not has_api_key():
-        raise InferenceError('Set CRUSOE_API_KEY in .env and restart the server.')
+        raise InferenceError('Set the model provider API key in .env and restart the server.')
     models = _models(model or MODEL)
     error = None
     async with httpx.AsyncClient(timeout=httpx.Timeout(CONFIG.inference.timeout_s, connect=CONFIG.inference.connect_timeout_s)) as client:
         for index, candidate in enumerate(models):
             if index:
                 # Tell the logs and the flow view that a different model is answering.
-                logger.warning('Crusoe model=%s failed (%s); retrying with %s', models[index - 1], error, candidate)
+                logger.warning('Provider model=%s failed (%s); retrying with %s', models[index - 1], error, candidate)
                 telemetry.emit('fallback', 'done', f'{models[index - 1]} failed → {candidate}')
             try:
                 text = await _attempt(client, messages, schema, candidate, max_tokens)
@@ -144,7 +144,7 @@ async def _run(messages: list[dict], schema: type[BaseModel] | None, model: str 
 
 async def complete(messages: list[dict], *, schema: type[BaseModel] | None = None,
                    model: str | None = None, max_tokens: int = CONFIG.inference.max_tokens) -> str:
-    """Request a completion, falling back to other configured models if Crusoe fails.
+    """Request a completion, falling back to other configured models if the provider fails.
 
     Args:
         messages: Provider-compatible conversation messages.
@@ -192,7 +192,7 @@ async def structured(instruction: str, content: str | list[dict], schema: type[T
         try:
             return schema.model_validate_json(text)
         except ValueError:
-            raise InferenceError('Crusoe returned data that failed validation. No result was saved.') from None
+            raise InferenceError('Model provider returned data that failed validation. No result was saved.') from None
 
     return await _run([{'role': 'system', 'content': instruction}, {'role': 'user', 'content': content}],
                       schema, model, CONFIG.inference.max_tokens, validate)
