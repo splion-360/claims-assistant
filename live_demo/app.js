@@ -317,6 +317,21 @@ function bookPrice(book) {
   return `${price.currency} ${Number(price.amount).toFixed(2)} · ${price.source}${converted}`;
 }
 
+
+// Pairing hands the camera to a phone while the conversation and inventory stay here.
+async function showPairingCode() {
+  const panel = document.querySelector("#pairingCode");
+  if (!sessionId) return;
+  try {
+    const result = await api(`/api/sessions/${sessionId}/capture-code`);
+    panel.innerHTML = `On the phone open <code>${escapeHtml(window.location.origin)}/capture</code> and enter<strong>${escapeHtml(result.code)}</strong>The camera moves to the phone; talking and the inventory stay here.`;
+    panel.hidden = false;
+  } catch (error) {
+    panel.textContent = error.message;
+    panel.hidden = false;
+  }
+}
+
 function renderBookDetail() {
   const books = state.book_inventory || [];
   const book = books.find(item => item.id === selectedBookId);
@@ -848,6 +863,7 @@ micButton.addEventListener("click", async () => {
     if (epoch === generation) await voice?.start();
   } catch (error) { appendSystem(error.message); }
 });
+document.querySelector("#phoneButton").addEventListener("click", showPairingCode);
 cameraButton.addEventListener("click", () => (cameraStream ? stopCamera() : startCamera()));
 newIntakeButton.addEventListener("click", () => createSession(false));
 document.addEventListener("visibilitychange", () => {

@@ -1035,3 +1035,7 @@ body:has(.books-drawer[open]) { overflow: hidden; }
 .book-card.excluded { opacity: 0.5; }
 
 .book-price { color: #2f5d3a; }
+
+.pairing-code { margin: 10px 0 0; font-size: .85rem; line-height: 1.5; }
+.pairing-code strong { display: block; font-size: 1.9rem; letter-spacing: .32em;
+  font-variant-numeric: tabular-nums; margin: 2px 0; }

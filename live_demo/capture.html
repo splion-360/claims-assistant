@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sweep camera</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #111; color: #f4f2ec; font: 16px/1.45 system-ui, sans-serif;
+         min-height: 100dvh; display: flex; flex-direction: column; }
+  main { flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 24px 20px;
+         padding-top: calc(24px + env(safe-area-inset-top, 0px)); }
+  h1 { font-size: 1.1rem; margin: 0; font-weight: 600; }
+  p { margin: 0; color: #b9b4a8; font-size: .92rem; }
+  .pair { display: flex; flex-direction: column; gap: 12px; }
+  input { font-size: 2rem; letter-spacing: .4em; text-align: center; padding: 14px;
+          border-radius: 12px; border: 1px solid #3a3733; background: #1b1a18; color: #f4f2ec; width: 100%; }
+  button { font-size: 1rem; padding: 16px; border-radius: 12px; border: 0;
+           background: #e8e4d9; color: #111; font-weight: 600; width: 100%; }
+  button[disabled] { opacity: .45; }
+  button.stop { background: #a8362f; color: #fff; }
+  video { width: 100%; flex: 1; min-height: 40dvh; object-fit: cover; border-radius: 14px; background: #000; }
+  .status { padding: 12px 14px; border-radius: 10px; background: #1b1a18; font-size: .9rem; }
+  .status.bad { background: #3a1f1d; color: #f4b8b2; }
+  [hidden] { display: none !important; }
+  footer { padding: 0 20px calc(20px + env(safe-area-inset-bottom, 0px)); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Sweep camera</h1>
+  <section class="pair" id="pairing">
+    <p>Enter the six-digit code shown on the computer running the sweep.</p>
+    <input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="000000">
+    <button id="pair" type="button">Pair</button>
+  </section>
+  <video id="preview" playsinline muted autoplay hidden></video>
+  <div class="status" id="status">Not paired.</div>
+</main>
+<footer>
+  <button id="camera" type="button" hidden>Start sweep</button>
+</footer>
+<script src="/capture.js"></script>
+</body>
+</html>

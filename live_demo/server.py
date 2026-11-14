@@ -180,6 +180,11 @@ class IntakeSession:
     deleted: bool = False
     workflow_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     live_socket: Any = None
+    # A paired phone sends camera frames into this queue; the live loop reads both sources.
+    inbox: Any = None
+    capture_code: str = ""
+    capture_code_at: float = 0.0
+    capture_socket: Any = None
     tasks: set = field(default_factory=set)
 
 
@@ -1144,6 +1149,115 @@ async def stop_cleanup():
         await discard_session(session)
 
 
+CAPTURE_CODE_TTL = 600
+CAPTURE_KINDS = {"camera_state", "video"}
+
+
+def capture_code_for(session: IntakeSession) -> str:
+    """Issue or reuse the short code a phone types to pair as this sweep's camera.
+
+    The code stands in for the browser cookie, which cannot reach another device.
+    It is short-lived and single-session, and pairing grants camera input only.
+
+    Args:
+        session: Sweep the phone will send frames to.
+
+    Returns:
+        A six-digit pairing code.
+    """
+    now = time.monotonic()
+    if not session.capture_code or now - session.capture_code_at > CAPTURE_CODE_TTL:
+        session.capture_code = f"{secrets.randbelow(1000000):06d}"
+    session.capture_code_at = now
+    return session.capture_code
+
+
+def session_for_code(code: str) -> IntakeSession | None:
+    """Find the live sweep a pairing code belongs to.
+
+    Args:
+        code: Six-digit code typed on the phone.
+
+    Returns:
+        The matching session while its code is current, else None.
+    """
+    now = time.monotonic()
+    for session in sessions.values():
+        if (session.capture_code and secrets.compare_digest(session.capture_code, code)
+                and now - session.capture_code_at <= CAPTURE_CODE_TTL and not session.deleted):
+            return session
+    return None
+
+
+@app.get("/api/sessions/{session_id}/capture-code")
+def capture_code(session_id: str, request: Request) -> dict:
+    """Return the pairing code for sending this sweep's camera from a phone.
+
+    Args:
+        session_id: Sweep to pair with.
+        request: Carrier of the ownership cookie.
+
+    Returns:
+        The code and how long it stays valid.
+    """
+    session = owned_session(session_id, request.cookies.get("intake_owner"))
+    return {"code": capture_code_for(session), "expires_in_s": CAPTURE_CODE_TTL}
+
+
+@app.get("/capture")
+def capture_page() -> FileResponse:
+    return FileResponse(DEMO_DIR / "capture.html")
+
+
+@app.get("/capture.js")
+def capture_script() -> FileResponse:
+    return FileResponse(DEMO_DIR / "capture.js", media_type="text/javascript")
+
+
+@app.websocket("/ws/capture")
+async def live_capture(websocket: WebSocket) -> None:
+    """Accept camera frames from a phone paired to a sweep running in another browser."""
+    host = websocket.headers.get("host", "")
+    if not local_host(host) or websocket.client.host not in {"127.0.0.1", "::1", "testclient"}:
+        await websocket.close(code=1008)
+        return
+    session = session_for_code(websocket.query_params.get("code", ""))
+    if session is None or session.inbox is None:
+        await websocket.close(code=1008)
+        return
+    if session.capture_socket is not None:
+        await websocket.close(code=1008)
+        return
+    session.capture_socket = websocket
+    await websocket.accept()
+    try:
+        await websocket.send_text(json.dumps({"type": "paired", "camera": CONFIG.capture.browser.model_dump()}))
+        while True:
+            raw = await websocket.receive_text()
+            if len(raw) > MAX_MESSAGE_BYTES:
+                await websocket.send_text(json.dumps({"type": "error", "message": "Frame too large"}))
+                continue
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            # A paired phone may drive the camera and nothing else: no text, voice or review.
+            if not isinstance(message, dict) or message.get("type") not in CAPTURE_KINDS:
+                await websocket.send_text(json.dumps({"type": "error", "message": "Only camera input is accepted"}))
+                continue
+            try:
+                session.inbox.put_nowait(raw)
+            except asyncio.QueueFull:
+                # Dropping the newest frame is better than queueing stale ones.
+                pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        session.capture_socket = None
+        with contextlib.suppress(Exception):
+            await websocket.close()
+
+
 @app.websocket("/ws/live")
 async def live_voice(websocket: WebSocket) -> None:
     """Keep camera ingestion responsive while text and evidence jobs run."""
@@ -1179,6 +1293,8 @@ async def live_voice(websocket: WebSocket) -> None:
     send_lock = asyncio.Lock()
     tasks = set()
     text_task = camera_task = speech_task = workflow_task = None
+    # Pending reads, named before the try so the cleanup can always cancel them.
+    from_browser = from_phone = None
     tracking_task = None
     capture_store = LiveCaptureStore(CAPTURE_DATA_DIR, session.session_id)
     tracking_stream = CameraTracking(capture_store)
@@ -2002,8 +2118,34 @@ async def live_voice(websocket: WebSocket) -> None:
         )
         await send({"type": "state", "state": _current_ui_state(session)})
         await send({"type": "ready"})
+        # A paired phone's frames queue here; the browser is still read one message at a time.
+        session.inbox = asyncio.Queue(maxsize=8)
+
+        async def next_message():
+            """Take the next message from this browser or from a paired camera.
+
+            Returns:
+                The raw message text, preferring the browser when both are ready.
+
+            Raises:
+                WebSocketDisconnect: The browser closed the connection.
+            """
+            nonlocal from_browser, from_phone
+            while True:
+                if from_browser is None:
+                    from_browser = asyncio.ensure_future(websocket.receive_text())
+                if from_phone is None:
+                    from_phone = asyncio.ensure_future(session.inbox.get())
+                done, _ = await asyncio.wait({from_browser, from_phone},
+                                             return_when=asyncio.FIRST_COMPLETED)
+                if from_browser in done:
+                    ready, from_browser = from_browser, None
+                    return ready.result()
+                ready, from_phone = from_phone, None
+                return ready.result()
+
         while True:
-            raw = await websocket.receive_text()
+            raw = await next_message()
             try:
                 if len(raw) > MAX_MESSAGE_BYTES:
                     raise ValueError("Input exceeded the message size limit.")
@@ -2132,7 +2274,15 @@ async def live_voice(websocket: WebSocket) -> None:
         for task in list(tasks):
             task.cancel()
         await asyncio.gather(*list(tasks), return_exceptions=True)
+        for pending in (from_browser, from_phone):
+            if pending is not None:
+                pending.cancel()
         session.live_socket = None
+        session.inbox = None
+        session.capture_code = ""
+        with contextlib.suppress(Exception):
+            if session.capture_socket is not None:
+                await session.capture_socket.close()
         set_camera_mode(session, False)
         # A disconnected camera must not leave a later connection stuck approaching.
         while session.sweep_phase != "Sweeping":
