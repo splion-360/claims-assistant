@@ -12,6 +12,8 @@ room's floor and wall area, all from the same pass.
 Books are the hard case it is built around: dozens of near-identical objects on a shelf, most
 partly hidden, each needing its own identity, size and price.
 
+![The sweep console: controls and pairing code on the left, the notepad filling in the middle, the transcript and outstanding work on the right](docs/images/console.png)
+
 ---
 
 ## Quick start
@@ -44,46 +46,7 @@ Everything else — models, thresholds, cadences — is in [`config.yml`](config
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph device["Phone — camera only"]
-        cam["WebXR AR camera<br/>frame + depth grid + pose"]
-    end
-    subgraph console["Laptop — conversation and inventory"]
-        ui["Sweep console<br/>notepad · books · inventory"]
-    end
-
-    cam -->|"/ws/capture<br/>6-digit pairing code"| gate
-    ui <-->|"/ws/live"| gate
-
-    subgraph server["FastAPI backend"]
-        gate["Local quality gate<br/>sharpness · exposure<br/><i>free, instant</i>"]
-        d1{{"D1 · Drex<br/>book visible?<br/>spine legible?"}}
-        vision["Vision model<br/>spine text only"]
-        d2{{"D2 · Drex<br/>same physical book?"}}
-        d3{{"D3 · Drex<br/>which catalogue work?"}}
-        depth["Depth → centimetres<br/>spines · objects · room"]
-        price["Price lookup<br/>sourced + dated"]
-        store[("SQLite + frame store")]
-        packet["claim_packet.json<br/>+ report.html"]
-    end
-
-    gate -->|passes| d1
-    gate -.->|blurred, dark| drop(["refused"])
-    d1 -->|admitted| vision
-    d1 -.->|no book| drop
-    vision --> d2 --> d3
-    d2 --> store
-    d3 --> store
-    cam -.->|depth| depth --> store
-    store --> price --> packet
-    store --> packet
-
-    style d1 fill:#2F5D3A,color:#fff
-    style d2 fill:#2F5D3A,color:#fff
-    style d3 fill:#2F5D3A,color:#fff
-    style drop fill:#f3f0e8,stroke:#aaa,color:#555
-```
+![Pipeline: the phone and console feed a local quality gate, Drex admits or refuses each frame, the vision model reads only admitted frames, Drex decides the rest, and depth and prices feed the claim packet](docs/images/pipeline.svg)
 
 The vision model sits behind the gate: it is sent a frame only after Drex has admitted it, so
 it never receives a blurred shelf, a blank wall, or a book already recorded.
@@ -211,27 +174,4 @@ tests/             388 Python tests, 52 browser tests
 
 ---
 
-## Tests
 
-```sh
-.venv/bin/python -m unittest discover -s tests   # 388
-node tests/client-regressions.cjs                # 29 — sweep console
-node tests/inventory-regressions.cjs             # 13 — inventory tables
-node tests/capture-regressions.cjs               #  5 — phone capture, AR path
-node tests/voice-regressions.cjs                 #  5 — microphone and playback
-```
-
-No test makes a network call: Drex, the catalogues and the price sources are faked with
-`httpx.MockTransport` or injected callables.
-
----
-
-## Not yet covered
-
-- **Used book values.** Replacement cost is sourced; used value is reported empty.
-- **Non-book prices.** `pricing.item_providers` is empty, so objects other than art report
-  "no retail source configured". Adding a retail provider is one function and a config entry.
-- **Room shape.** The floor outline is the convex hull of what the sweep saw, so alcoves read as
-  filled. The packet records this and the fraction of a full turn that was swept.
-- **Locale.** The agent does not yet confirm country and currency, so pricing uses the
-  configured default market and the packet flags it.
