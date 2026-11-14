@@ -88,6 +88,7 @@ from library_claim.identification.catalogue import resolve_book
 from library_claim.identification.corrections import apply_correction
 from library_claim.decisions.corrections import classify_intent, extract_stated_title, resolve_target, target_frame
 from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
+from library_claim.measurement.room_storage import measure_room
 from library_claim.items.models import INSTRUCTION as ITEM_INSTRUCTION
 from library_claim.items.models import ItemFrameAnalysis
 from library_claim.items.storage import save_items
@@ -162,6 +163,7 @@ class IntakeSession:
     camera_notes: list[str] = field(default_factory=list)
     book_inventory: list[dict[str, Any]] = field(default_factory=list)
     item_inventory: list[dict[str, Any]] = field(default_factory=list)
+    room: dict[str, Any] | None = None
     last_items_at: float = float("-inf")
     library_sweep: bool = False
     sweep_phase: str = "Sweeping"
@@ -496,6 +498,7 @@ def _ui_state(
         "camera_notes": session.camera_notes,
         "book_inventory": session.book_inventory,
         "item_inventory": session.item_inventory,
+        "room": session.room,
         "inventory_totals": inventory_totals(session.book_inventory),
         "severity": classification.severity,
         "claim_type": classification.claim_type.replace("_", " "),
@@ -1018,6 +1021,26 @@ async def record_items(session: IntakeSession, frame_id: str, frame: bytes) -> N
             telemetry.emit("items", "done", f"{len(session.item_inventory)} object(s) in the room")
     except Exception as error:  # noqa: BLE001 - a missed object must not lose the frame's books
         logger.warning("item detection failed: %s", type(error).__name__)
+
+
+async def measure_sweep_room(session: IntakeSession) -> None:
+    """Measure the room from the sweep's saved depth frames once its camera stops.
+
+    Args:
+        session: Sweep whose frames to measure.
+    """
+    try:
+        with telemetry.span("room") as reported:
+            room = await asyncio.to_thread(
+                measure_room, CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR, session.session_id
+            )
+            reported.model = (room or {}).get("scale_method") or "no posed depth"
+            reported.detail = (f"{room['floor_area_m2']} m2 floor, {room['wall_area_m2']} m2 wall"
+                               if room else "not enough posed depth to measure")
+        if room and not session.deleted:
+            session.room = room
+    except Exception as error:  # noqa: BLE001 - a missed room must not disturb the inventory
+        logger.warning("room measurement failed: %s", type(error).__name__)
 
 
 class FrameObservation(BookFrameAnalysis):
@@ -2235,6 +2258,9 @@ async def live_voice(websocket: WebSocket) -> None:
                         tracking_stream.requested_capture = session.sweep_phase in {"Approaching", "Capturing"}
                         if not enabled and session.sweep_phase != "Sweeping":
                             await finish_capture()
+                        if not enabled:
+                            # Room geometry comes from the frames the sweep already saved.
+                            track(measure_sweep_room(session))
                 elif kind == "book_capture":
                     if message.get("action"):
                         raise ValueError("Capture and resumption are automatic; refresh the page")

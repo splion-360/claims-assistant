@@ -11,7 +11,7 @@ import httpx
 
 from library_claim.config import CONFIG
 from library_claim.domain.models import (Book, BookObservation, Box, Frame, Item,
-                                         ItemObservation, ReviewIssue, Sweep)
+                                         ItemObservation, ProcessingJob, ReviewIssue, Sweep)
 from library_claim.packet import build_packet, packet_archive, render_report
 from library_claim.storage.evidence import EvidenceStore
 from library_claim.storage.repository import Repository
@@ -429,3 +429,81 @@ class ItemPacketTests(unittest.TestCase):
         self.assertIn('brass floor lamp', html)
         self.assertIn('needs_appraisal', html)
         self.assertNotIn('No non-book items recorded', html)
+
+
+class RoomPacketTests(unittest.TestCase):
+    """Check the packet's room block and what it says about its own coverage."""
+
+    def setUp(self):
+        """Save a sweep and a measured room estimate for it."""
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.database = Path(self.directory.name) / 'claims.sqlite3'
+        self.start = datetime(2026, 11, 14, 9, 0, tzinfo=timezone.utc)
+        with Repository(self.database) as repo:
+            repo.add_many([
+                Sweep(id='sweep1', captured_at=self.start, device='browser camera'),
+                Frame(id='f1', sweep_id='sweep1', captured_at=self.start,
+                      evidence_key=f'{"d" * 64}.jpg', width_px=640, height_px=480),
+            ])
+
+    def save_room(self, **overrides):
+        """Persist a room estimate for the sweep.
+
+        Args:
+            **overrides: Fields replacing the measured defaults.
+        """
+        room = {'length_m': 5.0, 'width_m': 3.6, 'height_m': 2.5, 'floor_area_m2': 18.0,
+                'floor_area_sqft': 193.8, 'wall_area_m2': 43.0, 'wall_area_sqft': 462.8,
+                'shelved_wall_area_m2': 4.2, 'scale_method': 'webxr_depth_pose_cloud',
+                'confidence': 1.0, 'yaw_coverage': 1.0, 'sample_count': 20736,
+                'footprint_m': [[2.5, 1.8], [-2.5, 1.8], [-2.5, -1.8], [2.5, -1.8]],
+                'shape_note': 'Floor outline is the convex hull of the surfaces the sweep saw.',
+                **overrides}
+        with Repository(self.database) as repo:
+            repo.add(ProcessingJob(id='room_sweep1', sweep_id='sweep1', frame_id='f1', task='room',
+                                   status='succeeded', created_at=self.start,
+                                   model='webxr_depth_pose_cloud', result={'room': room}))
+
+    def test_a_measured_room_reaches_the_packet_in_both_units(self):
+        """Report the measured room, its areas in both units and how it was scaled."""
+        self.save_room()
+        room = build_packet(self.database, 'sweep1', price=False)['room']
+        self.assertEqual(room['floor_area_m2'], 18.0)
+        self.assertEqual(room['floor_area_sqft'], 193.8)
+        self.assertEqual(room['wall_area_m2'], 43.0)
+        self.assertEqual(room['shelved_wall_area_m2'], 4.2)
+        self.assertEqual(room['scale_method'], 'webxr_depth_pose_cloud')
+
+    def test_an_unmeasured_room_stays_empty_and_says_why(self):
+        """Leave the room empty and name the reason when nothing measured it."""
+        packet = build_packet(self.database, 'sweep1', price=False)
+        self.assertIsNone(packet['room']['floor_area_m2'])
+        self.assertTrue(any(entry['ref_id'] == 'room' and 'too few frames' in entry['reason']
+                            for entry in packet['review_queue']))
+
+    def test_a_measured_room_still_declares_its_shape_assumption(self):
+        """Record how a non-rectangular room was handled, as the brief asks."""
+        self.save_room()
+        queue = build_packet(self.database, 'sweep1', price=False)['review_queue']
+        self.assertTrue(any('convex hull' in entry['reason'] for entry in queue))
+
+    def test_a_partial_sweep_is_flagged_in_the_review_queue(self):
+        """Say so when the sweep looked across only part of a full turn."""
+        self.save_room(yaw_coverage=0.4, confidence=0.4)
+        queue = build_packet(self.database, 'sweep1', price=False)['review_queue']
+        self.assertTrue(any('40% of a full turn' in entry['reason'] for entry in queue))
+
+    def test_unmeasured_shelving_is_flagged(self):
+        """Record that no shelving was measured against a wall."""
+        self.save_room(shelved_wall_area_m2=0.0)
+        queue = build_packet(self.database, 'sweep1', price=False)['review_queue']
+        self.assertTrue(any('No shelving was measured' in entry['reason'] for entry in queue))
+
+    def test_report_prints_the_room_figures(self):
+        """Show the room's areas and its scale source in the readable report."""
+        self.save_room()
+        html = render_report(build_packet(self.database, 'sweep1', price=False))
+        self.assertIn('18.0', html)
+        self.assertIn('193.8', html)
+        self.assertIn('webxr_depth_pose_cloud', html)

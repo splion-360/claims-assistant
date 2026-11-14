@@ -217,6 +217,14 @@ class MeasurementConfig(Settings):
     height_range_cm: tuple[PositiveFloat, PositiveFloat]
     thickness_range_cm: tuple[PositiveFloat, PositiveFloat]
     depth_pro_model: Text
+    # Room geometry: depth readings outside this range are ignored, and an estimate
+    # needs at least this many posed frames and points before it is reported.
+    room_depth_range_m: tuple[PositiveFloat, PositiveFloat]
+    room_min_frames: PositiveInt
+    room_min_points: PositiveInt
+    room_yaw_bins: PositiveInt
+    # Below this share of a full turn, the floor outline is flagged as partial.
+    room_min_coverage: Unit
 
 
 class MarketConfig(Settings):

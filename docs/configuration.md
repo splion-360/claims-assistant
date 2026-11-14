@@ -15,7 +15,7 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 | `inference` | Crusoe text/vision models and their fallback models (tried in order when a call fails), token budgets, temperature, Qwen thinking and request timeouts |
 | `speech` | Deepgram STT/TTS models, speech request chunk length and timeouts |
 | `drex` | Drex model, endpoint, client name, timeouts, decision probability thresholds and guidance cooldowns |
-| `measurement` | Depth sampling inset/window and Depth Pro model (the AR depth-grid size is under `capture.browser`) |
+| `measurement` | Depth sampling inset/window, Depth Pro model, and the room geometry limits: usable depth range, minimum posed frames and points, heading bins and the coverage below which a floor outline is flagged as partial (the AR depth-grid size is under `capture.browser`) |
 | `pricing` | Default country, per-country currency and price providers, appraisal keywords and threshold, conversion markets, exchange-rate endpoint and request timeouts |
 | `items` | Non-book detection on/off, per-frame cap, detection cadence, association overlap and the wording that releases a framed piece from appraisal |
 
@@ -151,3 +151,36 @@ what `items.print_statements` lists. Every other object needs a retail price
 provider under `pricing.item_providers`; no keyless retail API exists for
 furniture and electronics, so that list ships empty and those lines are reported
 unpriced with the reason rather than carrying an invented figure.
+
+## Room area
+
+Room geometry comes from the same sweep as the books, with no second pass. An
+AR session reports a camera pose with every depth frame, and that pose is stored
+in the frame's depth sidecar. When the camera stops, each depth cell is
+back-projected into the session's gravity-aligned space and the frames are
+combined into one point cloud.
+
+Height is read along the vertical axis between the 1st and 99th percentile, so a
+single reading through a doorway cannot raise the ceiling. The floor outline is
+the convex hull of the points projected onto the floor plane; length and width
+are the sides of its smallest enclosing rectangle, and wall area is that
+outline's perimeter times the height. `scale_method` records
+`webxr_depth_pose_cloud`, and both areas are reported in square metres and
+square feet.
+
+The outline measures what the sweep actually looked at. Each frame covers its
+own field of view, and the share of `measurement.room_yaw_bins` headings covered
+becomes `yaw_coverage`, which is also the estimate's confidence. Below
+`measurement.room_min_coverage` the packet says in its review queue what fraction
+of a turn was swept. The hull also fills alcoves and recesses, which the packet
+states for every estimate rather than only the partial ones.
+
+A sweep with fewer than `measurement.room_min_frames` posed frames, or fewer
+than `measurement.room_min_points` usable points, reports no room at all: the
+block stays empty and the review queue says why. Frames without a pose measure
+nothing, so a device whose Chrome lacks WebXR depth sensing yields no room
+geometry even though its books are still read and priced.
+
+Wall area covered by shelving is measured separately from the shelving
+detections: each unit's largest reading is taken once, so several sightings of
+one bookcase cannot inflate the figure.

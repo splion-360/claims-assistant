@@ -183,7 +183,7 @@ class ProcessingJob(Record):
     sweep_id: Identifier
     frame_id: Identifier
     book_id: Identifier | None = None
-    task: Literal['identify', 'items', 'measure', 'value', 'visual_diagnosis', 'frame_check']
+    task: Literal['identify', 'items', 'measure', 'room', 'value', 'visual_diagnosis', 'frame_check']
     status: Literal['pending', 'running', 'succeeded', 'failed', 'cancelled'] = 'pending'
     created_at: AwareDatetime
     model: str | None = None

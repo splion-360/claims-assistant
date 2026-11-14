@@ -719,6 +719,8 @@ function sendArFrame(gl, framebuffer, texture, view, depthInfo) {
     mm: depthGrid(depthInfo, cameraConfig.depth_grid_width, cameraConfig.depth_grid_height),
     fx: p[0] * jpegWidth / 2, fy: p[5] * jpegHeight / 2,
     cx: (1 - p[8]) * jpegWidth / 2, cy: (1 + p[9]) * jpegHeight / 2,
+    // Camera-to-world transform in the gravity-aligned local space; room geometry needs it.
+    pose: Array.from(view.transform.matrix),
   };
   liveSocket.send(JSON.stringify({ type: "video", data: dataUrl.split(",")[1], depth }));
 }

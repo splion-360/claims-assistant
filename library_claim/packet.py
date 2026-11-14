@@ -11,6 +11,7 @@ from library_claim.domain.models import Frame, Sweep
 from library_claim.identification.storage import inventory, inventory_totals
 from library_claim.items.pricing import price_item
 from library_claim.items.storage import inventory as item_inventory
+from library_claim.measurement.room_storage import stored_room
 from library_claim.pricing.models import Valuation
 from library_claim.pricing.storage import value_sweep
 from library_claim.storage.repository import Repository
@@ -142,7 +143,7 @@ def _totals(books: list[dict], lines: list[dict], items: list[dict]) -> dict:
 
 def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep,
                   valuations: dict[str, Valuation], objects: list[dict],
-                  item_values: dict[str, Valuation]) -> list[dict]:
+                  item_values: dict[str, Valuation], room: dict | None) -> list[dict]:
     """List every line the sweep is not confident in, with its reason.
 
     Args:
@@ -152,6 +153,7 @@ def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep,
         valuations: Book pricing outcomes indexed by book ID.
         objects: Non-book inventory entries carrying their review reasons.
         item_values: Item pricing outcomes indexed by item ID.
+        room: The saved room estimate, or None when the sweep measured none.
 
     Returns:
         Review entries referencing a book, an object, the room or the sweep.
@@ -174,7 +176,19 @@ def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep,
             queue.append({'ref_id': entry['id'], 'reason': reason})
         # Dimensions for an object need metric depth that no item pass supplies yet.
         queue.append({'ref_id': entry['id'], 'reason': 'Object dimensions were not measured'})
-    queue.append({'ref_id': 'room', 'reason': 'Room dimensions and areas were not measured during this sweep'})
+    if room is None:
+        queue.append({'ref_id': 'room',
+                      'reason': 'Room dimensions and areas were not measured: the sweep captured too '
+                                'few frames carrying both depth and a camera pose'})
+    else:
+        # An estimate measures only what the sweep looked at, so its coverage is a review fact.
+        queue.append({'ref_id': 'room', 'reason': room['shape_note']})
+        if room['yaw_coverage'] < CONFIG.measurement.room_min_coverage:
+            queue.append({'ref_id': 'room',
+                          'reason': f'The sweep looked across {round(room["yaw_coverage"] * 100)}% of a '
+                                    f'full turn, so the floor outline covers only part of the room'})
+        if not room['shelved_wall_area_m2']:
+            queue.append({'ref_id': 'room', 'reason': 'No shelving was measured against a wall'})
     if not objects:
         queue.append({'ref_id': 'items', 'reason': 'No non-book contents were recorded during this sweep'})
     if not sweep.country or not sweep.currency:
@@ -218,6 +232,7 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
         frames = repo.list_for_sweep(Frame, sweep_id)
         books = inventory(repo, sweep_id)
         contents = item_inventory(repo, sweep_id)
+        room = stored_room(repo, sweep_id)
     # frame_ref must resolve to a file an adjuster can open, so it names the saved JPEG.
     evidence = {frame.id: f'frames/{frame.evidence_key}' for frame in frames}
     kept = [book for book in books if not book.get('excluded')]
@@ -237,12 +252,13 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
                   'duration_s': _duration_s(frames), 'country': (sweep.country or chosen).upper(),
                   'currency': currency,
                   'frames_saved': len(frames), 'generated_at': datetime.now(sweep.captured_at.tzinfo).isoformat()},
-        'room': {'length_m': None, 'width_m': None, 'height_m': None, 'floor_area_m2': None,
-                 'wall_area_m2': None, 'shelved_wall_area_m2': None, 'scale_method': '', 'confidence': 0},
+        'room': room or {'length_m': None, 'width_m': None, 'height_m': None, 'floor_area_m2': None,
+                         'wall_area_m2': None, 'shelved_wall_area_m2': None,
+                         'scale_method': '', 'confidence': 0},
         'books': lines,
         'items': items,
         'totals': _totals(kept, lines, items),
-        'review_queue': _review_queue(kept, lines, sweep, valuations, objects, item_values),
+        'review_queue': _review_queue(kept, lines, sweep, valuations, objects, item_values, room),
     }
 
 
@@ -329,8 +345,19 @@ def render_report(packet: dict) -> str:
  locale {_cell(sweep["country"])} / {_cell(sweep["currency"])}</p>
 <h2>Totals</h2><dl class="figures">{figures}</dl>
 <h2>Room</h2>
-<p>Floor area {_cell(room["floor_area_m2"])} m&sup2; · wall area {_cell(room["wall_area_m2"])} m&sup2; ·
- shelved wall {_cell(room["shelved_wall_area_m2"])} m&sup2; · scale method {_cell(room["scale_method"])}</p>
+<dl class="figures">
+ <div class="figure"><dt>Floor area</dt><dd>{_cell(room["floor_area_m2"])} m&sup2;</dd></div>
+ <div class="figure"><dt>Floor area</dt><dd>{_cell(room.get("floor_area_sqft"))} sq ft</dd></div>
+ <div class="figure"><dt>Wall area</dt><dd>{_cell(room["wall_area_m2"])} m&sup2;</dd></div>
+ <div class="figure"><dt>Wall area</dt><dd>{_cell(room.get("wall_area_sqft"))} sq ft</dd></div>
+ <div class="figure"><dt>Shelved wall</dt><dd>{_cell(room["shelved_wall_area_m2"])} m&sup2;</dd></div>
+ <div class="figure"><dt>Length</dt><dd>{_cell(room["length_m"])} m</dd></div>
+ <div class="figure"><dt>Width</dt><dd>{_cell(room["width_m"])} m</dd></div>
+ <div class="figure"><dt>Ceiling</dt><dd>{_cell(room["height_m"])} m</dd></div>
+</dl>
+<p>Scale from {_cell(room["scale_method"])} · confidence {_cell(room["confidence"])}{
+ f' · swept {round(room["yaw_coverage"] * 100)}% of a full turn' if room.get("yaw_coverage") is not None else ''}</p>
+{f'<p>{escape(str(room["shape_note"]))}</p>' if room.get("shape_note") else ''}
 <h2>Books ({len(packet["books"])})</h2>
 <table><thead><tr><th>Status</th><th>Title</th><th>Author</th><th>ISBN</th><th>Height cm</th>
  <th>Thick cm</th><th>Scale</th><th>Replacement</th><th>Used</th><th>Frame</th></tr></thead>

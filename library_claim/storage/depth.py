@@ -34,6 +34,7 @@ def save_depth(root: Path, frame_id: str, depth: DepthMap) -> None:
     np.savez_compressed(path, depth_m=depth.depth_m.astype(np.float32),
                         intrinsics=np.array([depth.fx, depth.fy, depth.cx, depth.cy], np.float64),
                         size=np.array([depth.image_width, depth.image_height], np.int64),
+                        pose=np.array(depth.pose if depth.pose else [], np.float64),
                         method=np.array(depth.method))
 
 
@@ -53,7 +54,10 @@ def load_depth(root: Path, frame_id: str) -> DepthMap | None:
     with np.load(path) as data:
         fx, fy, cx, cy = (float(value) for value in data['intrinsics'])
         width, height = (int(value) for value in data['size'])
-        return DepthMap(depth_m=data['depth_m'], fx=fx, fy=fy, cx=cx, cy=cy,
+        # Sidecars written before poses were captured carry no pose array.
+        stored = data['pose'] if 'pose' in data.files else np.empty(0)
+        pose = tuple(float(value) for value in stored) if stored.size == 16 else None
+        return DepthMap(depth_m=data['depth_m'], fx=fx, fy=fy, cx=cx, cy=cy, pose=pose,
                         image_width=width, image_height=height, method=str(data['method']))
 
 
@@ -89,5 +93,11 @@ def parse_depth_payload(payload: dict, image_width: int, image_height: int) -> D
     if not all(np.isfinite(value) for value in (fx, fy, cx, cy)) or fx <= 0 or fy <= 0:
         raise ValueError('Depth intrinsics are invalid')
     grid = np.frombuffer(raw, '<u2').reshape(height, width).astype(np.float32) / 1000
-    return DepthMap(depth_m=grid, fx=fx, fy=fy, cx=cx, cy=cy, image_width=image_width,
+    # A device that reports no pose still measures spines; only room geometry needs one.
+    supplied = payload.get('pose')
+    pose = None
+    if isinstance(supplied, list) and len(supplied) == 16:
+        values = [float(value) for value in supplied]
+        pose = tuple(values) if all(np.isfinite(values)) else None
+    return DepthMap(depth_m=grid, fx=fx, fy=fy, cx=cx, cy=cy, pose=pose, image_width=image_width,
                     image_height=image_height, method='webxr_depth')
