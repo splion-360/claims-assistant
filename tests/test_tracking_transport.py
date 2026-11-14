@@ -216,3 +216,71 @@ class DrexFailureReportTests(unittest.IsolatedAsyncioTestCase):
         session, sent = await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=no_key)
         errors = [m['message'] for m in sent if m['type'] == 'error']
         self.assertEqual(errors, ['Set DREX_API_KEY in .env and restart the server.'])
+
+
+class DepthSchedulingTests(unittest.IsolatedAsyncioTestCase):
+    """Only frames that contain books are queued for slow Depth Pro measurement."""
+
+    async def run_capture(self, with_books):
+        """Admit one frame whose capture succeeds, with or without books in it.
+
+        Args:
+            with_books: Whether the inventory lists a book seen in the captured frame.
+
+        Returns:
+            The Depth Pro double.
+        """
+        from library_claim.measurement.depth_pro import DepthUnavailable
+
+        _, encoded = cv2.imencode('.jpg', textured_view())
+        depth = Mock(side_effect=DepthUnavailable('test'))
+        done = asyncio.Event()
+        count = 0
+
+        async def capture(session, args, *, candidate):
+            """Report a successful read, optionally listing a book in the frame.
+
+            Args:
+                session: Live session.
+                args: Capture arguments.
+                candidate: Admitted frame.
+
+            Returns:
+                Successful pin result.
+            """
+            if with_books:
+                session.book_inventory = [{'id': 'b1', 'title': 'Dune', 'frame_ids': [candidate.frame_id],
+                                           'observations': []}]
+            done.set()
+            return {'pinned': True}
+
+        async def receive(session, sent):
+            """Send one frame during a sweep and close after its capture.
+
+            Args:
+                session: Live session.
+                sent: Emitted messages.
+
+            Returns:
+                Next simulated browser message.
+            """
+            nonlocal count
+            count += 1
+            if count == 1:
+                session.library_sweep = True
+                return {'type': 'video', 'data': base64.b64encode(encoded).decode()}
+            await asyncio.wait_for(done.wait(), 2)
+            await asyncio.sleep(0.05)
+            return {'type': 'close'}
+
+        with patch.object(server, '_pin_evidence_photo', side_effect=capture):
+            await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=lambda jpeg: check(0.9), depth=depth)
+        return depth
+
+    async def test_frame_without_books_is_not_measured(self):
+        """Skip Depth Pro when the read frame had no books."""
+        self.assertFalse((await self.run_capture(False)).called)
+
+    async def test_frame_with_books_is_measured(self):
+        """Queue Depth Pro for a frame whose books were read."""
+        self.assertTrue((await self.run_capture(True)).called)

@@ -154,6 +154,8 @@ class IntakeSession:
     capture_target: str | None = None
     capture_attempts: int = 0
     guidance_policy: GuidancePolicy = field(default_factory=GuidancePolicy)
+    # True between Deepgram StartOfTurn and EndOfTurn; guidance stays quiet meanwhile.
+    user_turn_open: bool = False
     capture_started_at: float = 0.0
     capture_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_frame: bytes | None = None
@@ -1128,7 +1130,6 @@ async def live_voice(websocket: WebSocket) -> None:
     recent_issues = deque(maxlen=5)
     gate_streak = 0
     guidance_task = None
-    user_turn_open = False
     last_prompt, last_prompt_at = None, None
     last_capture_frame_id = None
     # Depth Pro is slow on CPU: one measurement runs, only the newest frame waits.
@@ -1235,7 +1236,7 @@ async def live_voice(websocket: WebSocket) -> None:
 
     def user_speaking():
         """Report whether the user is mid-turn or awaiting a reply."""
-        return user_turn_open or (text_task is not None and not text_task.done())
+        return session.user_turn_open or (text_task is not None and not text_task.done())
 
     def note_gate(stream):
         """Count consecutive local-gate failures and speak the matching prompt after a run of them.
@@ -1647,7 +1648,6 @@ async def live_voice(websocket: WebSocket) -> None:
                         await connection.send(await audio_queue.get())
 
                 async def receive():
-                    nonlocal user_turn_open
                     async for raw_event in connection:
                         event = json.loads(raw_event)
                         if event.get("type") == "Connected":
@@ -1662,7 +1662,7 @@ async def live_voice(websocket: WebSocket) -> None:
                                 f"voice-{connection_id}-{event.get('turn_index', 0)}"
                             )
                             if name == "StartOfTurn":
-                                user_turn_open = True
+                                session.user_turn_open = True
                                 await interrupt()
                             if name in {"StartOfTurn", "Update"} and text:
                                 await send(
@@ -1675,7 +1675,7 @@ async def live_voice(websocket: WebSocket) -> None:
                                     }
                                 )
                             elif name == "EndOfTurn":
-                                user_turn_open = False
+                                session.user_turn_open = False
                                 if text.strip():
                                     await submit(text[:8000], turn_id)
 
@@ -1705,6 +1705,8 @@ async def live_voice(websocket: WebSocket) -> None:
             )
         finally:
             voice_on = False
+            # A turn cut off by stopping voice or a disconnect must not keep guidance muted.
+            session.user_turn_open = False
             with contextlib.suppress(Exception):
                 await send({"type": "voice_state", "enabled": False})
 
@@ -1828,9 +1830,10 @@ async def live_voice(websocket: WebSocket) -> None:
             )
             success = bool(result.get("pinned"))
             if success and session.library_sweep:
+                # Only frames with books are worth a slow Depth Pro run or a "that" reference.
                 if any(candidate.frame_id in book.get("frame_ids", []) for book in session.book_inventory):
                     detection_frames.append((candidate.frame_id, time.monotonic()))
-                schedule_measure(candidate.frame_id, candidate.data)
+                    schedule_measure(candidate.frame_id, candidate.data)
                 schedule_catalogue()
             if success:
                 await send({"type": "state", "state": _current_ui_state(session)})

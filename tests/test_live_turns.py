@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 import unittest
 from types import SimpleNamespace as NS
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from live_demo import server as s
 
 
@@ -37,7 +37,7 @@ def title_prompt(signals):
 
 
 class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
-    async def drive(self, receive, *, workflow=None, reply=None, frame_check=None, prompt=None):
+    async def drive(self, receive, *, workflow=None, reply=None, frame_check=None, prompt=None, depth=None):
         """Exercise live transport with isolated evidence storage.
 
         Args:
@@ -46,6 +46,7 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             reply: Optional conversation implementation.
             frame_check: Optional D1 decision double; by default every check fails.
             prompt: Optional D6 decision double; by default it asks for missing titles only.
+            depth: Optional Depth Pro double; by default depth is unavailable.
 
         Returns:
             The session and emitted transport messages.
@@ -68,7 +69,7 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             async def receive_text(self): return json.dumps(await receive(session, sent))
         with patch.object(s, 'check_frame', side_effect=frame_check or unavailable_check), \
              patch.object(s, 'choose_prompt', side_effect=prompt or title_prompt), \
-             patch.object(s, 'estimate_depth', side_effect=s.DepthUnavailable('test')), \
+             patch.object(s, 'estimate_depth', depth or Mock(side_effect=s.DepthUnavailable('test'))), \
              patch.object(s, 'resolve_book'), \
              patch.dict('os.environ', {'DREX_API_KEY': ''}), \
              patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name)), \
@@ -278,3 +279,53 @@ class CorrectionReplyTests(unittest.IsolatedAsyncioTestCase):
 
         seen = await self.sweep_turn(classify_intent=broken)
         self.assertEqual(len(seen), 1)
+
+
+class VoiceTurnStateTests(unittest.IsolatedAsyncioTestCase):
+    """An unfinished spoken turn must not mute guidance after voice stops."""
+
+    async def test_stopping_voice_mid_turn_clears_user_turn(self):
+        """Reset the open-turn flag when voice stops before EndOfTurn arrives."""
+        events = asyncio.Queue()
+        events.put_nowait(json.dumps({'type': 'Connected'}))
+
+        class Connection:
+            """Deepgram stand-in that starts a turn and never ends it."""
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            def __aiter__(self): return self
+            async def __anext__(self): return await events.get()
+            async def send(self, data):
+                events.put_nowait(json.dumps({'type': 'TurnInfo', 'event': 'StartOfTurn', 'turn_index': 0,
+                                              'transcript': 'skip'}))
+
+        count = 0
+
+        async def receive(session, sent):
+            """Start voice, open a turn, then stop voice mid-turn.
+
+            Args:
+                session: Live session.
+                sent: Emitted messages.
+
+            Returns:
+                Next simulated browser message.
+            """
+            nonlocal count
+            count += 1
+            if count == 1:
+                return {'type': 'voice_state', 'enabled': True}
+            if count == 2:
+                while not any(m['type'] == 'voice_state' and m['enabled'] for m in sent):
+                    await asyncio.sleep(.001)
+                return {'type': 'audio', 'data': 'AAA='}
+            if count == 3:
+                while not session.user_turn_open:
+                    await asyncio.sleep(.001)
+                return {'type': 'voice_state', 'enabled': False}
+            await asyncio.sleep(0.05)
+            return {'type': 'close'}
+
+        with patch.object(s.speech, 'enabled', return_value=True), patch.object(s.speech, 'listen', return_value=Connection()):
+            session, _ = await LiveTurnTests.drive(self, receive)
+        self.assertFalse(session.user_turn_open)
