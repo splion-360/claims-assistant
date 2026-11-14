@@ -137,7 +137,7 @@ function setState(nextState) {
 
 function render() {
   // Frames may already be arriving from a paired phone, including after a reload.
-  if (sessionId) watchPhoneCamera();
+  if (sessionId && phoneViewOn) watchPhoneCamera();
   renderTranscript();
   renderNotes();
   renderPinboard();
@@ -321,19 +321,36 @@ function bookPrice(book) {
 // Pairing hands the camera to a phone while the conversation and inventory stay here.
 // The phone sends the camera; this is how the console shows what it sees.
 let phoneFrameTimer = null;
+let phoneViewOn = false;
 
 function watchPhoneCamera() {
-  if (phoneFrameTimer) return;
+  if (phoneFrameTimer || !phoneViewOn) return;
   const view = document.querySelector("#phoneView");
   const image = document.querySelector("#phoneFrame");
   phoneFrameTimer = window.setInterval(() => {
-    if (!sessionId) return;
+    if (!sessionId || !phoneViewOn) return;
     // A cache-busting query is what makes the browser fetch each new frame.
     const next = new Image();
     next.onload = () => { image.src = next.src; view.hidden = false; };
     next.onerror = () => { view.hidden = true; };
     next.src = `${API_ORIGIN}/api/sessions/${sessionId}/live-frame?t=${Date.now()}`;
   }, 400);
+}
+
+function setPhoneView(on) {
+  phoneViewOn = on;
+  const button = document.querySelector("#phoneViewButton");
+  button.classList.toggle("active", on);
+  button.setAttribute("aria-pressed", String(on));
+  button.querySelector(".round-label").textContent = on ? "Hide view" : "Phone view";
+  if (on) {
+    watchPhoneCamera();
+    return;
+  }
+  // Stop fetching frames as well as hiding them.
+  if (phoneFrameTimer) window.clearInterval(phoneFrameTimer);
+  phoneFrameTimer = null;
+  document.querySelector("#phoneView").hidden = true;
 }
 
 async function showPairingCode() {
@@ -345,7 +362,7 @@ async function showPairingCode() {
     const result = await api(`/api/sessions/${sessionId}/capture-code`);
     document.querySelector("#pairingDigits").textContent = result.code;
     panel.hidden = false;
-    watchPhoneCamera();
+    setPhoneView(true);
   } catch (error) {
     document.querySelector("#pairingDigits").textContent = error.message;
     panel.hidden = false;
@@ -807,6 +824,7 @@ micButton.addEventListener("click", async () => {
     if (epoch === generation) await voice?.start();
   } catch (error) { appendSystem(error.message); }
 });
+document.querySelector("#phoneViewButton").addEventListener("click", () => setPhoneView(!phoneViewOn));
 document.querySelector("#closePairing").addEventListener("click", () => {
   document.querySelector("#pairingCode").hidden = true;
 });

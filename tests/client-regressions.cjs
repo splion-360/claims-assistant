@@ -5,7 +5,7 @@ const src=fs.readFileSync(path.join(__dirname,'../live_demo/ar.js'),'utf8')
   +'\n'+fs.readFileSync(path.join(__dirname,'../live_demo/app.js'),'utf8').replace(/\ncreateSession\(true\);\s*$/,'\n');
 function env(){
  const elements=new Map(), sockets=[], sources=[], storage=new Map();let counter=0;
- const el=()=>({textContent:'',className:'',hidden:false,style:{},dataset:{},classList:{add(){},remove(){}},querySelector(){return el()},querySelectorAll(){return[]},addEventListener(){},focus(){},showModal(){},close(){},getTracks(){return[]}});
+ const el=()=>({textContent:'',className:'',hidden:false,style:{},dataset:{},classList:{add(){},remove(){},toggle(){}},setAttribute(){},getAttribute(){return null},querySelector(){return el()},querySelectorAll(){return[]},addEventListener(){},focus(){},showModal(){},close(){},getTracks(){return[]}});
  class WS{static OPEN=1;constructor(url){this.url=url;this.readyState=0;sockets.push(this);setImmediate(()=>{if(this.closed)return;this.readyState=1;this.onmessage?.({data:JSON.stringify({type:'ready',session_id:new URL(url).searchParams.get('session_id')})})})}send(x){this.sent??=[];this.sent.push(JSON.parse(x))}close(){this.closed=true;this.readyState=3;this.onclose?.()}}
  class Audio{constructor(){this.currentTime=10;this.destination={}}async resume(){}createBuffer(c,n,r){return {duration:n/r,getChannelData(){return new Float32Array(n)}}}createBufferSource(){const x={stopped:false,connect(){},start(at){this.startAt=at},stop(){this.stopped=true}};sources.push(x);return x}}
  const ctx=vm.createContext({console,crypto,document:{querySelector(k){if(!elements.has(k))elements.set(k,el());return elements.get(k)},addEventListener(){},visibilityState:'visible'},window:{location:{protocol:'http:',origin:'http://127.0.0.1:4188'},AudioContext:Audio,addEventListener(){},setInterval(){return 1},clearInterval(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},navigator:{},WebSocket:WS,AudioContext:Audio,fetch:async url=>({ok:true,json:async()=>url.endsWith('/health')?{camera:{frame_interval_ms:350,frame_width:800,ideal_width:960,ideal_height:540,jpeg_quality:0.65}}:url.endsWith('/capture-code')?{code:'123456',expires_in_s:600}:{session_id:'session-'+(++counter),has_api_key:true,state:{session_id:'session-'+counter,transcript:[],tool_activity:[]}}}),setTimeout,clearTimeout,atob:s=>Buffer.from(s,'base64').toString('binary'),btoa:s=>Buffer.from(s,'binary').toString('base64')});
@@ -158,6 +158,18 @@ test('asking for a pairing code opens the live sweep first',async()=>{
  assert.equal(e.sockets.length,1);
  assert.ok(e.run('document.querySelector("#pairingCode").hidden')===false);
  e.run('disconnectLive()');
+});
+test('the phone view has its own button and stops fetching when turned off',async()=>{
+ const e=env();
+ e.run('sessionId="s1"');
+ e.run('setPhoneView(true)');
+ assert.equal(e.run('phoneViewOn'),true);
+ assert.ok(e.run('Boolean(phoneFrameTimer)'));
+ e.run('setPhoneView(false)');
+ assert.equal(e.run('phoneViewOn'),false);
+ // Turning it off stops the polling, not just the picture.
+ assert.equal(e.run('phoneFrameTimer'),null);
+ assert.equal(e.run('document.querySelector("#phoneView").hidden'),true);
 });
 test('the pairing panel shows only the digits and can be closed',async()=>{
  const e=env();
