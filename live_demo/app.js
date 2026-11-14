@@ -87,7 +87,7 @@ const emptyState = {
   camera_notes: [],
   policy: null,
   handoff: {},
-  packet_markdown: "# Library sweep evidence\n\nNo evidence yet.",
+  packet_markdown: "# Sweep evidence\n\nNo evidence yet.",
 };
 
 function escapeHtml(value) {
@@ -556,7 +556,7 @@ async function createSession(resume = false) {
   setState(emptyState);
   selectedBookId = null;
   document.querySelector("#booksDialog").close();
-  pageDate.textContent = `Library sweep · ${new Date().toLocaleDateString([], { month: "short", day: "numeric" })}`;
+  pageDate.textContent = new Date().toLocaleDateString([], { month: "short", day: "numeric" });
   try {
     let payload;
     if (resume && previous) {
