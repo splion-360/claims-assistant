@@ -753,6 +753,7 @@ async function startCamera() {
       liveSocket.send(JSON.stringify({ type: "camera_state", enabled: true }));
       cameraButton.classList.add("active");
       cameraButton.querySelector(".round-label").textContent = "Stop camera";
+      await holdScreenAwake();
       setStatus("AR camera on, measuring with depth", "");
       return;
     } catch (error) {
@@ -779,6 +780,7 @@ async function startCamera() {
     cameraButton.classList.add("active");
     cameraButton.querySelector(".round-label").textContent = "Stop camera";
     frameTimer = window.setInterval(sendFrame, cameraConfig.frame_interval_ms);
+    await holdScreenAwake();
     setStatus("Camera on, agent can see", "");
   } catch (error) {
     const denied = error.name === "NotAllowedError" || /denied|permission/i.test(error.message);
@@ -787,8 +789,27 @@ async function startCamera() {
   } finally { cameraPending = false; }
 }
 
+let screenLock = null;
+
+// A sweep runs for minutes without a touch, so the phone would otherwise lock mid-capture.
+async function holdScreenAwake() {
+  if (screenLock || !navigator.wakeLock?.request) return;
+  try {
+    screenLock = await navigator.wakeLock.request("screen");
+    // The browser drops the lock when the tab is hidden; take it again on return.
+    screenLock.addEventListener("release", () => { screenLock = null; });
+  } catch { screenLock = null; }
+}
+
+function releaseScreen() {
+  const held = screenLock;
+  screenLock = null;
+  held?.release().catch(() => {});
+}
+
 function stopCamera() {
   const wasOn = Boolean(cameraStream);
+  releaseScreen();
   if (arSession) { const session = arSession; arSession = null; session.end().catch(() => {}); }
   if (frameTimer) window.clearInterval(frameTimer);
   frameTimer = null;
@@ -829,6 +850,9 @@ micButton.addEventListener("click", async () => {
 });
 cameraButton.addEventListener("click", () => (cameraStream ? stopCamera() : startCamera()));
 newIntakeButton.addEventListener("click", () => createSession(false));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && cameraStream) holdScreenAwake();
+});
 window.addEventListener("pagehide", disconnectLive);
 textForm.addEventListener("submit", (event) => {
   event.preventDefault();

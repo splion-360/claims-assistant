@@ -83,6 +83,29 @@ adb reverse tcp:4177 tcp:4177
 # then open http://localhost:4177 in Chrome on the phone
 ```
 
+`adb reverse` is what makes the phone work at all, and not only for WebXR. The
+backend answers requests from `127.0.0.1` and `localhost` only: CORS rejects any
+other origin and the live WebSocket refuses any other client address. Forwarding
+the port makes the phone's `localhost` the laptop's, which satisfies the secure
+context, the origin check and the socket check together. A phone reaching the
+laptop over Wi-Fi at `http://192.168.x.x:4177` is refused on all three counts,
+and would get no camera or microphone permission without TLS in any case.
+
+The AR depth path does not depend on `measurement.enabled`. A phone in an AR
+session sends its depth grid with every frame, and those books are measured from
+it immediately. `measurement.enabled` controls only the Depth Pro fallback used
+for frames that arrive without a depth grid, such as a desktop browser or an
+Android device whose Chrome lacks `depth-sensing`. Turn it on to measure those
+too, at the cost of loading Depth Pro.
+
+Capture settings are worth lowering for a phone on a slower link.
+`capture.browser` holds `frame_width`, `jpeg_quality` and `frame_interval_ms`;
+at their defaults a sweep pushes roughly 6 Mbit/s, which is free over USB.
+
+While the camera is on the page holds a screen wake lock, so the phone does not
+lock partway through a sweep, and takes it back when the tab becomes visible
+again. A browser without the Wake Lock API still sweeps normally.
+
 ## Pricing locale
 
 `pricing.markets` maps a country code to its currency and the price providers
