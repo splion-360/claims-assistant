@@ -23,8 +23,20 @@ def unavailable_check(jpeg):
     raise DrexError('Could not reach Drex.')
 
 
+def title_prompt(signals):
+    """Choose read_title whenever a visible book lacks a title, like the old fixed rule.
+
+    Args:
+        signals: D6 guidance signals.
+
+    Returns:
+        A guidance label.
+    """
+    return 'read_title' if signals.missing_title_books else 'stay_quiet'
+
+
 class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
-    async def drive(self, receive, *, workflow=None, reply=None, frame_check=None):
+    async def drive(self, receive, *, workflow=None, reply=None, frame_check=None, prompt=None):
         """Exercise live transport with isolated evidence storage.
 
         Args:
@@ -32,6 +44,7 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             workflow: Optional background workflow implementation.
             reply: Optional conversation implementation.
             frame_check: Optional D1 decision double; by default every check fails.
+            prompt: Optional D6 decision double; by default it asks for missing titles only.
 
         Returns:
             The session and emitted transport messages.
@@ -53,6 +66,8 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             async def send_json(self, payload): sent.append(payload)
             async def receive_text(self): return json.dumps(await receive(session, sent))
         with patch.object(s, 'check_frame', side_effect=frame_check or unavailable_check), \
+             patch.object(s, 'choose_prompt', side_effect=prompt or title_prompt), \
+             patch.dict('os.environ', {'DREX_API_KEY': ''}), \
              patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name)), \
              patch.object(s, '_has_api_key', return_value=True), \
              patch.object(s, 'run_claim_workflow', side_effect=workflow or AsyncMock(return_value=s.build_initial_workflow_state())), \

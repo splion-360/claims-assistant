@@ -96,6 +96,8 @@ from live_demo.camera_filter import CameraCandidate
 from live_demo.camera_quality import log_scores
 from live_demo.camera_quality import logger as quality_logger
 from live_demo.frame_checker import FrameChecker
+from live_demo.guidance_decision import (QUALITY_PROMPTS, GuidanceSignals, QualityPromptLimiter,
+                                         choose_prompt, edge_cut_count, should_speak)
 from library_claim.decisions.frame_check import check_frame, is_book_candidate, save_frame_check
 from live_demo.camera_tracking import CameraTracking
 from provider import (
@@ -1082,6 +1084,14 @@ async def live_voice(websocket: WebSocket) -> None:
     # One D1 scheduler per camera activation, so a stale activation cannot admit frames.
     frame_checker = FrameChecker(check_frame)
     drex_error_reported = False
+    # D6 state: recent Drex issues, local-gate failures and when prompts were last spoken.
+    guidance_limiter = QualityPromptLimiter()
+    recent_issues = deque(maxlen=5)
+    gate_streak = 0
+    guidance_task = None
+    user_turn_open = False
+    last_prompt, last_prompt_at = None, None
+    last_capture_frame_id = None
     voice_on = False
     spoken_turn_id = None
     audio_queue = asyncio.Queue(maxsize=25)
@@ -1138,6 +1148,7 @@ async def live_voice(websocket: WebSocket) -> None:
                 and session.camera_enabled
                 and session.camera_mode_revision == revision
             ):
+                note_gate(stream)
                 pending = stream.pending_check
                 if pending is not None:
                     checker = frame_checker
@@ -1151,6 +1162,77 @@ async def live_voice(websocket: WebSocket) -> None:
             raise
         except Exception as error:
             quality_logger.warning("camera_tracking failed=%s", type(error).__name__)
+
+    def user_speaking():
+        """Report whether the user is mid-turn or awaiting a reply."""
+        return user_turn_open or (text_task is not None and not text_task.done())
+
+    def note_gate(stream):
+        """Count consecutive local-gate failures and ask the user to slow down after a run of them.
+
+        Args:
+            stream: Tracker that just assessed a frame.
+        """
+        nonlocal gate_streak
+        if stream.gate_failure is not None:
+            gate_streak += 1
+        elif stream.pending_check is not None:
+            gate_streak = 0
+        if gate_streak >= CONFIG.drex.gate_failure_streak:
+            gate_streak = 0
+            track(speak_quality("slow_down"))
+
+    async def speak_quality(label):
+        """Speak a capture-quality prompt when the limits and the speaking rule allow.
+
+        Args:
+            label: Key of QUALITY_PROMPTS.
+        """
+        nonlocal last_prompt, last_prompt_at
+        now = time.monotonic()
+        if not (session.library_sweep and session.sweep_phase == "Sweeping"):
+            return
+        if not should_speak(user_speaking=user_speaking(), agent_speaking=spoken_turn_id is not None):
+            return
+        if not guidance_limiter.allow(label, now):
+            return
+        guidance_limiter.record(label, now)
+        last_prompt, last_prompt_at = label, now
+        await guide(QUALITY_PROMPTS[label])
+
+    def trigger_guidance():
+        """Ask Drex for one guidance decision unless one is already being made."""
+        nonlocal guidance_task
+        if guidance_task is None or guidance_task.done():
+            guidance_task = track(run_guidance())
+
+    async def run_guidance():
+        """Build D6 signals, ask Drex, and act on the chosen prompt."""
+        nonlocal last_prompt, last_prompt_at
+        if not (session.library_sweep and session.sweep_phase == "Sweeping"):
+            return
+        if not should_speak(user_speaking=user_speaking(), agent_speaking=spoken_turn_id is not None):
+            return
+        now = time.monotonic()
+        visible = [book for book in session.book_inventory if last_capture_frame_id in book.get("frame_ids", [])]
+        signals = GuidanceSignals(
+            recent_issues=list(recent_issues), gate_failure_streak=gate_streak,
+            missing_title_books=sum(needs_capture(book) for book in visible),
+            edge_cut_books=edge_cut_count(session.book_inventory), last_prompt=last_prompt,
+            seconds_since_prompt=None if last_prompt_at is None else round(now - last_prompt_at, 1),
+            phase=session.sweep_phase)
+        label = await asyncio.to_thread(choose_prompt, signals)
+        # The situation may have changed while Drex was deciding.
+        if session.sweep_phase != "Sweeping" or not should_speak(
+                user_speaking=user_speaking(), agent_speaking=spoken_turn_id is not None):
+            return
+        if label == "read_title":
+            book = session.guidance_policy.choose(session.book_inventory, time.monotonic(), last_capture_frame_id)
+            if book:
+                last_prompt, last_prompt_at = label, time.monotonic()
+                await request_capture(book)
+        elif label in QUALITY_PROMPTS:
+            await speak_quality(label)
 
     def dispatch(stream, revision):
         """Start spine reading for the filter's admitted or retried candidate, if any.
@@ -1194,6 +1276,9 @@ async def live_voice(websocket: WebSocket) -> None:
                     await send({"type": "error", "message": "Drex decisions unavailable; check credit."})
                 return
             stream.latest_check, stream.latest_check_at = check, time.monotonic()
+            if check.issue not in ("none", "no_books"):
+                recent_issues.append((check.issue, round(time.monotonic(), 1)))
+                trigger_guidance()
             if is_book_candidate(check) and not pending.saved:
                 await asyncio.to_thread(stream.save_book_candidate, pending)
                 pending = dataclasses.replace(pending, saved=True)
@@ -1380,6 +1465,7 @@ async def live_voice(websocket: WebSocket) -> None:
                         await connection.send(await audio_queue.get())
 
                 async def receive():
+                    nonlocal user_turn_open
                     async for raw_event in connection:
                         event = json.loads(raw_event)
                         if event.get("type") == "Connected":
@@ -1394,6 +1480,7 @@ async def live_voice(websocket: WebSocket) -> None:
                                 f"voice-{connection_id}-{event.get('turn_index', 0)}"
                             )
                             if name == "StartOfTurn":
+                                user_turn_open = True
                                 await interrupt()
                             if name in {"StartOfTurn", "Update"} and text:
                                 await send(
@@ -1405,8 +1492,10 @@ async def live_voice(websocket: WebSocket) -> None:
                                         "final": False,
                                     }
                                 )
-                            elif name == "EndOfTurn" and text.strip():
-                                await submit(text[:8000], turn_id)
+                            elif name == "EndOfTurn":
+                                user_turn_open = False
+                                if text.strip():
+                                    await submit(text[:8000], turn_id)
 
                 pair = [asyncio.create_task(upload()), asyncio.create_task(receive())]
                 try:
@@ -1543,6 +1632,7 @@ async def live_voice(websocket: WebSocket) -> None:
             candidate: Immutable frame admitted by the local filter.
             gate: Filter belonging to the candidate's camera activation.
         """
+        nonlocal last_capture_frame_id
         success = False
         try:
             async with session.capture_lock:
@@ -1567,11 +1657,12 @@ async def live_voice(websocket: WebSocket) -> None:
                         await finish_capture(resolved)
                     else:
                         tracking_stream.requested_capture = True
-                elif (session.library_sweep and session.sweep_phase == "Sweeping"
-                      and (text_task is None or text_task.done()) and spoken_turn_id is None):
-                    book = session.guidance_policy.choose(session.book_inventory, time.monotonic(), candidate.frame_id)
-                    if book:
-                        await request_capture(book)
+                elif session.library_sweep and session.sweep_phase == "Sweeping":
+                    last_capture_frame_id = candidate.frame_id
+                    visible = [book for book in session.book_inventory if candidate.frame_id in book.get("frame_ids", [])]
+                    # Ask Drex only when this frame left a gap a prompt could close.
+                    if any(needs_capture(book) for book in visible) or edge_cut_count(session.book_inventory):
+                        trigger_guidance()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
