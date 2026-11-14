@@ -148,6 +148,8 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
         material = next((row.material for row in reversed(rows) if row.material), item.material)
         reasons = [reason for row in rows for reason in row.review_reasons]
         result.append({
+            # An object needs review when a sighting flagged it or nothing described it.
+            'needs_review': bool(reasons) or not description,
             'id': item.id, 'category': item.category, 'description': description,
             'material': material, 'brand_model': brand,
             'needs_appraisal': item.needs_appraisal and not item.stated_print,

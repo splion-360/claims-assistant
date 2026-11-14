@@ -865,6 +865,10 @@ micButton.addEventListener("click", async () => {
     if (epoch === generation) await voice?.start();
   } catch (error) { appendSystem(error.message); }
 });
+document.querySelector("#inventoryButton").addEventListener("click", () => {
+  // The tables read the sweep by id, so they survive a reload of this page.
+  window.open(sessionId ? `/inventory?session=${encodeURIComponent(sessionId)}` : "/inventory", "_blank", "noopener");
+});
 document.querySelector("#phoneButton").addEventListener("click", showPairingCode);
 cameraButton.addEventListener("click", () => (cameraStream ? stopCamera() : startCamera()));
 newIntakeButton.addEventListener("click", () => createSession(false));

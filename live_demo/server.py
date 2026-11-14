@@ -1249,6 +1249,16 @@ def capture_code(session_id: str, request: Request) -> dict:
     return {"code": capture_code_for(session), "expires_in_s": CAPTURE_CODE_TTL}
 
 
+@app.get("/inventory")
+def inventory_page() -> FileResponse:
+    return FileResponse(DEMO_DIR / "inventory.html")
+
+
+@app.get("/inventory.js")
+def inventory_script() -> FileResponse:
+    return FileResponse(DEMO_DIR / "inventory.js", media_type="text/javascript")
+
+
 @app.get("/capture")
 def capture_page() -> FileResponse:
     return FileResponse(DEMO_DIR / "capture.html")

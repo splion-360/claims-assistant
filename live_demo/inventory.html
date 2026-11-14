@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sweep inventory</title>
+<style>
+  :root { --ink: #23201b; --muted: #6f6a61; --rule: #e0dbd0; --paper: #faf7f0; --accent: #2f5d3a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+         font: 15px/1.5 ui-sans-serif, system-ui, sans-serif; padding: 28px 24px 56px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; margin-bottom: 4px; }
+  h1 { font-size: 1.35rem; margin: 0; }
+  a.back { color: var(--accent); font-size: .9rem; }
+  .meta { color: var(--muted); font-size: .9rem; margin: 0 0 22px; }
+  h2 { font-size: 1.05rem; margin: 30px 0 10px; display: flex; align-items: baseline; gap: 10px; }
+  h2 .count { font-weight: 400; color: var(--muted); font-size: .85rem; }
+  .scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; background: #fff; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { background: #f2efe7; font-weight: 600; white-space: nowrap; position: sticky; top: 0; }
+  tr:last-child td { border-bottom: 0; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .unknown { color: #a39d93; font-style: italic; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px;
+         background: #ece8de; color: #4a453d; white-space: nowrap; }
+  .tag.review { background: #f6e5c8; color: #7a5312; }
+  .tag.appraisal { background: #e6dcf2; color: #4b3570; }
+  .tag.ok { background: #dfeadf; color: #2f5d3a; }
+  .price { color: var(--accent); white-space: nowrap; }
+  .reasons { color: var(--muted); font-size: 12px; }
+  .empty { padding: 18px; color: var(--muted); }
+  @media (max-width: 700px) { body { padding: 20px 14px 48px; } th, td { padding: 8px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sweep inventory</h1>
+  <a class="back" href="/">Back to sweep</a>
+</header>
+<p class="meta" id="meta">Loading…</p>
+<h2>Books <span class="count" id="bookCount"></span></h2>
+<div class="scroll"><table>
+  <thead><tr><th>Status</th><th>Title</th><th>Author</th><th>ISBN</th><th>Height</th>
+    <th>Thickness</th><th>Replacement</th><th>Sightings</th><th>Review</th></tr></thead>
+  <tbody id="books"></tbody>
+</table></div>
+<h2>Non-book contents <span class="count" id="itemCount"></span></h2>
+<div class="scroll"><table>
+  <thead><tr><th>Status</th><th>Category</th><th>Description</th><th>Material</th>
+    <th>Brand / model</th><th>Replacement</th><th>Sightings</th><th>Review</th></tr></thead>
+  <tbody id="items"></tbody>
+</table></div>
+<script src="/inventory.js"></script>
+</body>
+</html>
