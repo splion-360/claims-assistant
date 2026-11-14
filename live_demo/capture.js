@@ -55,7 +55,7 @@ function pair() {
     pairButton.disabled = false;
     pairingPanel.hidden = false;
     cameraButton.hidden = true;
-    setStatus("Disconnected. Check the code is still shown on the computer, then pair again.", true);
+    setStatus("Not paired. Open the sweep on the computer, press Use phone, and enter the code it shows.", true);
   };
   socket.onerror = () => setStatus("Could not reach the sweep. Is the computer still running it?", true);
 }

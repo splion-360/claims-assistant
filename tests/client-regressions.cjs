@@ -149,6 +149,14 @@ test('a book with no valuation yet shows no price line',()=>{
  e.run('state={...emptyState,library_sweep:true};state.book_inventory=[{id:"a",title:"PENDING",needs_review:false,frame_ids:["f1"],observation_count:1}];bookTab="identified";renderBookInventory()');
  assert.ok(!e.run('document.querySelector("#bookInventory").innerHTML').includes('No price source'));
 });
+test('asking for a pairing code opens the live sweep first',async()=>{
+ const e=env();
+ await e.run('showPairingCode()');
+ // Without a live socket the server has nowhere to put the phone's frames.
+ assert.equal(e.sockets.length,1);
+ assert.ok(e.run('document.querySelector("#pairingCode").hidden')===false);
+ e.run('disconnectLive()');
+});
 test('comparison shows both readings and collapses capture history',()=>{
  const e=env();e.run('state.book_inventory=[{id:"a",title:"THE GOOD PEOPLE",candidates:["b"],frame_ids:["f1"]},{id:"b",title:"OD PEOPLE",frame_ids:["f2"]}];selectedBookId="a";renderBookDetail()');
  const html=e.run('document.querySelector("#bookDetail").innerHTML');

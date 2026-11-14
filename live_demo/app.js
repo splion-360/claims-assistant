@@ -323,6 +323,8 @@ async function showPairingCode() {
   const panel = document.querySelector("#pairingCode");
   if (!sessionId) return;
   try {
+    // A phone can only join a sweep that is already live, so open the socket first.
+    await connectLive();
     const result = await api(`/api/sessions/${sessionId}/capture-code`);
     panel.innerHTML = `On the phone open <code>${escapeHtml(window.location.origin)}/capture</code> and enter<strong>${escapeHtml(result.code)}</strong>The camera moves to the phone; talking and the inventory stay here.`;
     panel.hidden = false;
