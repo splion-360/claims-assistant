@@ -2,12 +2,38 @@
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlencode
 
 import httpx
 from websockets.asyncio.client import connect
 
 from library_claim.config import CONFIG
+
+
+def speakable(text: str) -> str:
+    """Turn model output into plain words, so markdown symbols are never read aloud or shown.
+
+    Args:
+        text: Reply or guidance text that may contain markdown.
+
+    Returns:
+        The same words without emphasis, headings, code marks, link targets or list bullets.
+    """
+    text = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)          # [label](url) -> label
+    text = re.sub(r'(\*\*|__|\*|_|`)(\S(?:.*?\S)?)\1', r'\2', text)  # **x**, *x*, _x_, `x` -> x
+    lines = []
+    for line in text.splitlines():
+        # Headings and list bullets lose their markers; each becomes its own sentence.
+        line = re.sub(r'^\s*(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)', '', line).strip()
+        if line:
+            lines.append(line)
+    text = ''
+    for line in lines:
+        text += line if not text else (' ' if text[-1] in '.!?:;,' else '. ') + line
+    # Any stray symbol left over would be spoken as a word, e.g. "star".
+    text = re.sub(r'[*#`]+', ' ', text)
+    return re.sub(r'\s{2,}', ' ', text).strip()
 
 
 class SpeechError(RuntimeError):

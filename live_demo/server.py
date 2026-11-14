@@ -1559,6 +1559,8 @@ async def live_voice(websocket: WebSocket) -> None:
                 reply = await complete(
                     messages, max_tokens=CONFIG.inference.conversation_max_tokens
                 )
+                # Replies are spoken: markdown symbols would be read aloud as words like "star".
+                reply = speech.speakable(reply)
                 reported.detail = reply[:60]
             if epoch != text_epoch or session.deleted:
                 return
@@ -1816,6 +1818,7 @@ async def live_voice(websocket: WebSocket) -> None:
             instruction: Whether the text also becomes the on-screen capture instruction.
         """
         nonlocal spoken_turn_id
+        text = speech.speakable(text)
         if instruction:
             session.capture_instruction = text
         turn_id = uuid.uuid4().hex

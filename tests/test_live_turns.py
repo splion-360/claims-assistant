@@ -398,3 +398,33 @@ class ReadLimitTests(unittest.IsolatedAsyncioTestCase):
         result = await s._pin_evidence_photo(session, {})
         self.assertFalse(result['pinned'])
         self.assertIn('limit', result['message'])
+
+
+class PlainReplyTests(unittest.IsolatedAsyncioTestCase):
+    """Replies are shown and spoken without markdown symbols."""
+
+    async def test_markdown_reply_is_cleaned_before_display_and_speech(self):
+        """A model reply with *emphasis* reaches the transcript as plain words."""
+        count = 0
+
+        async def receive(session, sent):
+            """Send one turn and close after the reply.
+
+            Args:
+                session: Live session.
+                sent: Emitted messages.
+
+            Returns:
+                Next simulated browser message.
+            """
+            nonlocal count
+            count += 1
+            if count == 1:
+                return {'type': 'text', 'text': 'Who wrote it?', 'id': 'md1'}
+            while not any(m['type'] == 'transcript' and m['speaker'] == 'Agent' for m in sent):
+                await asyncio.sleep(.001)
+            return {'type': 'close'}
+
+        reply = AsyncMock(return_value='The author for *Hawkins Pressure Cookery* is currently unknown.')
+        session, _ = await LiveTurnTests.drive(self, receive, reply=reply)
+        self.assertEqual(session.transcript[-1]['text'], 'The author for Hawkins Pressure Cookery is currently unknown.')

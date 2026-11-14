@@ -29,3 +29,22 @@ class SpeechTests(unittest.IsolatedAsyncioTestCase):
     def test_listen_requires_key(self):
         with patch.dict('os.environ',{'DEEPGRAM_API_KEY':''}):
             with self.assertRaises(speech.SpeechError):speech.listen()
+
+
+class SpeakableTextTests(unittest.TestCase):
+    """Markdown from a model never reaches the speech engine as symbols."""
+
+    def test_markdown_is_removed_but_words_are_kept(self):
+        """Emphasis, headings, code, links and bullets become plain words."""
+        from speech import speakable
+        cases = {
+            'The author for *Hawkins Pressure Cookery* is currently unknown.':
+                'The author for Hawkins Pressure Cookery is currently unknown.',
+            '## Found **The Good People** by _Hannah Kent_': 'Found The Good People by Hannah Kent',
+            'Try `steady` on [Dune](https://example.org) now.': 'Try steady on Dune now.',
+            '- first book\n- second book': 'first book. second book',
+            "It's a well-known 5 * 3 shelf": "It's a well-known 5 3 shelf",
+        }
+        for raw, spoken in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(speakable(raw), spoken)
