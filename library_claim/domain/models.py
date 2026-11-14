@@ -6,6 +6,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 
 Finite = Annotated[float, Field(allow_inf_nan=False)]
 Score = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+Centimetres = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 Identifier = Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,128}$')]
 
 
@@ -123,6 +124,10 @@ class BookObservation(Record):
     provenance: Literal['visual', 'user_statement', 'catalogue'] = 'visual'
     source_model: str | None = None
     unresolved_fields: list[str] = Field(default_factory=list)
+    # Metric size from a depth map; empty when no depth was available for the frame.
+    spine_height_cm: Centimetres | None = None
+    spine_thickness_cm: Centimetres | None = None
+    scale_method: Literal['webxr_depth', 'depth_pro'] | None = None
 
 
 class ReviewIssue(Record):
