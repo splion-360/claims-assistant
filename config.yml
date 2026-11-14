@@ -115,8 +115,12 @@ drex:
   # A frame whose main issue is a capture defect is read only if its title looks legible.
   legible_min: 0.5
   capture_defects: [blur, glare, dark]
-  same_book_min: 0.8
-  different_book_max: 0.2
+  # Measured on 24 labelled pairs (scripts/same_book_benchmark.py): Drex scores
+  # same-book pairs 0.33-0.80 and different-book pairs 0.0006-0.077, so the band
+  # sits in the gap between those two clusters. The former 0.8/0.2 discarded
+  # almost every correct same-book answer and split one book into many.
+  same_book_min: 0.25
+  different_book_max: 0.15
   catalogue_min: 0.7
   target_min: 0.6
   quality_prompt_cooldown_s: 8

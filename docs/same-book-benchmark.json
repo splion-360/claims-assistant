@@ -1,0 +1,383 @@
+{
+  "summary": {
+    "pairs": 24,
+    "drex": {
+      "answered": 24,
+      "accuracy": 0.542,
+      "same_book_recall": 0.083,
+      "different_book_recall": 1.0,
+      "median_ms": 474,
+      "model": "drex-max-v1.1"
+    },
+    "vision": {
+      "answered": 24,
+      "accuracy": 1.0,
+      "same_book_recall": 1.0,
+      "different_book_recall": 1.0,
+      "median_ms": 540,
+      "model": "Qwen/Qwen3.8-27B"
+    }
+  },
+  "rows": [
+    {
+      "truth": true,
+      "titles": [
+        "DID I SAY YOU COULD GO",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.6218344158480887,
+        "ms": 581.8281669635326
+      },
+      "vision": {
+        "p": 0.9,
+        "ms": 621.4915829477832
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "DID I SAY",
+        "DID I SAY"
+      ],
+      "drex": {
+        "p": 0.8024374960400167,
+        "ms": 485.6266250135377
+      },
+      "vision": {
+        "p": 0.95,
+        "ms": 528.0101669486612
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "DID I SAY YOU COULD GO",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.6218344158480887,
+        "ms": 516.8635420268402
+      },
+      "vision": {
+        "p": 0.95,
+        "ms": 854.8042080365121
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "THE GOOD PEOPLE",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.7951717976352723,
+        "ms": 469.1355420509353
+      },
+      "vision": {
+        "p": 0.95,
+        "ms": 517.4839589744806
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "DID I SAY YOU COULD GO",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.4437232878043227,
+        "ms": 610.3775830706581
+      },
+      "vision": {
+        "p": 0.85,
+        "ms": 511.05258299503475
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "DID I SAY YOU COULD GO",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.6733566522598267,
+        "ms": 535.9898339956999
+      },
+      "vision": {
+        "p": 0.95,
+        "ms": 797.2216659691185
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "DID I SAY YOU COULD GO",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.5338577628135681,
+        "ms": 397.6651669945568
+      },
+      "vision": {
+        "p": 0.85,
+        "ms": 494.5358750410378
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "THE GOOD PEOPLE",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.32664342681428354,
+        "ms": 538.472791085951
+      },
+      "vision": {
+        "p": 0.9,
+        "ms": 490.5990419210866
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "THE GOOD PEOPLE",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.6929254325352481,
+        "ms": 426.62770801689476
+      },
+      "vision": {
+        "p": 0.85,
+        "ms": 523.4460420906544
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "THE GOOD PEOPLE",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.5674064755439758,
+        "ms": 474.0255830110982
+      },
+      "vision": {
+        "p": 0.9,
+        "ms": 512.1017079800367
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "CRACKING THE CODING INTERVIE",
+        "CRACKING THE CODING INTERVIE"
+      ],
+      "drex": {
+        "p": 0.7024610042572021,
+        "ms": 398.57262501027435
+      },
+      "vision": {
+        "p": 0.85,
+        "ms": 720.9354169899598
+      }
+    },
+    {
+      "truth": true,
+      "titles": [
+        "DID I SAY YOU COULD GO",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.7210086584091187,
+        "ms": 507.16699997428805
+      },
+      "vision": {
+        "p": 0.9,
+        "ms": 673.8925829995424
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "CRACKING THE CODING INTERVIE",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.0009892531147941465,
+        "ms": 705.707999994047
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 532.8983749495819
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "THE GOOD PEOPLE",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.002037148960626665,
+        "ms": 378.07912507560104
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 522.1279999241233
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "CRACKING THE CODING INTERVIE",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.0026703101457842943,
+        "ms": 344.1595420008525
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 488.1117920158431
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "DID I SAY YOU COULD GO",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.0026703087525308416,
+        "ms": 471.17287502624094
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 541.9584999326617
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "CRACKING THE CODING INTERVIE",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.003916713514909792,
+        "ms": 447.44387501850724
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 614.1846249811351
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "CRACKING THE CODING INTERVIE",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.0020836290752932213,
+        "ms": 370.22704200353473
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 579.394458909519
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "CRACKING THE CODING INTERVIE",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.003126710095916532,
+        "ms": 428.7897909525782
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 622.6303750881925
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "DID I SAY YOU COULD GO",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.005872054236893987,
+        "ms": 560.3120418963954
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 673.0571249499917
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "CRACKING THE CODING INTERVIE",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.007027925447987497,
+        "ms": 380.2557080052793
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 531.7802500212565
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "DID I SAY YOU COULD GO",
+        "CRACKING THE CODING INTERVIE"
+      ],
+      "drex": {
+        "p": 0.07679522037506104,
+        "ms": 530.4016669979319
+      },
+      "vision": {
+        "p": 0.05,
+        "ms": 540.3707920340821
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "CRACKING THE CODING INTERVIE",
+        "THE GOOD PEOPLE"
+      ],
+      "drex": {
+        "p": 0.002131167221319311,
+        "ms": 507.62816704809666
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 543.0212920764461
+      }
+    },
+    {
+      "truth": false,
+      "titles": [
+        "THE GOOD PEOPLE",
+        "DID I SAY YOU COULD GO"
+      ],
+      "drex": {
+        "p": 0.0006018427936722663,
+        "ms": 436.933541088365
+      },
+      "vision": {
+        "p": 0.0,
+        "ms": 513.4609170490876
+      }
+    }
+  ]
+}
