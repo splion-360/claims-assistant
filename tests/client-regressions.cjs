@@ -77,6 +77,31 @@ test('main pinboard does not repeat book readings',()=>{
  assert.ok(!e.run('document.querySelector("#pinboard").innerHTML').includes('Secret title'));
 });
 
+test('repeat sightings of one book share a single pinboard card',()=>{
+ const e=env();
+ e.run('state={...emptyState,book_inventory:[{id:"a",title:"THE GOOD PEOPLE",frame_ids:["f1","f2"]}],evidence_photos:[{id:"p1",frame_id:"f1",caption:"First",data_url:"",captured_at:"t1"},{id:"p2",frame_id:"f2",caption:"Second",data_url:"",captured_at:"t2"}]};renderPinboard()');
+ assert.equal(e.run('pinboardGroups(state.evidence_photos).length'),1);
+ const html=e.run('document.querySelector("#pinboard").innerHTML');
+ assert.ok(html.includes('seen 2'));
+ // The newest sighting represents the group.
+ assert.ok(html.includes('Second')&&!html.includes('First'));
+});
+test('frames holding different books and bookless frames keep their own cards',()=>{
+ const e=env();
+ e.run('state={...emptyState,book_inventory:[{id:"a",frame_ids:["f1"]},{id:"b",frame_ids:["f2"]}],evidence_photos:[{id:"p1",frame_id:"f1",caption:"A",data_url:""},{id:"p2",frame_id:"f2",caption:"B",data_url:""}]};renderPinboard()');
+ assert.equal(e.run('pinboardGroups(state.evidence_photos).length'),2);
+ e.run('state.book_inventory=[];state.evidence_photos=[{id:"p1",frame_id:"f1",caption:"Wall",data_url:""},{id:"p2",frame_id:"f2",caption:"Wall",data_url:""}]');
+ assert.equal(e.run('pinboardGroups(state.evidence_photos).length'),2);
+});
+test('merging two book records collapses their pinboard cards',()=>{
+ const e=env();
+ e.run('state={...emptyState,book_inventory:[{id:"a",frame_ids:["f1"]},{id:"b",frame_ids:["f2"]}],evidence_photos:[{id:"p1",frame_id:"f1",caption:"A",data_url:""},{id:"p2",frame_id:"f2",caption:"B",data_url:""}]}');
+ assert.equal(e.run('pinboardGroups(state.evidence_photos).length'),2);
+ // After a same-book decision the surviving record claims both frames.
+ e.run('state.book_inventory=[{id:"a",frame_ids:["f1","f2"]}]');
+ assert.equal(e.run('pinboardGroups(state.evidence_photos).length'),1);
+});
+
 test('possible duplicates form a visual group without changing records',()=>{
  const e=env();e.run('state.book_inventory=[{id:"a",title:"THE GOOD PEOPLE",needs_review:true,candidates:["b"],frame_ids:["f1"]},{id:"b",title:"OD PEOPLE",needs_review:true,candidates:["a"],frame_ids:["f2"]}];renderBookInventory()');
  assert.equal(e.run('state.book_inventory.length'),2);

@@ -347,22 +347,42 @@ async function reviewBook(action) {
   finally { reviewBusy = false; renderBookDetail(); }
 }
 
+// One card per physical book: repeat sightings of a book update its card instead of adding one.
+function pinboardGroups(photos) {
+  const groups = new Map();
+  for (const photo of photos) {
+    // frame_ids is rebuilt from canonical identities, so a later merge regroups the cards too.
+    const books = (state.book_inventory || []).filter((book) => (book.frame_ids || []).includes(photo.frame_id));
+    // A frame carrying no book keeps its own card rather than pooling with other bookless frames.
+    const key = books.length ? books.map((book) => book.id).sort().join("+") : `frame:${photo.id}`;
+    const group = groups.get(key);
+    if (group) {
+      group.photo = photo;
+      group.count += 1;
+    } else {
+      groups.set(key, { key, photo, count: 1 });
+    }
+  }
+  return [...groups.values()].map((group) => ({ ...group, signature: `${group.key}:${group.count}:${group.photo.id}` }));
+}
+
 function renderPinboard() {
   renderBookInventory();
-  const photos = state.evidence_photos || [];
-  const cards = photos.map(
-    (photo, index) => `
-      <figure class="polaroid" style="--tilt: ${index % 2 ? 2 : -2.5}deg" data-key="${escapeHtml(photo.id)}">
+  const groups = pinboardGroups(state.evidence_photos || []);
+  const cards = groups.map(
+    ({ photo, count, signature }, index) => `
+      <figure class="polaroid" style="--tilt: ${index % 2 ? 2 : -2.5}deg" data-key="${escapeHtml(signature)}">
         <img src="${photo.data_url}" alt="Camera frame pinned as evidence" />
         <figcaption>${escapeHtml(photo.caption)}</figcaption>
 
         <span class="tag ${photo.confirmed ? "" : "unconfirmed"}">${photo.claimant_description ? `Claimant says: ${escapeHtml(photo.claimant_description)} · ` : ""}${photo.confirmed ? "Supported by this image" : "Visual evidence; details in Books"}</span>
-        <span class="tag">Seen on camera ${escapeHtml(photo.captured_at || "")} · ${escapeHtml(photo.evidence_type || "evidence")}</span>
+        <span class="tag">Seen on camera ${escapeHtml(photo.captured_at || "")} · ${escapeHtml(photo.evidence_type || "evidence")}${count > 1 ? ` · seen ${count}×` : ""}</span>
       </figure>`
   );
 
+  // The signature carries the newest frame and the count, so a repeat sighting redraws its card.
   const currentKeys = [...pinboardEl.querySelectorAll("[data-key]")].map((el) => el.dataset.key).join("|");
-  const nextKeys = photos.map((p) => p.id).join("|");
+  const nextKeys = groups.map((group) => group.signature).join("|");
   if (currentKeys !== nextKeys) pinboardEl.innerHTML = cards.join("");
 }
 
