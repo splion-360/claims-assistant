@@ -77,17 +77,26 @@ def same_book_probabilities(detection_crop: bytes, detection: BookDetection, can
     return [result.answers[f'same_{index + 1}'].noul for index in range(len(candidates))]
 
 
-def choose_same_book(probabilities: list[float]) -> int | None | Literal['unresolved']:
-    """Turn same-book probabilities into a decision.
+def choose_same_book(probabilities: list[float], strong: list[bool] | None = None) -> int | None | Literal['unresolved']:
+    """Turn same-book probabilities, and the strength of the code's own evidence, into a decision.
 
     Args:
         probabilities: One probability per candidate.
+        strong: Per candidate, whether the title matches exactly and geometry or spine
+            images verified the match.
 
     Returns:
-        The index of the single candidate at or above `same_book_min`; None when every
+        The single strong candidate unless Drex says it is a different book
+        (≤ `different_book_max`) or another candidate is a confident Drex match; otherwise
+        the index of the single candidate at or above `same_book_min`; None when every
         candidate is at or below `different_book_max` (a new book); otherwise 'unresolved'.
     """
     above = [index for index, value in enumerate(probabilities) if value >= CONFIG.drex.same_book_min]
+    strong_indexes = [index for index, value in enumerate(strong or []) if value]
+    # One owned copy per title: strong evidence for exactly one candidate merges unless Drex objects.
+    if (len(strong_indexes) == 1 and probabilities[strong_indexes[0]] > CONFIG.drex.different_book_max
+            and set(above) <= set(strong_indexes)):
+        return strong_indexes[0]
     if len(above) == 1:
         return above[0]
     if all(value <= CONFIG.drex.different_book_max for value in probabilities):

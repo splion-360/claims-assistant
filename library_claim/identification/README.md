@@ -55,7 +55,10 @@ features are cached within a single analysis call. No new model or training is u
 Up to three candidates that survive these vetoes go to Drex (D2) with their crops; it
 reuses an ID only when exactly one candidate reaches `drex.same_book_min` (0.8), creates
 a new book when all are at or below `drex.different_book_max` (0.2), and otherwise leaves
-the association unresolved. A Drex failure also leaves it unresolved. Two detections cannot
+the association unresolved. Strong code evidence lowers that bar: when exactly one candidate has
+an exact title match and passed geometry or spine-image verification, it is reused unless Drex
+says it is a different book (≤ 0.2) or another candidate is a confident Drex match; such merges
+are recorded as `evidence_with_drex`. A Drex failure leaves the association unresolved. Two detections cannot
 consume the same existing ID. Ambiguous competing matches remain unresolved. For co-visible exact-title copies,
 the strongest match reuses the existing ID and the additional detections create
 separate provisional copies; ties use detection order. This preserves observed

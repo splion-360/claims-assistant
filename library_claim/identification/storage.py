@@ -184,7 +184,10 @@ def association_choices(frame: Frame, analysis: BookFrameAnalysis, frames: dict,
                         raise ValueError('Candidate evidence cannot be decoded')
                     candidates.append(SameBookCandidate(book_id, crop_jpeg(previous, old.bbox), old.title, old.author,
                                                         old.view, scores[book_id], routes[book_id]))
-                decision = choose_same_book(decide_same(crop_jpeg(image, detection.bbox), detection, candidates))
+                # Candidates already passed geometry or spine-image verification; an exact title makes them strong.
+                strong = [text_relation(detection.title, item.title) == 'exact' for item in candidates]
+                probabilities = decide_same(crop_jpeg(image, detection.bbox), detection, candidates)
+                decision = choose_same_book(probabilities, strong)
             except (DrexError, ValueError, OSError, cv2.error):
                 decision = 'unresolved'
             if decision == 'unresolved':
@@ -192,7 +195,9 @@ def association_choices(frame: Frame, analysis: BookFrameAnalysis, frames: dict,
             elif decision is None:
                 method = 'new_provisional'
             else:
-                selected, method = ranked[decision], 'drex'
+                selected = ranked[decision]
+                # Record whether Drex confirmed alone or agreed with strong code evidence.
+                method = 'drex' if probabilities[decision] >= CONFIG.drex.same_book_min else 'evidence_with_drex'
         choices.append(selected)
         methods.append(method)
         selected_scores.append(scores.get(selected, 0))

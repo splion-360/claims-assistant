@@ -25,6 +25,13 @@ class SameBookDecisionTests(unittest.TestCase):
         self.assertEqual(choose_same_book([0.5]), 'unresolved')
         self.assertEqual(choose_same_book([0.85, 0.82]), 'unresolved')
 
+    def test_strong_evidence_merges_unless_drex_objects(self):
+        """One exact-title, image-verified candidate merges at Drex 0.76 (replayed sweep), not at ≤0.2."""
+        self.assertEqual(choose_same_book([0.76], strong=[True]), 0)
+        self.assertEqual(choose_same_book([0.76], strong=[False]), 'unresolved')
+        self.assertIsNone(choose_same_book([0.15], strong=[True]))
+        self.assertEqual(choose_same_book([0.76, 0.5], strong=[True, True]), 'unresolved')
+
     def test_request_sends_crops_and_one_question_per_candidate(self):
         """Send the detection crop first and ask one yes/no per candidate."""
         def handler(request):
@@ -83,6 +90,22 @@ class DrexAssociationTests(unittest.TestCase):
         self.assertEqual(self.methods()[-1], 'drex')
         with Repository(self.store.database) as repo:
             self.assertEqual(len(repo.list_for_sweep(Book, 'sweep')), 1)
+
+    def test_exact_title_with_verified_match_merges_at_borderline_drex(self):
+        """Reuse the book when the code evidence is strong and Drex does not object."""
+        self.save_frame('second', [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        self.persist('reference', [detection(title='Did I Say You Could Go')], lambda crop, det, cands: [0.76] * len(cands))
+        self.persist('second', [detection(title='Did I Say You Could Go')], lambda crop, det, cands: [0.76] * len(cands))
+        self.assertEqual(self.methods()[-1], 'evidence_with_drex')
+        with Repository(self.store.database) as repo:
+            self.assertEqual(len(repo.list_for_sweep(Book, 'sweep')), 1)
+
+    def test_partial_title_at_borderline_drex_stays_unresolved(self):
+        """Without an exact title, a borderline Drex answer still goes to review."""
+        self.save_frame('second', [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        self.persist('reference', [detection(title='Did I Say You Could Go')], lambda crop, det, cands: [0.76] * len(cands))
+        self.persist('second', [detection(title='Did I Say You')], lambda crop, det, cands: [0.76] * len(cands))
+        self.assertEqual(self.methods()[-1], 'unresolved')
 
     def test_drex_failure_leaves_unresolved(self):
         """Keep the association open when Drex cannot decide."""
