@@ -303,7 +303,6 @@ function renderBookInventory() {
       ${book.status === "unresolved" ? "<small>Association unresolved</small>" : ""}</span></button>`;
   }).join("") : `<p class="empty">${bookTab === "review" ? "No books need review yet." : "No identified books yet."}</p>`;
   renderBookDetail();
-  document.querySelector("#captureInstruction").textContent = state.capture_instruction || "Sweep slowly across the shelves.";
 }
 
 function bookPrice(book) {
