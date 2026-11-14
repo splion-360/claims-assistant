@@ -143,7 +143,7 @@ function render() {
   renderNeeded();
   renderTeam();
   renderStamp();
-  document.querySelector("#downloadPacket").href = sessionId ? `${API_ORIGIN}/api/sessions/${sessionId}/packet` : "#";
+  document.querySelector("#downloadPacket").href = sessionId ? `${API_ORIGIN}/api/sessions/${sessionId}/claim-packet` : "#";
 }
 
 function renderTranscript() {

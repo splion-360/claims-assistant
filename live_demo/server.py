@@ -88,6 +88,7 @@ from library_claim.identification.catalogue import resolve_book
 from library_claim.identification.corrections import apply_correction
 from library_claim.decisions.corrections import classify_intent, extract_stated_title, resolve_target, target_frame
 from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
+from library_claim.packet import packet_archive
 from library_claim.storage.depth import load_depth, parse_depth_payload
 from library_claim.storage.prune import prune_finished, prune_sweep
 from library_claim.storage.live_capture import LiveCaptureStore
@@ -918,6 +919,38 @@ async def delete_session(session_id: str, request: Request):
     session = owned_session(session_id, request.cookies.get("intake_owner"))
     await discard_session(session)
     return {"deleted": True}
+
+
+@app.get("/api/sessions/{session_id}/claim-packet")
+def download_claim_packet(session_id: str, request: Request):
+    """Return the sweep's claim packet, readable report and every frame they cite.
+
+    Args:
+        session_id: Sweep whose packet is requested.
+        request: Carrier of the ownership cookie.
+
+    Returns:
+        A zip holding claim_packet.json, report.html and the cited frames.
+
+    Raises:
+        HTTPException: The sweep is not owned by this caller or has no saved evidence.
+    """
+    owned_session(session_id, request.cookies.get("intake_owner"))
+    started = time.monotonic()
+    try:
+        archive = packet_archive(
+            CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR / "frames", session_id
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="No saved sweep evidence for this session.")
+    telemetry.emit(
+        "claim_packet", "done", f"packet built in {round((time.monotonic() - started) * 1000)} ms"
+    )
+    return Response(
+        archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="claim-packet.zip"'},
+    )
 
 
 @app.get("/api/sessions/{session_id}/packet")
