@@ -46,7 +46,7 @@ Everything else — models, thresholds, cadences — is in [`config.yml`](config
 
 ## Architecture
 
-![Pipeline: the phone and console feed a local quality gate, Drex admits or refuses each frame, the vision model reads only admitted frames, Drex decides the rest, and depth and prices feed the claim packet](docs/images/pipeline.png)
+![Claims Assistant architecture: live capture on the phone, Drex Max selecting frames and making every decision, the frontier model doing text extraction and conversation, and the evidence packet with its inventory, saved frames, dated price sources and unresolved items](docs/images/architecture.png)
 
 The vision model sits behind the gate: it is sent a frame only after Drex has admitted it, so
 it never receives a blurred shelf, a blank wall, or a book already recorded.
@@ -69,9 +69,7 @@ the conversation; it makes no decisions.
 
 Drex returns **calibrated probabilities, not labels**. Every threshold is therefore explicit
 configuration, and the band between two thresholds is recorded as `unresolved` rather than
-forced into a guess:
-
-![A Drex probability becomes a new copy, an unresolved line, or a merge](docs/images/band.png)
+forced into a guess.
 
 Because several questions about the same images travel in one request, one Drex call replaces a
 handful of prompts.
@@ -113,9 +111,11 @@ Reproduce:
 
 ## The claim packet
 
-![What a claim packet holds: sweep, room, books and items, with totals summed in code and a review queue naming every uncertain line](docs/images/packet.png)
+One `claim_packet.json` and one `report.html` per sweep: the sweep's own details, the room's
+dimensions and areas, a line per book, a line per object, totals summed in code from those
+lines, and a review queue naming every line the sweep is not confident in.
 
-Downloads as a zip holding `claim_packet.json`, `report.html`, and **every frame the packet
+It downloads as a zip holding `claim_packet.json`, `report.html`, and **every frame the packet
 cites**, so each `frame_ref` resolves without a running server.
 
 ---
