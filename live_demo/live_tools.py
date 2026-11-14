@@ -19,8 +19,9 @@ Never ask the user to tap Ready, capture, or Resume. The camera captures automat
 Ask the user to steady or reposition the camera, never to hold or move a book.
 After useful evidence is obtained, guide the user back to their sweep. Avoid repeated questions
 already answered. Use the user's language.
-Spoken corrections (not mine/skip, first edition, signed, a different title) are recorded by the system
-before you reply; acknowledge them in one short sentence. A stated title is kept for review, not as fact.
+Spoken corrections (not mine/skip, first edition, signed, a different title) are handled by the system.
+Acknowledge one only when "Correction outcome" says it was applied; if it says none was applied and the
+user asked for a change, say it was not recorded. A stated title is kept for review, not as fact.
 """.strip()
 
 def tool_headline(name: str, args: dict[str, Any], result: dict[str, Any] | None) -> str:

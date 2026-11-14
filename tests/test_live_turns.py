@@ -1,5 +1,6 @@
 """Text/camera transport stays responsive while inference is in flight."""
 import asyncio
+import contextlib
 import base64
 import json
 import tempfile
@@ -203,3 +204,77 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
         session,_=await self.drive(receive,workflow=workflow)
         self.assertEqual(session.transcript[-1]['text'],'What happened?')
         self.assertFalse(session.tasks)
+
+
+class CorrectionReplyTests(unittest.IsolatedAsyncioTestCase):
+    """The reply model hears the real correction outcome, and failures still get a reply."""
+
+    async def sweep_turn(self, **patches):
+        """Send one typed turn during a library sweep and return the reply model's messages.
+
+        Args:
+            **patches: Server attributes to replace for this turn.
+
+        Returns:
+            The messages passed to the reply model.
+        """
+        seen = []
+
+        async def reply(messages, **kwargs):
+            """Capture the reply request.
+
+            Args:
+                messages: Conversation messages.
+                **kwargs: Generation options.
+
+            Returns:
+                A fixed reply.
+            """
+            seen.append(messages)
+            return 'Okay.'
+
+        count = 0
+
+        async def receive(session, sent):
+            """Send one turn and close after the agent replies.
+
+            Args:
+                session: Live session.
+                sent: Emitted messages.
+
+            Returns:
+                Next simulated browser message.
+            """
+            nonlocal count
+            count += 1
+            if count == 1:
+                session.library_sweep = True
+                return {'type': 'text', 'text': "skip that shelf, those aren't mine", 'id': 'turn1'}
+            while not any(m['type'] == 'transcript' and m['speaker'] == 'Agent' for m in sent):
+                await asyncio.sleep(.001)
+            return {'type': 'close'}
+
+        with patch.multiple(s, **patches) if patches else contextlib.nullcontext():
+            await LiveTurnTests.drive(self, receive, reply=reply)
+        return seen
+
+    async def test_failed_decision_tells_model_nothing_was_recorded(self):
+        """With Drex unavailable, the reply context says no correction was applied."""
+        seen = await self.sweep_turn()
+        self.assertIn('No correction was applied this turn', seen[0][0]['content'])
+
+    async def test_unexpected_correction_error_still_replies(self):
+        """An unexpected failure in the correction path falls back to a normal reply."""
+        def broken(text):
+            """Fail unexpectedly.
+
+            Args:
+                text: Utterance.
+
+            Raises:
+                RuntimeError: Always.
+            """
+            raise RuntimeError('database locked')
+
+        seen = await self.sweep_turn(classify_intent=broken)
+        self.assertEqual(len(seen), 1)

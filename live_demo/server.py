@@ -1447,7 +1447,7 @@ async def live_voice(websocket: WebSocket) -> None:
         )
         await send({"type": "error", "message": message})
 
-    async def respond(epoch):
+    async def respond(epoch, correction=None):
         nonlocal busy, spoken_turn_id
         busy += 1
         try:
@@ -1460,7 +1460,9 @@ async def live_voice(websocket: WebSocket) -> None:
                     + "\nLatest background packet (may lag the current conversation): "
                     + json.dumps({"books": [{key: book.get(key) for key in ("id", "title", "author", "needs_review")} for book in session.book_inventory], "phase": session.sweep_phase, "instruction": session.capture_instruction} if session.library_sweep else workflow)
                     + "\nCamera observations: "
-                    + json.dumps(session.camera_notes),
+                    + json.dumps(session.camera_notes)
+                    # Tell the model what was actually recorded so it never confirms an unapplied correction.
+                    + ("\nCorrection outcome: " + correction if correction else ""),
                 }
             ]
             messages.extend(
@@ -1562,9 +1564,20 @@ async def live_voice(websocket: WebSocket) -> None:
             text: Final user utterance.
             epoch: Conversation epoch the reply belongs to.
         """
-        if session.library_sweep and await apply_spoken_correction(text) == "asked":
-            return
-        await respond(epoch)
+        outcome = None
+        if session.library_sweep:
+            try:
+                outcome = await apply_spoken_correction(text)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                # A failed correction must not cost the user their reply.
+                logger.error("correction failed: %s", type(error).__name__)
+                outcome = None
+            if outcome == "asked":
+                return
+            outcome = outcome or "No correction was applied this turn."
+        await respond(epoch, outcome)
 
     async def apply_spoken_correction(text):
         """Let Drex classify a correction and resolve its target, then record it.
@@ -1573,7 +1586,8 @@ async def live_voice(websocket: WebSocket) -> None:
             text: Final user utterance.
 
         Returns:
-            'applied', 'asked' when the agent asked which books were meant, or None for conversation.
+            A description of the applied correction, 'asked' when the agent asked which books
+            were meant, or None when nothing was applied.
         """
         intent = await asyncio.to_thread(classify_intent, text)
         if intent == "question_or_chat":
@@ -1598,7 +1612,7 @@ async def live_voice(websocket: WebSocket) -> None:
         await asyncio.to_thread(invalidate_capture_context, session)
         session.book_inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
         await send({"type": "state", "state": _current_ui_state(session)})
-        return "applied"
+        return f"Applied {intent} to {len(book_ids)} book(s)."
 
     async def listen_voice():
         nonlocal voice_on

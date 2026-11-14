@@ -99,8 +99,11 @@ def _post(client: httpx.Client, payload: dict, key: str) -> httpx.Response:
         if response.status_code not in RETRY_STATUSES or attempt:
             return response
         # Drex states how long to back off; default to one second when it does not.
-        delay_ms = response.headers.get('retry-after-ms')
-        time.sleep(float(delay_ms) / 1000 if delay_ms else 1.0)
+        try:
+            delay = float(response.headers.get('retry-after-ms', '')) / 1000
+        except ValueError:
+            delay = 1.0
+        time.sleep(min(max(delay, 0), 10))
     return response
 
 
@@ -141,8 +144,14 @@ def decide(questions: dict[str, dict], *, state: object, images: list[bytes] | N
         result = DrexResult(model=body['model'], answers=body['answers'], request_id=body.get('request_id'),
                             input_tokens=body.get('usage', {}).get('input_tokens', 0),
                             latency_ms=(time.monotonic() - started) * 1000)
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, AttributeError):
         raise DrexError('Drex returned an invalid response.', response.status_code) from None
+    # Every requested question must come back with a value of its own type.
+    for question_id, question in questions.items():
+        answer = result.answers.get(question_id)
+        value = None if answer is None else getattr(answer, question['type'], None)
+        if answer is None or answer.type != question['type'] or value is None:
+            raise DrexError('Drex returned an incomplete decision.', response.status_code)
     logger.info('Drex request_id=%s latency_ms=%.0f input_tokens=%d', result.request_id,
                 result.latency_ms, result.input_tokens)
     return result

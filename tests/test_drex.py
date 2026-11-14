@@ -97,3 +97,29 @@ class DrexClientTests(unittest.TestCase):
         with patch.dict(os.environ, {'DREX_API_KEY': ''}):
             with self.assertRaises(DrexError):
                 decide({'q': noul('?')}, state='x', client=client_for(lambda request: httpx.Response(200)))
+
+    def test_malformed_answers_raise_drex_error(self):
+        """Treat a 200 response with missing or mistyped answers as a failed decision."""
+        bad_bodies = [
+            {'model': 'm', 'answers': {}},
+            {'model': 'm', 'answers': {'q': {'type': 'noul', 'noul': None}}},
+            {'model': 'm', 'answers': {'q': {'type': 'choice', 'choice': 'x'}}},
+        ]
+        for body in bad_bodies:
+            with self.subTest(body=body):
+                with self.assertRaises(DrexError):
+                    decide({'q': noul('?')}, state='x', client=client_for(lambda request, body=body: httpx.Response(200, json=body)))
+
+    def test_unparseable_retry_after_still_retries(self):
+        """Fall back to a default wait when retry-after-ms is not a number."""
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            if len(calls) == 1:
+                return httpx.Response(429, headers={'retry-after-ms': 'soon'})
+            return httpx.Response(200, json=SMOKE_RESPONSE)
+
+        with patch('library_claim.decisions.drex.time.sleep'):
+            decide({'book_visible': noul('?')}, state='x', client=client_for(handler))
+        self.assertEqual(len(calls), 2)
