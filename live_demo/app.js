@@ -459,7 +459,7 @@ function renderNeeded() {
     items.push({ text: shortBlocker(blocker).replace(/\?$/, ""), cls: "blocker" });
   }
   for (const doc of state.documents || []) {
-    items.push({ text: `${doc.item} — ${doc.status || "unknown"}`, cls: doc.already_provided ? "done" : "" });
+    items.push({ text: `${doc.item}: ${doc.status || "unknown"}`, cls: doc.already_provided ? "done" : "" });
   }
   neededListEl.innerHTML = items.length
     ? items.map((item) => `<li class="${item.cls}"><span class="tick-box"></span><span>${escapeHtml(item.text)}</span></li>`).join("")
@@ -663,7 +663,7 @@ function connectLive() {
       stopCamera();
       voice?.stop(false);
       clearBusy();
-      setStatus("Disconnected — reconnect to continue", "warning");
+      setStatus("Disconnected. Reconnect to continue.", "warning");
     };
   });
   return connectionPromise;

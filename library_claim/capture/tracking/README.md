@@ -8,7 +8,7 @@ book IDs. Input is decoded uint8 BGR or grayscale; timestamps must increase.
 ## Association path
 
 1. Reduce the image to a maximum edge of 640 pixels and detect up to 250 corners.
-2. Follow corners with pyramidal Lucas–Kanade flow in both directions. Reject
+2. Follow corners with pyramidal Lucas-Kanade flow in both directions. Reject
    points with inconsistent forward/backward tracks or positions outside the image.
 3. Fit a planar mapping from the surviving correspondences using ordinary least
    squares and verify its error and spatial support. This path does not use RANSAC.

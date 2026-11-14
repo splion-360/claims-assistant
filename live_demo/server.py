@@ -493,7 +493,7 @@ def _ui_state(
     ]
     packet_markdown = packet["markdown"] + "\n## Captured evidence\n"
     for photo in session.evidence_photos:
-        packet_markdown += f"- [{photo['id']}](evidence/{photo['id']}.jpg): {photo['caption']} — {'confirmed' if photo['confirmed'] else 'unconfirmed'}; captured {photo['captured_at']}\n"
+        packet_markdown += f"- [{photo['id']}](evidence/{photo['id']}.jpg): {photo['caption']}: {'confirmed' if photo['confirmed'] else 'unconfirmed'}; captured {photo['captured_at']}\n"
     if not manifest:
         packet_markdown += "No evidence captured.\n"
     packet_markdown += "\nThis packet has not been submitted to an adjuster yet.\n"
@@ -2432,7 +2432,7 @@ async def live_voice(websocket: WebSocket) -> None:
                         or not text.strip()
                         or len(text) > 8000
                     ):
-                        raise ValueError("Text must contain 1–8000 characters")
+                        raise ValueError("Text must contain 1 to 8000 characters")
                     turn_id = message.get("id") or uuid.uuid4().hex
                     if not isinstance(turn_id, str) or len(turn_id) > 100:
                         raise ValueError("Invalid turn identifier")

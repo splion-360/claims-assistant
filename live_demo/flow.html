@@ -55,7 +55,7 @@
 <header>
   <h1>Library agent · live pipeline</h1>
   <span class="stat">Decision model calls <b id="drexCount">0</b></span>
-  <span class="stat">Decision avg <b id="drexAvg">–</b></span>
+  <span class="stat">Decision avg <b id="drexAvg">0</b></span>
   <span class="stat">Vision/language model calls <b id="modelCount">0</b></span>
   <span class="stat">Model fallbacks <b id="fallbackCount">0</b></span>
   <span id="status">Connecting…</span>
@@ -67,19 +67,19 @@
 const WHO = { decision: "Decision model", vision: "Vision model", language: "Language model", local: "Local",
               speech: "Speech model", web: "Catalogue", depth: "Depth model" };
 const STRIPS = [
-  { title: "1 · Capture — every camera frame", blocks: [
+  { title: "1 · Capture, every camera frame", blocks: [
     ["camera", "local", "Browser camera"], ["tracking", "local", "Tracking (SIFT / optical flow)"],
     ["gate", "local", "Local gate (sharpness, exposure)"], ["d1", "decision", "Book visible? What's wrong?"],
     ["save", "local", "Evidence store"]] },
-  { title: "2 · Identification — per frame with books", blocks: [
+  { title: "2 · Identification, per frame with books", blocks: [
     ["spine_reading", "vision", "Spine reading"], ["d2", "decision", "Same book as one seen before?"],
     ["inventory", "local", "Inventory update"], ["depth", "depth", "Spine measurement"],
     ["catalogue", "web", "Catalogue search"],
     ["d3", "decision", "Which catalogue entry matches?"]] },
-  { title: "3 · Voice — what the user says", blocks: [
+  { title: "3 · Voice, what the user says", blocks: [
     ["stt", "speech", "Speech to text"], ["d5", "decision", "What did the user mean?"],
     ["correction", "local", "Correction applied"], ["reply", "language", "Reply"], ["tts", "speech", "Speech out"]] },
-  { title: "4 · Guidance — when the agent speaks up", blocks: [
+  { title: "4 · Guidance, when the agent speaks up", blocks: [
     ["d6", "decision", "Speak now? Which prompt?"], ["guidance", "local", "Prompt chosen → Speech out"],
     ["announce", "local", "Book announced → Speech out"]] },
 ];
@@ -102,11 +102,11 @@ for (const strip of STRIPS) {
     card.innerHTML = `<span class="who" style="color: var(--${who})">${WHO[who]}</span><span class="name"></span>
       <span class="model"></span><span class="detail">idle</span><span class="meta"><span class="ms"></span><span class="count">0×</span></span>`;
     card.querySelector(".name").textContent = name;
-    card.title = `${WHO[who]} — ${name}`;
+    card.title = `${WHO[who]}: ${name}`;
     card.dataset.count = "0";
     row.appendChild(card);
     cards[id] = card;
-    LABELS[id] = who === "decision" ? `Decision model — ${name}` : name;
+    LABELS[id] = who === "decision" ? `Decision model: ${name}` : name;
   });
   root.appendChild(section);
 }
@@ -167,7 +167,7 @@ function log(event) {
   const ms = event.ms != null ? ` · ${event.ms} ms` : "";
   const model = event.model ? ` · ${event.model}` : "";
   line.innerHTML = `<span class="t">${time}</span> `;
-  line.append(`${LABELS[event.stage]} — ${event.phase}${event.detail ? ": " + event.detail : ""}${ms}${model}`);
+  line.append(`${LABELS[event.stage]}: ${event.phase}${event.detail ? ": " + event.detail : ""}${ms}${model}`);
   box.prepend(line);
   while (box.childElementCount > 80) box.lastElementChild.remove();
 }

@@ -141,10 +141,10 @@ tests/
 
 ```sh
 .venv/bin/python -m unittest discover -s tests   # 388 tests
-node tests/client-regressions.cjs                #  29 — sweep console
-node tests/inventory-regressions.cjs             #  13 — inventory tables
-node tests/capture-regressions.cjs               #   5 — phone capture
-node tests/voice-regressions.cjs                 #   5 — microphone and playback
+node tests/client-regressions.cjs                #  29, sweep console
+node tests/inventory-regressions.cjs             #  13, inventory tables
+node tests/capture-regressions.cjs               #   5, phone capture
+node tests/voice-regressions.cjs                 #   5, microphone and playback
 ```
 
 No test makes network calls; external services are stubbed with `httpx.MockTransport` or

@@ -89,7 +89,7 @@ class SpineMeasurementTests(unittest.TestCase):
         """A 96×54 grid on a 1280×720 frame samples the book, not the surrounding wall."""
         rows, cols = 54, 96
         grid = np.full((rows, cols), 3.0, np.float32)
-        # Cells whose centres fall on a spine at x 625–655 px, y 260–460 px.
+        # Cells whose centres fall on a spine at x 625-655 px, y 260-460 px.
         for row in range(rows):
             for col in range(cols):
                 x, y = (col + 0.5) * 1280 / cols, (row + 0.5) * 720 / rows

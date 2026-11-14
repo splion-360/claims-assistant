@@ -8,7 +8,7 @@ function escapeHtml(value) {
 }
 
 function cell(value) {
-  return value === null || value === undefined || value === "" ? '<span class="unknown">—</span>' : escapeHtml(value);
+  return value === null || value === undefined || value === "" ? '<span class="unknown">not recorded</span>' : escapeHtml(value);
 }
 
 function centimetres(value) {
@@ -60,7 +60,7 @@ function reasons(entry) {
 
 // A crop of the sighting, so a line can be judged against what the camera saw.
 function thumbnail(sessionId, kind, observationId, label) {
-  if (!observationId) return '<span class="unknown">—</span>';
+  if (!observationId) return '<span class="unknown">no crop</span>';
   const url = `${API_ORIGIN}/api/sessions/${encodeURIComponent(sessionId)}/${kind}/evidence/${encodeURIComponent(observationId)}`;
   return `<img src="${escapeHtml(url)}" alt="${escapeHtml(label)}" loading="lazy">`;
 }
