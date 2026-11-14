@@ -31,6 +31,22 @@ def detection(left=.2, right=.4, title=None):
     return BookDetection(bbox=Box(x_min=left, x_max=right, y_min=.2, y_max=.8), view='spine', title=title)
 
 
+def margin_decider(crop, detection, candidates):
+    """Stand in for Drex with the former score-margin rule, so association tests stay offline.
+
+    Args:
+        crop: Detection crop (unused).
+        detection: New detection (unused).
+        candidates: Surviving candidates ordered by score.
+
+    Returns:
+        A confident match for a clear winner, otherwise an ambiguous probability.
+    """
+    runner_up = candidates[1].score if len(candidates) > 1 else 0
+    clear = candidates[0].score - runner_up >= 0.15
+    return [0.95 if clear else 0.5] + [0.05] * (len(candidates) - 1)
+
+
 class BookObservationTests(unittest.TestCase):
     """Exercise real SQLite transactions and geometric copy association."""
 
@@ -38,6 +54,11 @@ class BookObservationTests(unittest.TestCase):
         """Create an isolated sweep with a real saved reference JPEG."""
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
+        # No association test may reach the real Drex service.
+        from unittest.mock import patch
+        guard = patch.dict('os.environ', {'DREX_API_KEY': ''})
+        guard.start()
+        self.addCleanup(guard.stop)
         self.store = LiveCaptureStore(Path(self.directory.name), 'sweep')
         _, encoded = cv2.imencode('.jpg', textured_view())
         self.jpeg = encoded.tobytes()
@@ -72,7 +93,7 @@ class BookObservationTests(unittest.TestCase):
         """
         return save_analysis(self.store.database, 'sweep', frame,
                              BookFrameAnalysis(books=books if books is not None else [detection()], complete=complete),
-                             jpeg or self.jpeg, 'test-model')
+                             jpeg or self.jpeg, 'test-model', decide_same=margin_decider)
 
     def test_unknown_book_and_region_quality_are_saved_with_source(self):
         """Preserve null identity fields and crop quality instead of guessing titles."""
@@ -168,7 +189,8 @@ class BookObservationTests(unittest.TestCase):
         self.assertEqual(len(result['inventory']), 1)
         with Repository(self.store.database) as repo:
             rows = repo.list_for_sweep(BookObservation, 'sweep')
-            self.assertEqual(rows[-1].association_method, 'appearance_and_compatible_readings')
+            # Crop matching made it a candidate; Drex made the identity decision.
+        self.assertEqual(rows[-1].association_method, 'drex')
 
     def test_similar_titles_and_different_crops_remain_unresolved(self):
         """Do not treat compatible titles as proof of identity or count uncertainty."""

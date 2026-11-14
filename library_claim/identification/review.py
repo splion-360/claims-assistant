@@ -66,7 +66,7 @@ def decide(repo: Repository, sweep_id: str, source: str, target: str, action: st
             (sweep_id, a, b, action, origin))
 
 
-def reconcile(repo: Repository, sweep_id: str, frame: Frame, image, database: Path) -> None:
+def reconcile(repo: Repository, sweep_id: str, frame: Frame, image, database: Path, decide_same=None) -> None:
     """Revisit earlier fragmented records using a newly analyzed frame.
 
     Args:
@@ -75,8 +75,11 @@ def reconcile(repo: Repository, sweep_id: str, frame: Frame, image, database: Pa
         frame: Newly analyzed source frame.
         image: Decoded image used for crop verification.
         database: SQLite path beside the evidence directory.
+        decide_same: D2 decision function; defaults to the Drex same-book decision.
     """
-    from .storage import association_choices
+    from .storage import association_choices, same_book_probabilities
+
+    decide_same = decide_same or same_book_probabilities
 
     observations = repo.list_for_sweep(BookObservation, sweep_id)
     frames = {row.id: row for row in repo.list_for_sweep(Frame, sweep_id)}
@@ -94,7 +97,7 @@ def reconcile(repo: Repository, sweep_id: str, frame: Frame, image, database: Pa
                                                          title=current.title, author=current.author,
                                                          issues=current.visual_issues)])
         matches, _ = association_choices(frame, analysis, frames, candidates, mappings, image,
-                                         EvidenceStore(database.parent / 'frames'))
+                                         EvidenceStore(database.parent / 'frames'), decide_same)
         if matches[0] is not None:
             try:
                 decide(repo, sweep_id, matches[0], root, 'same', 'automatic')

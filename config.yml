@@ -6,7 +6,6 @@ identification:
   recapture_max_attempts: 2
   max_books_per_frame: 80
   association_min_iou: 0.5
-  association_min_margin: 0.15
   association_max_hops: 16
   text_min_characters: 6
   text_edit_similarity: 0.9

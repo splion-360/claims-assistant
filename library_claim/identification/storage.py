@@ -11,6 +11,8 @@ from library_claim.capture.tracking.geometry import transform
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.domain.models import Book, BookObservation, Frame, FrameAssociation, ProcessingJob, Quality, ReviewIssue
 from library_claim.measurement.spine import DepthMap, book_dimensions, measure_spine, shelf_run_m
+from library_claim.decisions.drex import DrexError
+from library_claim.decisions.same_book import SameBookCandidate, choose_same_book, crop_jpeg, same_book_probabilities
 from library_claim.storage.repository import Repository
 from library_claim.storage.evidence import EvidenceStore
 from .matching import crop_features, visual_match, text_relation, preferred_reading, normalize
@@ -77,8 +79,9 @@ def overlap(first: np.ndarray, second: np.ndarray) -> float:
 
 def association_choices(frame: Frame, analysis: BookFrameAnalysis, frames: dict,
                         observations: list[BookObservation], associations: dict,
-                        image: np.ndarray, evidence: EvidenceStore) -> tuple[list[str | None], list[str]]:
-    """Apply geometry/text gates and use crop matching only without shared geometry.
+                        image: np.ndarray, evidence: EvidenceStore,
+                        decide_same=same_book_probabilities) -> tuple[list[str | None], list[str]]:
+    """Apply geometry/text vetoes in code, then let Drex decide among surviving candidates.
 
     Args:
         frame: Current saved source frame.
@@ -88,15 +91,31 @@ def association_choices(frame: Frame, analysis: BookFrameAnalysis, frames: dict,
         associations: Saved mappings indexed by source frame.
         image: Current decoded source image.
         evidence: Original JPEG storage.
+        decide_same: D2 decision `(detection_crop, detection, candidates) -> probabilities`.
 
     Returns:
         Existing book IDs and association methods, including unresolved decisions.
     """
     choices, methods, selected_scores = [], [], []
-    features = {}
+    features, images = {}, {}
+
+    def source_image(frame_id):
+        """Decode a saved frame once per call.
+
+        Args:
+            frame_id: Saved frame ID.
+
+        Returns:
+            The decoded image, or None if it cannot be decoded.
+        """
+        if frame_id not in images:
+            data = evidence.read(frames[frame_id].evidence_key)
+            images[frame_id] = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        return images[frame_id]
+
     established = [old for old in observations if old.association_method != 'unresolved']
     for index, detection in enumerate(analysis.books):
-        scores, routes = {}, {}
+        scores, routes, sources = {}, {}, {}
         possible = False
         for old in established:
             title = text_relation(old.title, detection.title)
@@ -134,8 +153,7 @@ def association_choices(frame: Frame, analysis: BookFrameAnalysis, frames: dict,
                     if current_key not in features:
                         features[current_key] = crop_features(image, detection.bbox)
                     if old_key not in features:
-                        data = evidence.read(frames[old.frame_id].evidence_key)
-                        previous = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                        previous = source_image(old.frame_id)
                         if previous is None:
                             continue
                         features[old_key] = crop_features(previous, old.bbox)
@@ -149,17 +167,32 @@ def association_choices(frame: Frame, analysis: BookFrameAnalysis, frames: dict,
                         text_relation(other.author, detection.author) == 'conflicting') for other in established):
                     continue
                 if score > scores.get(old.book_id, -1):
-                    scores[old.book_id], routes[old.book_id] = score, method
+                    scores[old.book_id], routes[old.book_id], sources[old.book_id] = score, method, old
             except (ValueError, OSError, cv2.error):
                 continue
-        ranked = sorted(scores, key=scores.get, reverse=True)
+        # Drex compares crops of the strongest surviving candidates; no score margin decides identity.
+        ranked = sorted(scores, key=scores.get, reverse=True)[:3]
         selected = None
         method = 'unresolved' if possible else 'new_provisional'
         if ranked:
-            best = ranked[0]
-            runner_up = scores[ranked[1]] if len(ranked) > 1 else 0
-            if scores[best] - runner_up >= CONFIG.identification.association_min_margin:
-                selected, method = best, routes[best]
+            try:
+                candidates = []
+                for book_id in ranked:
+                    old = sources[book_id]
+                    previous = source_image(old.frame_id)
+                    if previous is None:
+                        raise ValueError('Candidate evidence cannot be decoded')
+                    candidates.append(SameBookCandidate(book_id, crop_jpeg(previous, old.bbox), old.title, old.author,
+                                                        old.view, scores[book_id], routes[book_id]))
+                decision = choose_same_book(decide_same(crop_jpeg(image, detection.bbox), detection, candidates))
+            except (DrexError, ValueError, OSError, cv2.error):
+                decision = 'unresolved'
+            if decision == 'unresolved':
+                method = 'unresolved'
+            elif decision is None:
+                method = 'new_provisional'
+            else:
+                selected, method = ranked[decision], 'drex'
         choices.append(selected)
         methods.append(method)
         selected_scores.append(scores.get(selected, 0))
@@ -299,7 +332,8 @@ def save_measurements(database: Path, sweep_id: str, frame_id: str, depth: Depth
 
 
 def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFrameAnalysis,
-                  jpeg: bytes, model: str, depth: DepthMap | None = None) -> dict:
+                  jpeg: bytes, model: str, depth: DepthMap | None = None,
+                  decide_same=same_book_probabilities) -> dict:
     """Append a frame's readings atomically and return its provisional inventory.
 
     Args:
@@ -310,6 +344,7 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
         jpeg: Original frame for local per-book quality measurements.
         model: Provider model used for extraction.
         depth: Metric depth for this frame; without it books are saved unmeasured.
+        decide_same: D2 decision function, injectable for tests.
 
     Returns:
         Frame detection count, completion flag, and provisional inventory.
@@ -339,8 +374,9 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
         associations = {row.frame_id: row for row in repo.list_for_sweep(FrameAssociation, sweep_id)}
         roots, _ = identities(repo, sweep_id)
         associated = [row.model_copy(update={'book_id': roots[row.book_id]}) for row in observations]
+        # Drex calls happen here, before any write, so no SQLite write lock is held while waiting.
         choices, methods = association_choices(frame, analysis, frames, associated, associations,
-                                                image, EvidenceStore(database.parent / 'frames'))
+                                                image, EvidenceStore(database.parent / 'frames'), decide_same)
         records = []
         assessor = QualityAssessor() if analysis.books else None
         for detection, matched, method in zip(analysis.books, choices, methods):
@@ -383,5 +419,5 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
                                      status='succeeded', created_at=datetime.now(timezone.utc), model=model,
                                      configuration_version=CONFIG_DIGEST, result=result))
         repo.add_many(records)
-        reconcile(repo, sweep_id, frame, image, database)
+        reconcile(repo, sweep_id, frame, image, database, decide_same)
         return {**result, 'inventory': inventory(repo, sweep_id)}

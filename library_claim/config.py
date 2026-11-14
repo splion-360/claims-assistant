@@ -25,7 +25,6 @@ class IdentificationConfig(Settings):
     recapture_max_attempts: PositiveInt
     max_books_per_frame: PositiveInt
     association_min_iou: Unit
-    association_min_margin: Unit
     association_max_hops: PositiveInt
     text_min_characters: PositiveInt
     text_edit_similarity: Unit
