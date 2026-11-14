@@ -9,19 +9,14 @@ dated price source.
 
 ## Features
 
-- **Live capture with voice** — the agent speaks while the camera runs, asking the user to slow
-  down, step closer or steady the camera.
-- **Book identification** — spines are read, resolved against Google Books and Open Library, and
-  measured in centimetres from WebXR depth.
-- **Non-book contents** — shelving, seating, lighting, electronics, art and more are detected,
-  classified and recorded.
-- **Room geometry** — floor area, wall area, ceiling height and shelved wall area in m² and ft²,
-  from the same sweep.
-- **Sourced pricing** — replacement cost per book in the policyholder's market, each with a URL
-  and retrieval date.
-- **Phone as camera** — pair a phone with a six-digit code; the laptop keeps the conversation,
-  the inventory and the packet.
-- **Review queue** — every line the system is not confident in, with its reason.
+- Live voice capture, with the agent directing the sweep as it happens
+- Books identified from the spine, resolved against Google Books and Open Library
+- Spine sizes in centimetres from WebXR depth
+- Non-book contents detected and classified: shelving, seating, lighting, electronics, art
+- Room floor area, wall area, ceiling height and shelved wall area, in m² and ft²
+- Replacement cost per book in the policyholder's market, each with a source URL and date
+- Phone as the camera, laptop as the console
+- A review queue listing every uncertain line with its reason
 
 ## Requirements
 
@@ -56,38 +51,25 @@ Add your API keys to `.env`:
 
 Open <http://127.0.0.1:4177>.
 
-| Control | Does |
-| --- | --- |
-| **Talk** | speak to the agent |
-| **Show camera** | use the laptop camera |
-| **Use phone** | show a pairing code for a phone |
-| **Show inventory** | books and objects as tables |
-| **Download claim packet** | the packet, report and cited frames as a zip |
-
 ### Using a phone as the camera
 
-Press **Use phone** for a six-digit code, open `/capture` on the phone, enter the code and press
-**Start sweep**. The phone has to reach the server over a secure context:
+**Use phone** shows a pairing code to enter at `/capture` on the phone. The phone needs a
+secure context to reach the server, either over adb or through a tunnel:
 
 ```sh
-adb reverse tcp:4177 tcp:4177     # then open http://localhost:4177/capture
+adb reverse tcp:4177 tcp:4177     # open http://localhost:4177/capture
+ngrok http 4177                   # or set PUBLIC_HOST to the tunnel host in .env
 ```
 
-Or through a tunnel, which also works on networks that block device-to-device traffic:
-
-```sh
-ngrok http 4177                   # set PUBLIC_HOST to the tunnel host in .env
-```
-
-Both give WebXR depth, which is what measures spine sizes and the room. A phone whose Chrome
-lacks `depth-sensing` falls back to the plain camera and records no dimensions.
+Depth measurement needs Chrome with WebXR `depth-sensing`; without it the sweep runs on the
+plain camera and records no dimensions.
 
 ## Architecture
 
 ![Claims Assistant architecture: live capture on the phone, Drex Max selecting frames and making every decision, the frontier model handling text extraction and conversation, and the evidence packet](docs/images/architecture.png)
 
 Drex Max makes every decision in the pipeline. The vision model is called only on frames Drex
-has admitted, and handles text extraction and conversation only.
+has admitted, and does text extraction and conversation.
 
 | Decision | Question | Module |
 | --- | --- | --- |
@@ -98,12 +80,11 @@ has admitted, and handles text extraction and conversation only.
 | Catalogue match | Which candidate work matches this spine? | [`identification/catalogue.py`](library_claim/identification/catalogue.py) |
 | Correction intent | What did a spoken correction mean? | [`decisions/corrections.py`](library_claim/decisions/corrections.py) |
 
-Drex returns probabilities rather than labels, so thresholds are configuration. A value between
-`different_book_max` and `same_book_min` is recorded as `unresolved` and sent to the review
-queue instead of being resolved either way.
+Drex returns probabilities rather than labels, so thresholds are configuration; a value
+between `different_book_max` and `same_book_min` is recorded as `unresolved`.
 
-On a 61-frame benchmark, gating with Drex rather than the vision model reduced frontier-model
-tokens by 48%, with 20 frames refused before any vision call:
+On a 61-frame benchmark, gating with Drex rather than the vision model cut frontier-model
+tokens by 48%:
 
 ```sh
 .venv/bin/python scripts/drex_benchmark.py --limit 30
@@ -126,15 +107,12 @@ every frame the packet cites, so each `frame_ref` resolves offline.
 }
 ```
 
-Values are reported only when the evidence supports them:
-
-- A price appears only with a retrievable URL and a retrieval date. Unpriced lines are excluded
-  from the totals and listed in the review queue.
-- An unreadable spine is recorded as an unidentified book with its dimensions, not a guessed
-  title.
-- Dimensions come from measured depth. Readings that could not belong to a book are rejected.
-- Framed art and mirrors are marked `needs_appraisal` unless the user states the piece is a print.
-- Totals are computed in code from the lines in the packet.
+- Prices carry a retrievable URL and a retrieval date; unpriced lines are excluded from the
+  totals and listed in the review queue.
+- An unreadable spine is recorded as an unidentified book with its dimensions.
+- Dimensions come from measured depth.
+- Framed art and mirrors are `needs_appraisal` unless the user states the piece is a print.
+- Totals are computed in code from the packet's lines.
 
 ## Configuration
 
