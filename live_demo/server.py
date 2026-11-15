@@ -109,6 +109,7 @@ from library_claim.measurement.room_storage import measure_room
 from library_claim.items.models import INSTRUCTION as ITEM_INSTRUCTION
 from library_claim.items.models import ItemFrameAnalysis
 from library_claim.items.storage import current_items, save_items
+from library_claim.finish import finish_sweep
 from library_claim.packet import packet_archive
 from library_claim.pricing.storage import value_book
 from library_claim.storage.depth import load_depth, parse_depth_payload
@@ -1099,6 +1100,11 @@ def download_claim_packet(session_id: str, request: Request):
     """
     owned_session(session_id, request.cookies.get("intake_owner"))
     started = time.monotonic()
+    # Complete anything the live loop left unfinished (failed lookups, a restart mid-sweep).
+    try:
+        finish_sweep(CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR, session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="No saved sweep evidence for this session.")
     try:
         archive = packet_archive(
             CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR / "frames", session_id
@@ -1188,6 +1194,28 @@ async def measure_sweep_room(session: IntakeSession) -> None:
             session.room = room
     except Exception as error:  # noqa: BLE001 - a missed room must not disturb the inventory
         logger.warning("room measurement failed: %s", type(error).__name__)
+
+
+async def finish_sweep_background(session: IntakeSession) -> None:
+    """Measure the room, then finish catalogue lookups and pricing once the camera stops.
+
+    The packet download runs the same idempotent step again, so this only makes the
+    download fast; nothing depends on it completing.
+
+    Args:
+        session: Sweep to finish.
+    """
+    await measure_sweep_room(session)
+    if session.deleted:
+        return
+    try:
+        await asyncio.to_thread(finish_sweep, CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR,
+                                session.session_id)
+        if not session.deleted:
+            session.book_inventory = await asyncio.to_thread(
+                current_inventory, CAPTURE_DATA_DIR / "claims.sqlite3", session.session_id)
+    except Exception as error:  # noqa: BLE001 - the download retries whatever this missed
+        logger.warning("finishing sweep failed: %s", type(error).__name__)
 
 
 class FrameObservation(BookFrameAnalysis):
@@ -2411,8 +2439,8 @@ async def live_voice(websocket: WebSocket) -> None:
                         if not enabled and session.sweep_phase != "Sweeping":
                             await finish_capture()
                         if not enabled:
-                            # Room geometry comes from the frames the sweep already saved.
-                            track(measure_sweep_room(session))
+                            # Room geometry, catalogue lookups and prices are finished from saved frames.
+                            track(finish_sweep_background(session))
                 elif kind == "book_capture":
                     if message.get("action"):
                         raise ValueError("Capture and resumption are automatic; refresh the page")

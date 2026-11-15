@@ -118,7 +118,7 @@ def value_sweep(database: Path, sweep_id: str, books: list[dict], country: str |
     for book in books:
         try:
             valuation = value_book(database, sweep_id, book, country, client=client)
-        except (httpx.HTTPError, ValueError, KeyError) as error:
+        except Exception as error:  # noqa: BLE001 - one book's failure must not stop the rest
             # One unreachable source must not stop the rest of the sweep being priced.
             logger.warning('valuation failed for %s: %s', book.get('id'), type(error).__name__)
             continue

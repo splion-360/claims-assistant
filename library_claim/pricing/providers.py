@@ -67,14 +67,23 @@ def google_books_price(title: str, author: str | None, isbn: str | None, market,
     finally:
         if owned:
             http.close()
+    if not isinstance(payload, dict):
+        raise PriceUnavailable('Google Books returned unreadable data')
     for item in payload.get('items') or []:
-        sale = item.get('saleInfo') or {}
-        listed = sale.get('retailPrice') or sale.get('listPrice') or {}
-        amount, currency = listed.get('amount'), listed.get('currencyCode')
-        if amount is None or currency is None:
+        sale = item.get('saleInfo') if isinstance(item, dict) else None
+        if not isinstance(sale, dict):
             continue
+        listed = sale.get('retailPrice') or sale.get('listPrice') or {}
+        # A record in an unexpected shape is skipped, never coerced into a figure.
+        if not isinstance(listed, dict) or not isinstance(listed.get('currencyCode'), str):
+            continue
+        try:
+            amount = float(listed.get('amount'))
+        except (TypeError, ValueError):
+            continue
+        currency = listed['currencyCode']
         link = sale.get('buyLink') or (item.get('volumeInfo') or {}).get('infoLink') or ''
-        return Price(amount=float(amount), currency=currency, source='Google Books', url=link,
+        return Price(amount=amount, currency=currency, source='Google Books', url=link,
                      retrieved_at=datetime.now(timezone.utc), kind='replacement')
     raise PriceUnavailable(f'No {market.country} price listed by Google Books')
 
@@ -104,8 +113,9 @@ def exchange_rate(base: str, target: str, *, client: httpx.Client | None = None)
     finally:
         if owned:
             http.close()
-    rate = (payload.get('rates') or {}).get(target)
-    if rate is None:
+    rates = payload.get('rates') if isinstance(payload, dict) else None
+    rate = rates.get(target) if isinstance(rates, dict) else None
+    if not isinstance(rate, (int, float)):
         raise PriceUnavailable(f'No published rate from {base} to {target}')
     return float(rate), str(payload.get('date', '')), f'{url}?base={base}&symbols={target}'
 
