@@ -14,6 +14,7 @@ from .nimble import (abebooks_search_url, amazon_search_url, fetch_page, parse_a
 from .models import Price
 
 logger = logging.getLogger(__name__)
+GOOGLE_SOURCE = 'Google Books (ebook edition)'
 
 
 def _client(client: httpx.Client | None) -> tuple[httpx.Client, bool]:
@@ -86,7 +87,8 @@ def google_books_price(title: str, author: str | None, isbn: str | None, market,
             continue
         currency = listed['currencyCode']
         link = sale.get('buyLink') or (item.get('volumeInfo') or {}).get('infoLink') or ''
-        return Price(amount=amount, currency=currency, source='Google Books', url=link,
+        # Google Books sells ebooks; the label says so, since a print copy may cost more.
+        return Price(amount=amount, currency=currency, source=GOOGLE_SOURCE, url=link,
                      retrieved_at=datetime.now(timezone.utc), kind='replacement')
     raise PriceUnavailable(f'No {market.country} price listed by Google Books')
 

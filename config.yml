@@ -183,13 +183,13 @@ pricing:
   markets:
     US:
       currency: USD
-      providers: [google_books, amazon]
+      providers: [amazon, google_books]
       used_providers: [abebooks]
       amazon_domain: www.amazon.com
       abebooks_domain: www.abebooks.com
     GB:
       currency: GBP
-      providers: [google_books, amazon]
+      providers: [amazon, google_books]
       used_providers: [abebooks]
       amazon_domain: www.amazon.co.uk
       abebooks_domain: www.abebooks.co.uk

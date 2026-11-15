@@ -119,7 +119,7 @@ class ProviderTests(unittest.TestCase):
             price = google_books_price('The Good People', 'Hannah Kent', None, market('US'), client=http)
         self.assertEqual(price.amount, 18.99)
         self.assertEqual(price.currency, 'USD')
-        self.assertEqual(price.source, 'Google Books')
+        self.assertEqual(price.source, 'Google Books (ebook edition)')
         self.assertEqual(price.url, 'https://books.example/buy')
         self.assertIsNotNone(price.retrieved_at)
         self.assertFalse(price.converted)
