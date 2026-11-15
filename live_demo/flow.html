@@ -30,20 +30,20 @@
   .pill.taken { border-color: var(--done); color: var(--done); background: color-mix(in srgb, var(--done) 12%, var(--card)); }
   .pill.skipped { opacity: .5; }
   .node { position: absolute; transform: translate(-50%, -50%); background: var(--card); border: 1.5px solid var(--line);
-          border-left: 4px solid var(--accent); border-radius: 8px; padding: 4px 8px 4px 28px; display: flex; flex-direction: column; justify-content: center;
+          border-left: 3px solid var(--accent); border-radius: 7px; padding: 3px 8px 3px 26px; display: flex; flex-direction: column; justify-content: center;
           transition: border-color .3s, box-shadow .3s, opacity .3s; }
   .node .icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; border-radius: 50%;
                 border: 1.5px solid var(--muted); display: grid; place-items: center; font-size: 9px; line-height: 1; color: #0d1117; }
   /* Names are written short enough to fit; nothing is truncated with an ellipsis. */
-  .node .name { font-weight: 600; font-size: 14px; white-space: nowrap; }
+  .node .name { font-weight: 600; font-size: 12.5px; white-space: nowrap; }
   .node .model, .node .meta { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
   .node .model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .node .meta { font-size: 12px; }
+  .node .meta { font-size: 11px; }
   /* Decisions are hexagons: an outer shape in the border colour and an inner one in the card colour. */
   .node.decision { border: 0; background: var(--state, var(--decision)); clip-path: polygon(10% 0, 90% 0, 100% 50%, 90% 100%, 10% 100%, 0 50%); padding: 0; }
   .node.decision .inner { position: absolute; inset: 2px; background: var(--card); clip-path: polygon(10% 0, 90% 0, 100% 50%, 90% 100%, 10% 100%, 0 50%);
-                          padding: 4px 12px 4px 32px; display: flex; flex-direction: column; justify-content: center; }
-  .node.decision .icon { left: 16px; }
+                          padding: 3px 10px 3px 28px; display: flex; flex-direction: column; justify-content: center; }
+  .node.decision .icon { left: 13px; }
   .node.terminal { border-style: dashed; border-left-width: 1.5px; }
   .node.running { border-color: var(--running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 25%, transparent); }
   .node.running .icon { border-color: var(--running); border-top-color: transparent; animation: spin .9s linear infinite; }
@@ -98,17 +98,17 @@
 <script>
 // One left-to-right pipeline like a CI run graph: capture fans out to the book and object paths,
 // each with its own Drex decisions, and both join at the finish. Voice and guidance run underneath.
-const W = 1240, H = 540, X0 = 90, DX = 150, NODE_W = 136, NODE_H = 50, HEX_W = 146;
+const W = 1240, H = 540, X0 = 90, DX = 150, NODE_W = 112, NODE_H = 42, HEX_W = 128;
 const ROWS = { top: 70, mid: 170, bottom: 270, low: 350, voice: 480 };
 const LANES = [["Sweep", 14], ["Voice and guidance", 422]];
 const x = col => X0 + col * DX;
 // Nodes: [id, column, row, role, name]. Several pipeline stages report into one node (see ALIAS).
 const NODES = [
-  ["capture", 0, "mid", "local", "Capture"], ["d1", 1, "mid", "decision", "Book visible?"],
+  ["capture", 0, "mid", "local", "Capture"], ["d1", 1, "mid", "decision", "Book in view?"],
   ["spine_reading", 2, "top", "vision", "Read spines"], ["item_detection", 2, "mid", "vision", "Find objects"],
-  ["d2", 3, "top", "decision", "Same book?"], ["same_object", 3, "mid", "decision", "Same object?"],
+  ["d2", 3, "top", "decision", "Repeat book?"], ["same_object", 3, "mid", "decision", "Repeat item?"],
   ["depth", 3, "bottom", "depth", "Spine size"],
-  ["d3", 4, "top", "decision", "Which work?"], ["listing_match", 4, "mid", "decision", "Listing fits?"],
+  ["d3", 4, "top", "decision", "In catalogue?"], ["listing_match", 4, "mid", "decision", "Store match?"],
   ["pricing", 5, "top", "web", "Book prices"], ["room", 5, "low", "depth", "Room size"],
   ["finish", 6, "mid", "local", "Finish"], ["summary", 7, "mid", "local", "Summary"],
   ["claim_packet", 7, "bottom", "local", "Packet"],
@@ -123,10 +123,10 @@ const ALIAS = { camera: "capture", tracking: "capture", gate: "capture", save: "
 // Edges: [from, to, label, outcomes, route]. Outcome edges light when their decision answers one of
 // them and are dashed when it answers anything else; "arc" lifts an edge over the node beside it.
 const EDGES = [
-  ["capture", "d1"], ["d1", "spine_reading", "books", ["admit"]], ["d1", "item_detection", "contents"],
-  ["spine_reading", "d2"], ["spine_reading", "depth"], ["d2", "d3", "same / new", ["same", "new", "unresolved"]],
-  ["d3", "pricing", "matched", ["matched"]], ["d3", "finish", "no match", ["review"], "arc"],
-  ["item_detection", "same_object"], ["same_object", "listing_match", "same / new", ["same", "new"]],
+  ["capture", "d1"], ["d1", "spine_reading", "books seen", ["admit"]], ["d1", "item_detection", "room contents"],
+  ["spine_reading", "d2"], ["spine_reading", "depth"], ["d2", "d3", "repeat / new", ["same", "new", "unresolved"]],
+  ["d3", "pricing", "found", ["matched"]], ["d3", "finish", "not found: review", ["review"], "arc"],
+  ["item_detection", "same_object"], ["same_object", "listing_match", "repeat / new", ["same", "new"]],
   ["listing_match", "finish", "priced", ["priced"]],
   ["pricing", "finish"], ["depth", "finish"], ["room", "finish"],
   ["finish", "summary"], ["finish", "claim_packet"],
@@ -134,13 +134,24 @@ const EDGES = [
   ["d6", "guidance", "speak", ["speak"]],
 ];
 // Full names for the log and tooltips.
-const LABELS = { fallback: "Model fallback", locale: "Market confirmed", capture: "Camera, tracking and local gate",
-  d1: "Drex: book visible?", d2: "Drex: same book?", d3: "Catalogue lookup and Drex: which work?",
-  same_object: "Drex: same object?", listing_match: "Drex: does the listing fit?", d5: "Drex: is it a correction?",
-  d6: "Drex: speak now?", depth: "Spine size from phone depth (WebXR)", item_detection: "Object detection",
+// Long explanations shown on hover; the log uses the short LABELS below.
+const TIPS = { fallback: "Model fallback", locale: "Market confirmed", capture: "Camera, tracking and local gate",
+  d1: "Drex: is a readable book in this frame? Books go to spine reading; every clear frame goes to object detection",
+  d2: "Drex: is this the same physical book as one already recorded, or a new copy?",
+  d3: "Catalogue lookup (Google Books, Open Library), then Drex: which catalogue entry is this spine? No confident match goes to review",
+  same_object: "Drex: is this the same physical object as one already recorded, or another one?",
+  listing_match: "Drex: is this store listing the same product (or a comparable one) as the object? Only accepted listings are priced",
+  d5: "Drex: is the user correcting the inventory (not mine, first edition, different title) or just talking?",
+  d6: "Drex: should the agent speak up now, and with which capture prompt?", depth: "Spine size from phone depth (WebXR)", item_detection: "Object detection",
   claim_packet: "Claim packet download", guidance: "Spoken prompt or announcement", room: "Room size from phone depth",
   camera: "Camera", tracking: "Tracking", gate: "Local gate", save: "Frame saved", items: "Object list",
   catalogue: "Catalogue lookup", correction: "Correction saved", announce: "Book announced" };
+const LABELS = { fallback: "Model fallback", locale: "Market confirmed", capture: "Capture", d1: "Drex: book in view?",
+  d2: "Drex: repeat book?", d3: "Drex: in catalogue?", same_object: "Drex: repeat item?", listing_match: "Drex: store match?",
+  d5: "Drex: correction?", d6: "Drex: speak now?", depth: "Spine size (WebXR)", room: "Room size (WebXR)",
+  item_detection: "Find objects", items: "Object list", claim_packet: "Claim packet", guidance: "Prompt", camera: "Camera",
+  tracking: "Tracking", gate: "Local gate", save: "Frame saved", catalogue: "Catalogue lookup", correction: "Correction saved",
+  announce: "Book announced" };
 const short = model => String(model || "").replace(/^[^/]+\//, "");
 const cards = {}, edgeEls = [], timers = {};
 
@@ -161,11 +172,12 @@ function build() {
     const body = `<span class="icon"></span><span class="name"></span><span class="meta">idle</span>`;
     node.innerHTML = who === "decision" ? `<div class="inner">${body}</div>` : body;
     node.querySelector(".name").textContent = name;
-    node.title = LABELS[id] || name;
+    node.title = TIPS[id] || name;
     node.dataset.count = "0";
     canvas.appendChild(node);
     cards[id] = node;
     LABELS[id] = LABELS[id] || name;
+    TIPS[id] = TIPS[id] || name;
   }
   const halfOf = id => (NODES.find(n => n[0] === id)[3] === "decision" ? HEX_W : NODE_W) / 2;
   for (const [from, to, label, outcomes, route] of EDGES) {
@@ -263,7 +275,7 @@ function apply(event, replay = false) {
   // The node keeps timing and count; the full result goes to its tooltip and the log.
   const ms = event.ms != null ? (event.ms >= 1000 ? `${(event.ms / 1000).toFixed(1)} s` : `${event.ms} ms`) : "";
   meta.textContent = event.phase === "error" ? `failed · ${card.dataset.count}×` : [ms, `${card.dataset.count}×`].filter(Boolean).join(" · ");
-  card.title = `${LABELS[event.stage] || event.stage}: ${event.detail || event.phase}${event.model ? " · " + short(event.model) : ""}`;
+  card.title = `${TIPS[id]}\nLast: ${LABELS[event.stage] || event.stage}: ${event.detail || event.phase}${event.model ? " · " + short(event.model) : ""}`;
   setState(id, event.phase === "error" ? "error" : event.phase === "done" ? "done" : null,
            replay ? 0 : event.phase === "error" ? 5000 : 1500);
   if (event.phase === "done") markEdges(e => e.to === id && !e.outcomes, "taken", replay ? 0 : 1500);
@@ -291,7 +303,7 @@ function connect() {
     const setup = JSON.parse(message.data);
     status.textContent = "live"; status.className = "live";
     for (const [stage, model] of Object.entries(setup.models || {})) {
-      if (cards[stage] && model) cards[stage].title = `${LABELS[stage] || stage} · ${short(model)}`;
+      if (cards[stage] && model) cards[stage].title = `${TIPS[stage] || stage} (${short(model)})`;
     }
     for (const stage of setup.disabled || []) {
       if (!cards[stage]) continue;
