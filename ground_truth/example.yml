@@ -1,0 +1,34 @@
+# Illustrative example only: these are NOT measurements of a real room.
+space: "Example study, two bookcases"
+collected_on: "2026-11-15"
+collected_by: "example"
+
+books:
+  count: 6
+  titles:
+    - {title: "Dune", author: "Frank Herbert", shelf: "A1", position: 1}
+    - {title: "The Good People", author: "Hannah Kent", shelf: "A1", position: 2}
+    - {title: "Did I Say You Could Go", author: "Melissa de la Cruz", shelf: "A1", position: 3}
+    - {title: "Sapiens", author: "Yuval Noah Harari", shelf: "B1", position: 1}
+  spines:
+    method: "bank card"
+    sample:
+      - {title: "Dune", height_cm: 17.5, thickness_cm: 3.6}
+      - {title: "The Good People", height_cm: 23.4, thickness_cm: 3.2}
+
+prices:
+  - {title: "Dune", replacement: 10.99, currency: "USD", source_type: "google_books", url: "", checked_on: "2026-11-15"}
+
+items:
+  - {category: "shelving", description: "white bookcase"}
+  - {category: "shelving", description: "oak bookcase"}
+  - {category: "lighting", description: "floor lamp"}
+  - {category: "seating", description: "armchair"}
+
+room:
+  method: "tape"
+  length_m: 3.6
+  width_m: 3.0
+  height_m: 2.6
+  shelved_wall_area_m2: 3.4
+  notes: "rectangle; door and window included in wall area"

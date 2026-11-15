@@ -1,0 +1,39 @@
+# Ground truth for one sweep, collected by hand BEFORE tuning anything.
+# Score a packet against it with:
+#   .venv/bin/python scripts/score_packet.py claim_packet.json ground_truth/<file>.yml --out results.md
+# Leave a section out (or empty) when you did not collect it; that pass bar is reported "not measured".
+
+space: ""            # e.g. "Home study, two bookcases" or "Public library corner, with permission"
+collected_on: ""     # YYYY-MM-DD
+collected_by: ""
+
+books:
+  count: 0           # every book on the swept shelves, including flat and stacked ones
+  # Every spine a person can read, with where it sits. Unreadable spines are left out.
+  titles:
+    - {title: "", author: "", shelf: "", position: 0}
+  spines:
+    method: ""       # ruler | bank card (8.56 x 5.40 cm) | A4 sheet | publisher record
+    # 20 books, spread across shelves and sizes, not only the easy ones.
+    sample:
+      - {title: "", height_cm: 0, thickness_cm: 0}
+
+# 15 books checked by hand at the same kind of source the system uses.
+prices:
+  - {title: "", replacement: 0, currency: "", source_type: "", url: "", checked_on: ""}
+
+# Every non-book item in the room. Categories: shelving, seating, table, storage, lighting,
+# art, mirror, rug, electronics, appliance, window_covering, plant, decor, other.
+items:
+  - {category: "", description: ""}
+
+room:
+  method: ""         # tape | floor tiles | floor plan
+  length_m: 0
+  width_m: 0
+  height_m: 0
+  # Give these only when the room is not a rectangle; otherwise they are computed from the sides.
+  # floor_area_m2: 0
+  # wall_area_m2: 0
+  shelved_wall_area_m2: 0
+  notes: ""          # alcoves, sloped ceiling, doors and windows included or not
