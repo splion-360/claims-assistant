@@ -52,6 +52,8 @@ class Valuation(BaseModel):
     country: str
     currency: str
     replacement: Price | None = None
+    # Upper end of a sourced range for an object whose brand and model are unknown.
+    replacement_high: Price | None = None
     used: Price | None = None
     needs_appraisal: bool = False
     # Why a figure is missing or why the book was withheld from automatic pricing.

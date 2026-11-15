@@ -175,6 +175,11 @@ pricing:
   max_listings: 8
   used_min_listings: 3
   workers: 6
+  # Furniture and electronics cost more than books; their appraisal bar is this multiple.
+  item_threshold_factor: 8
+  # The packet also prices the first compare_books identified books in this market.
+  compare_country: GB
+  compare_books: 10
   markets:
     US:
       currency: USD

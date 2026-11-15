@@ -328,6 +328,15 @@ class PricedPacketTests(unittest.TestCase):
         self.assertEqual(packet['totals']['books_replacement_cost'], 18.99)
         self.assertEqual(packet['totals']['excluded_from_totals'], 0)
 
+    def test_packet_prices_the_same_books_in_a_second_market(self):
+        """The packet and report carry the configured second-market comparison."""
+        with self.priced_client() as http:
+            packet = build_packet(self.database, 'sweep1', client=http)
+        comparison = packet['locale_comparison']
+        self.assertEqual(comparison['countries'], ['US', 'GB'])
+        self.assertEqual(comparison['books'][0]['title'], 'The Good People')
+        self.assertIn('Same books in 2 markets', render_report(packet))
+
     def test_unreachable_source_leaves_the_line_empty_and_flagged(self):
         """Keep an unpriced line out of the totals and name the reason."""
         with patch.dict('os.environ', {'GOOGLE_BOOKS_API_KEY': ''}), httpx.Client(transport=httpx.MockTransport(

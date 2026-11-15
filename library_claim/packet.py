@@ -1,5 +1,6 @@
 """Assemble the claim packet for one sweep and render its readable report."""
 import io
+import logging
 import json
 import zipfile
 from datetime import datetime
@@ -9,12 +10,15 @@ from pathlib import Path
 from library_claim.config import CONFIG
 from library_claim.domain.models import Frame, Sweep
 from library_claim.identification.storage import inventory, inventory_totals
-from library_claim.items.pricing import price_item
+from library_claim.items.pricing import value_items
 from library_claim.items.storage import inventory as item_inventory
 from library_claim.measurement.room_storage import stored_room
 from library_claim.pricing.models import Valuation
-from library_claim.pricing.storage import value_sweep
+from library_claim.pricing.compare import compare_markets
+from library_claim.pricing.storage import CACHE_FILE, value_sweep
 from library_claim.storage.repository import Repository
+
+logger = logging.getLogger(__name__)
 
 # Empty money blocks: the keys stay so the contract holds, the amounts stay unknown.
 NO_REPLACEMENT_COST = {'amount': None, 'source': '', 'url': '', 'retrieved_at': '', 'converted': False}
@@ -94,8 +98,11 @@ def _item_line(item: dict, evidence: dict[str, str], valuation: Valuation | None
     """
     frame_ids = item.get('frame_ids') or []
     appraisal = item.get('needs_appraisal') or (valuation is not None and valuation.needs_appraisal)
-    price = None if appraisal or valuation is None else valuation.replacement
-    status = 'needs_appraisal' if appraisal else ('priced' if price else 'range')
+    low = None if appraisal or valuation is None else valuation.replacement
+    high = (valuation.replacement_high or low) if low is not None else None
+    # One matched product is "priced"; several comparable listings give a "range".
+    exact = low is not None and item.get('brand_model') and high.amount == low.amount
+    status = 'needs_appraisal' if appraisal else ('priced' if exact else 'range')
     return {
         'id': item['id'], 'category': item.get('category', 'other'),
         'description': item.get('description', ''), 'brand_model': item.get('brand_model') or '',
@@ -105,10 +112,13 @@ def _item_line(item: dict, evidence: dict[str, str], valuation: Valuation | None
         # Dimensions need metric depth, which no item measurement pass supplies yet.
         'dimensions_cm': {'w': None, 'h': None, 'd': None},
         'status': status,
-        'replacement_cost': ({'low': round(price.amount, 2), 'high': round(price.amount, 2),
-                              'source': price.source, 'url': price.url,
-                              'retrieved_at': price.retrieved_at.isoformat()} if price else
-                             {'low': None, 'high': None, 'source': '', 'url': '', 'retrieved_at': ''}),
+        'replacement_cost': ({'low': round(low.amount, 2), 'high': round(high.amount, 2),
+                              'currency': low.currency, 'source': low.source, 'url': low.url,
+                              'url_high': high.url, 'retrieved_at': low.retrieved_at.isoformat(),
+                              'converted': low.converted, 'converted_from': low.converted_from}
+                             if low is not None else
+                             {'low': None, 'high': None, 'source': '', 'url': '', 'retrieved_at': '',
+                              'converted': False}),
         'observation_count': item.get('observation_count', 0),
         'confidence': None,
     }
@@ -243,11 +253,13 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
         kept = [{**book, 'valuation': valuations[book['id']].model_dump(mode='json')}
                 if book['id'] in valuations else book for book in kept]
     objects = [entry for entry in contents if not entry.get('excluded')]
-    item_values = {entry['id']: price_item(entry, chosen, client=client) for entry in objects} if price else {}
+    # Objects already priced keep their saved figure, so a second download fetches nothing.
+    item_values = value_items(database, sweep_id, objects, chosen, client=client) if price else {}
     items = [_item_line(entry, evidence, item_values.get(entry['id'])) for entry in objects]
     lines = [_book_line(book, evidence, valuations.get(book['id'])) for book in kept]
     currency = sweep.currency or next((value.currency for value in valuations.values() if value.currency), '')
-    return {
+    comparison = _comparison(database, kept, chosen, client) if price else None
+    packet = {
         'sweep': {'id': sweep.id, 'captured_at': sweep.captured_at.isoformat(), 'device': sweep.device,
                   'duration_s': _duration_s(frames), 'country': (sweep.country or chosen).upper(),
                   'currency': currency,
@@ -260,6 +272,37 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
         'totals': _totals(kept, lines, items),
         'review_queue': _review_queue(kept, lines, sweep, valuations, objects, item_values, room),
     }
+    if comparison is not None:
+        packet['locale_comparison'] = comparison
+    return packet
+
+
+def _comparison(database: Path, books: list[dict], chosen: str, client) -> dict | None:
+    """Price the same books in the configured second market, or skip when none is set.
+
+    Args:
+        database: Capture SQLite path; the price cache lives beside it.
+        books: Kept inventory entries.
+        chosen: The policyholder's market.
+        client: Optional HTTP client, used by tests.
+
+    Returns:
+        The comparison block, or None when no second market is configured or it failed.
+    """
+    second = (CONFIG.pricing.compare_country or '').upper()
+    if not second:
+        return None
+    # When the sweep is already in the comparison market, compare against the default one.
+    if second == chosen.upper():
+        second = CONFIG.pricing.default_country.upper()
+    if second == chosen.upper():
+        return None
+    try:
+        return compare_markets(books, [chosen.upper(), second], cache_path=Path(database).parent / CACHE_FILE,
+                               client=client, limit=CONFIG.pricing.compare_books)
+    except Exception as error:  # noqa: BLE001 - the comparison is a demonstration, never a blocker
+        logger.warning('locale comparison failed: %s', type(error).__name__)
+        return None
 
 
 def _cell(value) -> str:
@@ -274,6 +317,59 @@ def _cell(value) -> str:
     if value is None or value == '':
         return '<span class="unknown">&mdash;</span>'
     return escape(str(value))
+
+
+def _range(block: dict, currency: str) -> str:
+    """Render an item's replacement cost, a single figure or a sourced range.
+
+    Args:
+        block: An item replacement_cost block.
+        currency: Currency to show when the block names none.
+
+    Returns:
+        HTML with the figure(s), source and links, or a note that no price was found.
+    """
+    if block.get('low') is None:
+        return '<span class="unknown">no price found</span>'
+    unit = escape(block.get('currency') or currency)
+    figure = (f'{unit} {block["low"]:.2f}' if block['low'] == block['high']
+              else f'{unit} {block["low"]:.2f} – {block["high"]:.2f}')
+    links = f'<a href="{escape(block["url"])}">low</a>'
+    if block.get('url_high') and block['url_high'] != block['url']:
+        links += f' · <a href="{escape(block["url_high"])}">high</a>'
+    converted = ' · converted' if block.get('converted') else ''
+    return f'{figure}<br><small>{escape(block["source"])} · {links}{converted}</small>'
+
+
+def _comparison_html(comparison: dict | None) -> str:
+    """Render the second-market comparison table.
+
+    Args:
+        comparison: The packet's locale_comparison block, or None.
+
+    Returns:
+        An HTML section, or '' when the packet has no comparison.
+    """
+    if not comparison or not comparison.get('books'):
+        return ''
+    countries = comparison['countries']
+
+    def cell(entry: dict, kind: str) -> str:
+        if entry.get('needs_appraisal'):
+            return '<span class="unknown">appraisal</span>'
+        figure = entry.get(kind)
+        if not figure:
+            return '<span class="unknown">&mdash;</span>'
+        mark = ' (converted)' if figure['converted'] else ''
+        return f'<a href="{escape(figure["url"])}">{escape(figure["currency"])} {figure["amount"]:.2f}</a>{mark}'
+    head = ''.join(f'<th>{escape(code)} new</th><th>{escape(code)} used</th>' for code in countries)
+    rows = ''.join(f'<tr><td>{escape(row["title"])}</td>'
+                   + ''.join(cell(row['prices'][code], 'replacement').join(('<td>', '</td>'))
+                             + cell(row['prices'][code], 'used').join(('<td>', '</td>')) for code in countries)
+                   + '</tr>' for row in comparison['books'])
+    return (f'<h2>Same books in {len(countries)} markets</h2><p class="meta">Each market is looked up in its own '
+            f'stores and currency; nothing is hardcoded per country.</p>'
+            f'<table><thead><tr><th>Title</th>{head}</tr></thead><tbody>{rows}</tbody></table>')
 
 
 def _money(block: dict, currency: str) -> str:
@@ -315,8 +411,9 @@ def render_report(packet: dict) -> str:
     items = ''.join(
         f'<tr><td>{_cell(item.get("category"))}</td><td>{_cell(item.get("description"))}</td>'
         f'<td>{_cell(item.get("brand_model"))}</td><td>{_cell(item.get("status"))}</td>'
+        f'<td>{_range(item["replacement_cost"], currency)}</td>'
         f'<td><code>{_cell(item.get("frame_ref"))}</code></td></tr>'
-        for item in packet['items']) or '<tr><td colspan="5" class="unknown">No non-book items recorded.</td></tr>'
+        for item in packet['items']) or '<tr><td colspan="6" class="unknown">No non-book items recorded.</td></tr>'
     review = ''.join(f'<tr><td><code>{_cell(entry["ref_id"])}</code></td><td>{_cell(entry["reason"])}</td></tr>'
                      for entry in packet['review_queue']) or '<tr><td colspan="2">Nothing flagged.</td></tr>'
     # Totals are printed from the packet's own totals block, which code computed from the lines.
@@ -363,8 +460,10 @@ def render_report(packet: dict) -> str:
  <th>Thick cm</th><th>Scale</th><th>Replacement</th><th>Used</th><th>Frame</th></tr></thead>
 <tbody>{books}</tbody></table>
 <h2>Non-book items ({len(packet["items"])})</h2>
-<table><thead><tr><th>Category</th><th>Description</th><th>Brand / model</th><th>Status</th><th>Frame</th></tr></thead>
+<table><thead><tr><th>Category</th><th>Description</th><th>Brand / model</th><th>Status</th><th>Replacement</th>
+ <th>Frame</th></tr></thead>
 <tbody>{items}</tbody></table>
+{_comparison_html(packet.get("locale_comparison"))}
 <h2>Review queue ({len(packet["review_queue"])})</h2>
 <table><thead><tr><th>Line</th><th>Reason</th></tr></thead><tbody>{review}</tbody></table>
 </body></html>'''

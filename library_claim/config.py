@@ -266,6 +266,11 @@ class PricingConfig(Settings):
     used_min_listings: PositiveInt
     # Books priced at the same time when a sweep is finished.
     workers: PositiveInt
+    # Contents above appraisal_threshold times this factor are withheld for an appraiser.
+    item_threshold_factor: PositiveFloat
+    # A second market the packet prices the same books in; empty turns the comparison off.
+    compare_country: Text | None = None
+    compare_books: PositiveInt = 10
     markets: dict[Text, MarketConfig]
 
     @model_validator(mode='after')

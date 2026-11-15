@@ -16,6 +16,8 @@ import httpx
 from library_claim.domain.models import Sweep
 from library_claim.identification.catalogue import resolve_book
 from library_claim.identification.storage import inventory
+from library_claim.items.pricing import value_items
+from library_claim.items.storage import inventory as item_inventory
 from library_claim.measurement.room_storage import measure_room, stored_room
 from library_claim.pricing.storage import value_sweep
 from library_claim.storage.repository import Repository
@@ -76,7 +78,7 @@ def finish_sweep(database: Path, data_dir: Path, sweep_id: str, country: str | N
         Counts of what ran, the errors met, and the elapsed seconds.
     """
     started = time.monotonic()
-    summary = {'resolved': 0, 'priced': 0, 'room': False, 'errors': []}
+    summary = {'resolved': 0, 'priced': 0, 'items_priced': 0, 'room': False, 'errors': []}
     books = _books(database, sweep_id)
     for book in [book for book in books if _needs_catalogue(book)]:
         try:
@@ -99,6 +101,14 @@ def finish_sweep(database: Path, data_dir: Path, sweep_id: str, country: str | N
         summary['priced'] = sum(1 for valuation in valued.values() if valuation.replacement)
     except Exception as error:  # noqa: BLE001 - the packet still builds from what was saved
         summary['errors'].append(f'pricing: {type(error).__name__}')
+        chosen = country
+    try:
+        with Repository(database) as repo:
+            objects = [entry for entry in item_inventory(repo, sweep_id) if not entry.get('excluded')]
+        item_values = value_items(database, sweep_id, objects, chosen, client=http, drex=drex)
+        summary['items_priced'] = sum(1 for valuation in item_values.values() if valuation.replacement)
+    except Exception as error:  # noqa: BLE001 - the packet still builds from what was saved
+        summary['errors'].append(f'item pricing: {type(error).__name__}')
     summary['elapsed_s'] = round(time.monotonic() - started, 2)
     telemetry.emit('finish', 'done', f"{summary['resolved']} looked up, {summary['priced']} priced",
                    ms=round(summary['elapsed_s'] * 1000))

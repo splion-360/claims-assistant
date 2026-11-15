@@ -210,14 +210,14 @@ class ItemPricingTests(unittest.TestCase):
         valuation = price_item(self.item(category='art', stated_print=True), 'US')
         self.assertFalse(valuation.needs_appraisal)
 
-    def test_no_provider_leaves_the_figure_empty_with_a_reason(self):
-        """Say that no retail source is configured instead of writing a price."""
+    def test_no_listing_source_leaves_the_figure_empty_with_a_reason(self):
+        """Say that the listing source is not configured instead of writing a price."""
         valuation = price_item(self.item(), 'US')
         self.assertIsNone(valuation.replacement)
-        self.assertTrue(any('provider' in reason for reason in valuation.reasons))
+        self.assertTrue(any('not configured' in reason for reason in valuation.reasons))
 
     def test_an_unidentified_object_says_it_needs_a_range(self):
-        """Record that an unbranded object needs a sourced range."""
+        """Record that an unbranded object can only be given a sourced range."""
         valuation = price_item(self.item(), 'US')
         self.assertTrue(any('range' in reason for reason in valuation.reasons))
 
