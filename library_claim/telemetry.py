@@ -27,6 +27,19 @@ def emit(stage: str, phase: str, detail: str | None = None, ms: float | None = N
                   'ms': None if ms is None else round(ms), 't': time.time()})
 
 
+def usage(source: str, **counters: float) -> None:
+    """Report paid usage (calls, tokens, characters) to the current listener.
+
+    Args:
+        source: Billing source, e.g. 'drex', 'nimble' or 'model:<name>'.
+        **counters: Amounts to add, e.g. calls=1, input_tokens=800.
+    """
+    listener = _listener.get()
+    if listener is not None:
+        listener({'stage': 'usage', 'phase': 'done', 'detail': None, 'model': None, 'ms': None,
+                  'usage': {'source': source, **counters}, 't': time.time()})
+
+
 def record_model(model: str) -> None:
     """Note which model answered inside the current span, if any.
 

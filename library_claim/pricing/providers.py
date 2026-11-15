@@ -7,6 +7,7 @@ import httpx
 
 from library_claim.config import CONFIG
 from library_claim.sources import GOOGLE_BOOKS, HEADERS, google_books_params
+from library_claim import telemetry
 from .errors import PriceUnavailable
 from .fetch import request_json
 from .nimble import (abebooks_search_url, amazon_search_url, fetch_page, parse_abebooks, parse_amazon,
@@ -62,6 +63,7 @@ def google_books_price(title: str, author: str | None, isbn: str | None, market,
     http, owned = _client(client)
     try:
         payload = request_json(http, 'GET', GOOGLE_BOOKS, params=params, source='Google Books')
+        telemetry.usage('google_books', calls=1)
     except PriceUnavailable as error:
         # Without a key the anonymous quota is shared and usually spent; say so.
         if 'HTTP 429' in str(error) and 'key' not in params:

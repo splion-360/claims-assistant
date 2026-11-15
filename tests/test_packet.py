@@ -93,7 +93,8 @@ class PacketTests(unittest.TestCase):
         """Emit the sweep, room, book, totals and review sections the contract fixes."""
         self.seed_one_identified_book()
         packet = build_packet(self.database, self.sweep_id, price=False)
-        self.assertEqual(set(packet), {'sweep', 'room', 'books', 'items', 'totals', 'review_queue'})
+        # The brief allows added sections; none of the required ones may be missing.
+        self.assertLessEqual({'sweep', 'room', 'books', 'items', 'totals', 'review_queue'}, set(packet))
         self.assertLessEqual({'id', 'captured_at', 'device', 'duration_s', 'country', 'currency'}, set(packet['sweep']))
         self.assertLessEqual(CONTRACT_ROOM_FIELDS, set(packet['room']))
         self.assertLessEqual(CONTRACT_TOTALS, set(packet['totals']))
@@ -270,6 +271,25 @@ class ArchiveTests(unittest.TestCase):
             self.assertTrue(references)
             self.assertLessEqual(references, names)
             self.assertEqual(opened.read(f'frames/{self.key}'), b'\xff\xd8\xff-not-a-real-jpeg')
+
+    def test_frames_cited_only_by_objects_are_in_the_archive(self):
+        """An object's frame_ref resolves offline even when no book cites that frame."""
+        key = EvidenceStore(self.frames).save(b'\xff\xd8\xff-lamp-frame', 'image/jpeg')
+        start = datetime(2026, 11, 14, 9, 1, tzinfo=timezone.utc)
+        with Repository(self.database) as repo:
+            repo.add_many([
+                Frame(id='f2', sweep_id='sweep1', captured_at=start, evidence_key=key, width_px=640, height_px=480),
+                Item(id='i1', sweep_id='sweep1', category='lighting', description='floor lamp'),
+                ItemObservation(sweep_id='sweep1', item_id='i1', frame_id='f2',
+                                bbox=Box(x_min=.1, y_min=.1, x_max=.5, y_max=.9), category='lighting',
+                                description='floor lamp'),
+            ])
+        archive = packet_archive(self.database, self.frames, 'sweep1', price=False)
+        with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+            packet = json.loads(opened.read('claim_packet.json'))
+            references = {path for line in packet['items'] for path in line['frame_refs']}
+            self.assertEqual(references, {f'frames/{key}'})
+            self.assertLessEqual(references, set(opened.namelist()))
 
     def test_missing_sweep_is_reported(self):
         """Raise rather than return an archive for an unknown sweep."""

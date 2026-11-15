@@ -67,6 +67,7 @@ def search_google_books(title: str, author: str | None, *,
     client = client or httpx.Client(timeout=15)
     try:
         response = client.get(GOOGLE_BOOKS, params=google_books_params(q=query, maxResults=5), headers=HEADERS)
+        telemetry.usage('google_books', calls=1)
         response.raise_for_status()
         payload = response.json()
     finally:
@@ -103,6 +104,7 @@ def _open_library(path: str, params: dict, client: httpx.Client | None) -> dict:
     client = client or httpx.Client(timeout=15)
     try:
         response = client.get(OPEN_LIBRARY + path, params=params, headers=HEADERS)
+        telemetry.usage('open_library', calls=1)
         response.raise_for_status()
         return response.json()
     finally:
@@ -187,8 +189,26 @@ def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: http
     Raises:
         DrexError: The decision could not be obtained.
     """
+    return choose_work_scored(readings, candidates, client=client)[0]
+
+
+def choose_work_scored(readings: dict, candidates: list[WorkCandidate], *,
+                       client: httpx.Client | None = None) -> tuple[WorkCandidate | None, float | None]:
+    """Let Drex pick the work the spine shows, and report how sure it was.
+
+    Args:
+        readings: Spine readings (title, author, publisher, visible_text).
+        candidates: Catalogue candidates.
+        client: Optional HTTP client, used by tests.
+
+    Returns:
+        The chosen work (or None) and Drex's probability for that choice.
+
+    Raises:
+        DrexError: The decision could not be obtained.
+    """
     if not candidates:
-        return None
+        return None, None
     criteria = {f'c{index}': f"{item.title} by {', '.join(item.authors) or 'unknown author'}"
                              f" ({item.first_publish_year or 'year unknown'})" for index, item in enumerate(candidates)}
     criteria['none'] = 'None of these works matches the spine'
@@ -196,10 +216,11 @@ def choose_work(readings: dict, candidates: list[WorkCandidate], *, client: http
                     state={'spine_readings': readings}, client=client, stage='d3')
     answer = result.answers['match']
     if answer.choice == 'none' or answer.choice not in criteria:
-        return None
-    if answer.probabilities.get(answer.choice, 0) < CONFIG.drex.catalogue_min:
-        return None
-    return candidates[int(answer.choice[1:])]
+        return None, None
+    probability = answer.probabilities.get(answer.choice, 0)
+    if probability < CONFIG.drex.catalogue_min:
+        return None, None
+    return candidates[int(answer.choice[1:])], probability
 
 
 def _edition(work: WorkCandidate, publisher: str | None, http: httpx.Client | None = None) -> dict | None:
@@ -243,7 +264,7 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
         return
     latest = book['observations'][-1]
     readings = {key: book.get(key) for key in ('title', 'author', 'publisher')}
-    work, answered = None, False
+    work, answered, confidence = None, False, None
     # Each catalogue is tried in turn until Drex accepts a match; a failing catalogue is skipped.
     for provider, search in catalogue_sources():
         try:
@@ -252,7 +273,7 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
                 reported.model = provider
                 candidates = search(book['title'], book.get('author'), client=http)
                 reported.detail = f'{len(candidates)} candidate(s)'
-            work = choose_work(readings, candidates, client=drex)
+            work, confidence = choose_work_scored(readings, candidates, client=drex)
             answered = True
         except DrexError as error:
             # Without a decision nothing is recorded; the lookup repeats on the next reading change.
@@ -276,6 +297,8 @@ def resolve_book(database: Path, sweep_id: str, book: dict, *, http: httpx.Clien
             return
         repo.add(BookObservation(sweep_id=sweep_id, book_id=book['id'], frame_id=latest['frame_id'],
                                  bbox=latest['bbox'], provenance='catalogue', association_method='catalogue',
+                                 # Drex's probability for this match is the identification confidence.
+                                 association_confidence=confidence,
                                  title=work.title, author=', '.join(work.authors) or None,
                                  edition=edition['edition'] if edition else None,
                                  isbn=edition['isbn'] if edition else None,

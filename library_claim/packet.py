@@ -9,10 +9,12 @@ from pathlib import Path
 
 from library_claim.config import CONFIG
 from library_claim.domain.models import Frame, Sweep
+from library_claim.identification.placement import place_books
 from library_claim.identification.storage import inventory, inventory_totals
 from library_claim.items.pricing import value_items
 from library_claim.items.storage import inventory as item_inventory
 from library_claim.measurement.room_storage import stored_room
+from library_claim.metrics import load_metrics
 from library_claim.pricing.models import NEW_CONDITION, Valuation
 from library_claim.pricing.compare import compare_markets
 from library_claim.pricing.storage import CACHE_FILE, value_sweep
@@ -56,7 +58,8 @@ def _time_to_packet(sweep: Sweep) -> float | None:
     return round((sweep.packet_ready_at - sweep.ended_at).total_seconds(), 1)
 
 
-def _book_line(book: dict, evidence: dict[str, str], valuation: Valuation | None = None) -> dict:
+def _book_line(book: dict, evidence: dict[str, str], valuation: Valuation | None = None,
+               place: tuple[str, int | None] = ('', None)) -> dict:
     """Convert one inventory entry into a claim packet book line.
 
     Catalogue fields fill edition and ISBN only where a catalogue answered, so a
@@ -67,6 +70,7 @@ def _book_line(book: dict, evidence: dict[str, str], valuation: Valuation | None
         book: Inventory entry from `inventory`.
         evidence: Saved frame path indexed by frame ID.
         valuation: Pricing outcome for this book, or None when pricing did not run.
+        place: Shelf label and position from tracked frame geometry, empty when unknown.
 
     Returns:
         A book line holding only values backed by evidence.
@@ -80,8 +84,8 @@ def _book_line(book: dict, evidence: dict[str, str], valuation: Valuation | None
     used = None if appraisal or valuation is None else valuation.used
     return {
         'id': book['id'],
-        # Shelf and position are not yet derived from the sweep; an empty field is the honest value.
-        'shelf': '', 'position': None,
+        # Shelf and order come from where the spine sat in its tracked view; empty when untracked.
+        'shelf': place[0], 'position': place[1],
         'frame_ref': evidence.get(frame_ids[0], '') if frame_ids else '',
         'frame_refs': [evidence[frame_id] for frame_id in frame_ids if frame_id in evidence],
         'status': status,
@@ -92,7 +96,8 @@ def _book_line(book: dict, evidence: dict[str, str], valuation: Valuation | None
         'spine_height_cm': book.get('spine_height_cm'),
         'spine_thickness_cm': book.get('spine_thickness_cm'),
         'scale_method': book.get('scale_method') or '',
-        'id_confidence': None,
+        # Drex's probability for the accepted catalogue match; empty when no catalogue confirmed it.
+        'id_confidence': catalogue.get('confidence'),
         'catalogue_url': catalogue.get('url') or '',
         'observation_count': book.get('observation_count', 0),
         'replacement_cost': replacement.as_replacement_block() if replacement else dict(NO_REPLACEMENT_COST),
@@ -264,6 +269,7 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
         books = inventory(repo, sweep_id)
         contents = item_inventory(repo, sweep_id)
         room = stored_room(repo, sweep_id)
+        places = place_books(repo, sweep_id, [book['id'] for book in books])
     # frame_ref must resolve to a file an adjuster can open, so it names the saved JPEG.
     evidence = {frame.id: f'frames/{frame.evidence_key}' for frame in frames}
     kept = [book for book in books if not book.get('excluded')]
@@ -277,7 +283,8 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
     # Objects already priced keep their saved figure, so a second download fetches nothing.
     item_values = value_items(database, sweep_id, objects, chosen, client=client) if price else {}
     items = [_item_line(entry, evidence, item_values.get(entry['id'])) for entry in objects]
-    lines = [_book_line(book, evidence, valuations.get(book['id'])) for book in kept]
+    lines = [_book_line(book, evidence, valuations.get(book['id']), places.get(book['id'], ('', None)))
+             for book in kept]
     currency = sweep.currency or next((value.currency for value in valuations.values() if value.currency), '')
     comparison = _comparison(database, kept, chosen, client) if price and compare else None
     packet = {
@@ -297,6 +304,8 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
     }
     if comparison is not None:
         packet['locale_comparison'] = comparison
+    # Latency per stage and estimated cost, as metered during the sweep and its finishing.
+    packet['metrics'] = load_metrics(database, sweep_id)
     return packet
 
 
@@ -395,6 +404,32 @@ def _comparison_html(comparison: dict | None) -> str:
             f'<table><thead><tr><th>Title</th>{head}</tr></thead><tbody>{rows}</tbody></table>')
 
 
+def _metrics_html(metrics: dict | None) -> str:
+    """Render latency per stage and the estimated cost of the sweep.
+
+    Args:
+        metrics: The packet's metrics block, or None.
+
+    Returns:
+        An HTML section, or a note that the sweep was not metered.
+    """
+    if not metrics:
+        return '<h2>Cost and latency</h2><p class="unknown">This sweep was not metered.</p>'
+    cost = metrics['cost_usd']
+    sources = ''.join(f'<tr><td>{escape(source)}</td><td>{escape(json.dumps(counters))}</td>'
+                      f'<td class="n">{_cell(cost["by_source"].get(source))}</td></tr>'
+                      for source, counters in metrics['usage'].items())
+    stages = ''.join(f'<tr><td>{escape(stage)}</td><td class="n">{row["count"]}</td><td class="n">{row["errors"]}</td>'
+                     f'<td class="n">{row["p50"]}</td><td class="n">{row["p95"]}</td><td class="n">{row["max"]}</td></tr>'
+                     for stage, row in metrics['latency_ms'].items())
+    missing = (f'<p class="meta">Not estimated (no unit price configured): {escape(", ".join(cost["not_estimated"]))}</p>'
+               if cost['not_estimated'] else '')
+    return (f'<h2>Cost and latency</h2><p>Estimated cost USD {cost["estimated_total"]:.4f} · {escape(cost["basis"])}</p>'
+            f'{missing}<table><thead><tr><th>Source</th><th>Usage</th><th>USD</th></tr></thead><tbody>{sources}</tbody></table>'
+            f'<table><thead><tr><th>Stage</th><th>Runs</th><th>Errors</th><th>p50 ms</th><th>p95 ms</th><th>max ms</th></tr>'
+            f'</thead><tbody>{stages}</tbody></table>')
+
+
 def _money(block: dict, currency: str) -> str:
     """Render a money block with its source, or state that no price was found.
 
@@ -425,12 +460,14 @@ def render_report(packet: dict) -> str:
     sweep, room, totals = packet['sweep'], packet['room'], packet['totals']
     currency = sweep.get('currency') or ''
     books = ''.join(
-        f'<tr><td>{_cell(line["status"])}</td><td>{_cell(line["title"])}</td><td>{_cell(line["author"])}</td>'
+        f'<tr><td>{_cell(line["status"])}</td><td>{_cell(line["shelf"])}</td><td class="n">{_cell(line["position"])}</td>'
+        f'<td>{_cell(line["title"])}</td><td>{_cell(line["author"])}</td>'
+        f'<td class="n">{_cell(line["id_confidence"])}</td>'
         f'<td>{_cell(line["isbn"])}</td><td class="n">{_cell(line["spine_height_cm"])}</td>'
         f'<td class="n">{_cell(line["spine_thickness_cm"])}</td><td>{_cell(line["scale_method"])}</td>'
         f'<td>{_money(line["replacement_cost"], currency)}</td><td>{_money(line["used_value"], currency)}</td>'
         f'<td><code>{_cell(line["frame_ref"])}</code></td></tr>'
-        for line in packet['books']) or '<tr><td colspan="10" class="unknown">No books recorded.</td></tr>'
+        for line in packet['books']) or '<tr><td colspan="13" class="unknown">No books recorded.</td></tr>'
     items = ''.join(
         f'<tr><td>{_cell(item.get("category"))}</td><td>{_cell(item.get("description"))}</td>'
         f'<td>{_cell(item.get("brand_model"))}</td><td>{_cell(item.get("status"))}</td>'
@@ -477,9 +514,9 @@ def render_report(packet: dict) -> str:
 </dl>
 <p>Scale from {_cell(room["scale_method"])} · confidence {_cell(room["confidence"])}{
  f' · swept {round(room["yaw_coverage"] * 100)}% of a full turn' if room.get("yaw_coverage") is not None else ''}</p>
-{f'<p>{escape(str(room["shape_note"]))}</p>' if room.get("shape_note") else ''}
+{f'<p>Shape: {escape(str(room.get("shape")))} (rectangularity {_cell(room.get("rectangularity"))}). {escape(str(room["shape_note"]))}</p>' if room.get("shape_note") else ''}
 <h2>Books ({len(packet["books"])})</h2>
-<table><thead><tr><th>Status</th><th>Title</th><th>Author</th><th>ISBN</th><th>Height cm</th>
+<table><thead><tr><th>Status</th><th>Shelf</th><th>Pos</th><th>Title</th><th>Author</th><th>ID conf.</th><th>ISBN</th><th>Height cm</th>
  <th>Thick cm</th><th>Scale</th><th>Replacement</th><th>Used</th><th>Frame</th></tr></thead>
 <tbody>{books}</tbody></table>
 <h2>Non-book items ({len(packet["items"])})</h2>
@@ -487,6 +524,7 @@ def render_report(packet: dict) -> str:
  <th>Frame</th></tr></thead>
 <tbody>{items}</tbody></table>
 {_comparison_html(packet.get("locale_comparison"))}
+{_metrics_html(packet.get("metrics"))}
 <h2>Review queue ({len(packet["review_queue"])})</h2>
 <table><thead><tr><th>Line</th><th>Reason</th></tr></thead><tbody>{review}</tbody></table>
 </body></html>'''
@@ -521,7 +559,9 @@ def packet_archive(database: Path, frames_root: Path, sweep_id: str, *, price: b
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('claim_packet.json', json.dumps(packet, indent=2))
         archive.writestr('report.html', render_report(packet))
-        for reference in sorted({path for line in packet['books'] for path in line['frame_refs']}):
+        # Books and objects both cite frames; every one must open from the archive alone.
+        cited = {path for line in packet['books'] + packet['items'] for path in line['frame_refs']}
+        for reference in sorted(cited):
             # A frame missing from disk is skipped; the packet still names it for the adjuster.
             try:
                 archive.writestr(reference, evidence.read(reference.split('/', 1)[1]))

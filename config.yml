@@ -207,3 +207,13 @@ items:
   association_min_iou: 0.45
   max_appearance_candidates: 3
   print_statements: [print, poster, reproduction, reprint, not an original, it is a copy]
+costs:
+  # USD unit prices used to estimate cost per sweep from the usage counted during it.
+  # Leave a price empty until you have checked it on the provider's price page; that
+  # source is then reported as "not estimated" instead of guessed.
+  nimble: {calls: 0.001}          # Nimble pricing page, Extract: $1.00 per 1,000 URLs (read 2026-11-15)
+  google_books: {calls: 0.0}      # Books API: no per-call charge within the daily quota
+  open_library: {calls: 0.0}      # free public API
+  drex: {calls: null}
+  deepgram_tts: {characters: null}
+  deepgram_stt: {seconds: null}

@@ -286,6 +286,7 @@ def inventory(repo: Repository, sweep_id: str) -> list[dict]:
                        'catalogue': None if catalogue is None else {
                            'title': catalogue.title, 'author': catalogue.author, 'edition': catalogue.edition,
                            'isbn': catalogue.isbn, 'url': catalogue.catalogue_url,
+                           'confidence': catalogue.association_confidence,
                            'retrieved_at': catalogue.retrieved_at.isoformat() if catalogue.retrieved_at else None},
                        'valuation': valuations.get(book.id),
                        'member_ids': [key for key, root in roots.items() if root == book.id],

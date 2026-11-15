@@ -106,6 +106,13 @@ class RoomGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(room['floor_area_sqft'], room['floor_area_m2'] * 10.7639, delta=0.2)
         self.assertAlmostEqual(room['wall_area_sqft'], room['wall_area_m2'] * 10.7639, delta=0.2)
 
+    def test_shape_handling_is_reported(self):
+        """A rectangular room is reported as one, with the outline method named."""
+        room = estimate_room(full_turn()).as_packet_room()
+        self.assertEqual(room['shape'], 'rectangle')
+        self.assertGreaterEqual(room['rectangularity'], 0.9)
+        self.assertIn('convex hull', room['shape_method'])
+
     def test_a_full_turn_reports_complete_coverage(self):
         """Report full coverage when the sweep looked all the way round."""
         self.assertEqual(estimate_room(full_turn()).yaw_coverage, 1.0)

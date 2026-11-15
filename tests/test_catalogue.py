@@ -181,6 +181,13 @@ class ResolveBookTests(unittest.TestCase):
         self.assertEqual(entry['catalogue']['title'], 'Dune')
         self.assertEqual(entry['title'], 'Dune')
 
+    def test_match_probability_becomes_the_packet_id_confidence(self):
+        """Drex's probability for the accepted match is reported as id_confidence."""
+        self.resolve(self.book(), probability=0.83)
+        from library_claim.packet import build_packet
+        packet = build_packet(self.store.database, 'sweep', price=False)
+        self.assertEqual(packet['books'][0]['id_confidence'], 0.83)
+
     def test_isbn_needs_a_matching_spine_publisher(self):
         """Attach an ISBN only when the publisher read on the spine matches the record."""
         self.resolve(self.book(publisher='Ace Books'))

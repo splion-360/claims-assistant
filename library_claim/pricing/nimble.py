@@ -12,6 +12,7 @@ from urllib.parse import quote_plus
 
 import httpx
 
+from library_claim import telemetry
 from library_claim.config import CONFIG
 from library_claim.identification.matching import normalize
 from library_claim.sources import HEADERS
@@ -127,6 +128,8 @@ def fetch_page(url: str, country: str, *, client: httpx.Client | None = None) ->
     finally:
         if owned:
             http.close()
+    # Only successful page loads are billed by the source.
+    telemetry.usage('nimble', calls=1)
     html = ((payload.get('data') or {}).get('html') if isinstance(payload, dict) else None) or ''
     if not isinstance(payload, dict) or payload.get('status') != 'success' or not html:
         # The service answered but the store page did not load (blocked, captcha, empty).

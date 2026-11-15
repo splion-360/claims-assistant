@@ -99,7 +99,10 @@ async def _attempt(client: httpx.AsyncClient, messages: list[dict], schema: type
         content = choice['message'].get('content')
         if not isinstance(content, str) or not content.strip():
             raise InferenceError('Model provider returned no usable answer. Please retry.')
-        logger.info('Provider model=%s latency_s=%.2f usage=%s', model, time.monotonic() - started, body.get('usage', {}))
+        spent = body.get('usage') or {}
+        logger.info('Provider model=%s latency_s=%.2f usage=%s', model, time.monotonic() - started, spent)
+        telemetry.usage(f'model:{model}', calls=1, input_tokens=spent.get('prompt_tokens') or 0,
+                        output_tokens=spent.get('completion_tokens') or 0)
         return content
     except httpx.RequestError:
         raise InferenceError('Could not reach the model provider (timed out or offline). Please retry.') from None

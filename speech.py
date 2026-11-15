@@ -9,6 +9,7 @@ import httpx
 from websockets.asyncio.client import connect
 
 from library_claim.config import CONFIG
+from library_claim import telemetry
 
 
 def speakable(text: str) -> str:
@@ -89,6 +90,8 @@ async def synthesize(text: str):
                                          json={'text': text[start:start + CONFIG.speech.tts_chunk_chars]}) as response:
                     if response.status_code != 200:
                         raise SpeechError(f'Deepgram speech failed (HTTP {response.status_code}). Text is still available.')
+                    # Speech is billed per character synthesized.
+                    telemetry.usage('deepgram_tts', characters=len(text[start:start + CONFIG.speech.tts_chunk_chars]))
                     pending = b''
                     async for chunk in response.aiter_bytes():
                         pending += chunk

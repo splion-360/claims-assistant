@@ -110,6 +110,7 @@ from library_claim.items.models import INSTRUCTION as ITEM_INSTRUCTION
 from library_claim.items.models import ItemFrameAnalysis
 from library_claim.items.storage import current_items, save_items
 from library_claim.finish import finish_sweep
+from library_claim.metrics import SweepMeter
 from library_claim.items.models import APPRAISAL_CATEGORIES
 from library_claim.packet import build_packet
 from library_claim.storage.sweep_state import mark_packet_ready, mark_sweep_ended, set_stated_print, set_sweep_locale
@@ -193,6 +194,8 @@ class IntakeSession:
     # Framed piece the agent last asked "original or print?" about, and every piece asked about.
     pending_art: str | None = None
     asked_art: set[str] = field(default_factory=set)
+    # Latency per stage and paid usage for this sweep, shared by the live loop and the download.
+    meter: Any = None
     sweep_phase: str = "Sweeping"
     capture_instruction: str = "Sweep slowly across the shelves."
     capture_target: str | None = None
@@ -1107,13 +1110,16 @@ def download_claim_packet(session_id: str, request: Request):
     Raises:
         HTTPException: The sweep is not owned by this caller or has no saved evidence.
     """
-    owned_session(session_id, request.cookies.get("intake_owner"))
+    session = owned_session(session_id, request.cookies.get("intake_owner"))
     started = time.monotonic()
+    meter = session_meter(session)
     # Complete anything the live loop left unfinished (failed lookups, a restart mid-sweep).
     try:
-        finish_sweep(CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR, session_id)
+        with telemetry.listening(meter.record):
+            finish_sweep(CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR, session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="No saved sweep evidence for this session.")
+    meter.save(CAPTURE_DATA_DIR / "claims.sqlite3")
     try:
         archive = packet_archive(
             CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR / "frames", session_id
@@ -1203,6 +1209,20 @@ async def measure_sweep_room(session: IntakeSession) -> None:
             session.room = room
     except Exception as error:  # noqa: BLE001 - a missed room must not disturb the inventory
         logger.warning("room measurement failed: %s", type(error).__name__)
+
+
+def session_meter(session: IntakeSession) -> SweepMeter:
+    """Return the sweep's meter, resuming saved counters after a restart.
+
+    Args:
+        session: Sweep session.
+
+    Returns:
+        The shared meter.
+    """
+    if session.meter is None:
+        session.meter = SweepMeter.load(CAPTURE_DATA_DIR / "claims.sqlite3", session.session_id)
+    return session.meter
 
 
 async def finish_sweep_background(session: IntakeSession) -> None:
@@ -1555,7 +1575,13 @@ async def live_voice(websocket: WebSocket) -> None:
     session.live_model = MODEL
     # Everything this connection starts, including worker threads, reports stage events to /flow.
     FLOW.bind(asyncio.get_running_loop())
-    telemetry.attach(FLOW.publish)
+    meter = session_meter(session)
+
+    def listener(event):
+        """Send each stage event to the flow view and to this sweep's meter."""
+        FLOW.publish(event)
+        meter.record(event)
+    telemetry.attach(listener)
     await websocket.accept()
     send_lock = asyncio.Lock()
     tasks = set()
@@ -1860,6 +1886,7 @@ async def live_voice(websocket: WebSocket) -> None:
         if session.deleted or session.camera_enabled:
             return
         await asyncio.to_thread(mark_packet_ready, database, session.session_id)
+        await asyncio.to_thread(meter.save, database)
         if not (session.book_inventory or session.item_inventory):
             return
         # Skipped walls are named first; the user may resume within the same pass.
@@ -2628,6 +2655,8 @@ async def live_voice(websocket: WebSocket) -> None:
         for task in list(tasks):
             task.cancel()
         await asyncio.gather(*list(tasks), return_exceptions=True)
+        with contextlib.suppress(Exception):
+            meter.save(CAPTURE_DATA_DIR / "claims.sqlite3")
         for pending in (from_browser, from_phone):
             if pending is not None:
                 pending.cancel()

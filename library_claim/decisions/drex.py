@@ -200,6 +200,9 @@ def _decide(questions: dict[str, dict], state: object, images: list[bytes] | Non
         value = None if answer is None else getattr(answer, question['type'], None)
         if answer is None or answer.type != question['type'] or value is None:
             raise DrexError('Drex returned an incomplete decision.', response.status_code)
+    spent = body.get('usage') or {}
+    telemetry.usage('drex', calls=1, **{key: spent[key] for key in ('input_tokens', 'output_tokens', 'image_tokens')
+                                        if isinstance(spent.get(key), (int, float))})
     logger.info('Drex request_id=%s latency_ms=%.0f input_tokens=%d', result.request_id,
                 result.latency_ms, result.input_tokens)
     return result

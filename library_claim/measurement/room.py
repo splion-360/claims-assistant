@@ -12,6 +12,12 @@ logger = logging.getLogger(__name__)
 SQUARE_FEET_PER_SQUARE_METRE = 10.763910416709722
 
 
+# An outline filling this share of its bounding rectangle is reported as a rectangle.
+RECTANGLE_MIN = 0.9
+SHAPE_METHOD = ('convex hull of floor points seen in posed depth; floor area is the hull area and wall '
+                'area is the hull perimeter times ceiling height, so recesses are filled in')
+
+
 @dataclass(frozen=True)
 class RoomEstimate:
     """One sweep's room geometry, with the coverage that backs it."""
@@ -47,7 +53,21 @@ class RoomEstimate:
             'yaw_coverage': round(self.yaw_coverage, 2), 'sample_count': self.sample_count,
             'footprint_m': [[round(x, 2), round(z, 2)] for x, z in self.footprint_m],
             'shape_note': self.note,
+            # How the outline was formed, and how close it is to the length-by-width rectangle.
+            'shape_method': SHAPE_METHOD,
+            'rectangularity': round(self.rectangularity, 2),
+            'shape': 'rectangle' if self.rectangularity >= RECTANGLE_MIN else 'irregular',
         }
+
+    @property
+    def rectangularity(self) -> float:
+        """Floor area as a share of the bounding length-by-width rectangle.
+
+        Returns:
+            1.0 for a rectangle; lower for L-shapes and angled walls.
+        """
+        bounding = self.length_m * self.width_m
+        return min(1.0, self.floor_area_m2 / bounding) if bounding else 0.0
 
 
 def world_points(depth: DepthMap, stride: int = 2) -> np.ndarray:

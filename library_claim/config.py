@@ -320,6 +320,8 @@ class AppConfig(Settings):
     measurement: MeasurementConfig
     pricing: PricingConfig
     items: ItemsConfig
+    # USD unit price per counter, per billing source; None means not checked, so not estimated.
+    costs: dict[Text, dict[Text, float | None]] = {}
 
 
 def load_config(path: Path = ROOT / 'config.yml') -> AppConfig:

@@ -131,5 +131,10 @@ class DrexClientTests(unittest.TestCase):
         with telemetry.listening(events.append):
             decide({'book_visible': noul('?'), 'issue': choice('?', {'none': 'a', 'no_books': 'b'})}, state='x',
                    stage='d1', client=client_for(lambda request: httpx.Response(200, json=SMOKE_RESPONSE)))
-        self.assertEqual([(e['stage'], e['phase']) for e in events], [('d1', 'start'), ('d1', 'done')])
-        self.assertEqual(events[1]['detail'], 'book_visible 0.00 · issue no_books 0.99')
+        stages = [e for e in events if e['stage'] != 'usage']
+        self.assertEqual([(e['stage'], e['phase']) for e in stages], [('d1', 'start'), ('d1', 'done')])
+        self.assertEqual(stages[1]['detail'], 'book_visible 0.00 · issue no_books 0.99')
+        # The call's tokens are reported for the sweep's cost.
+        usage = [e['usage'] for e in events if e['stage'] == 'usage']
+        self.assertEqual(usage, [{'source': 'drex', 'calls': 1, 'input_tokens': 803, 'output_tokens': 298,
+                                  'image_tokens': 576}])
