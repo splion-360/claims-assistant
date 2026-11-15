@@ -37,13 +37,12 @@ def title_prompt(signals):
 
 
 class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
-    async def drive(self, receive, *, workflow=None, reply=None, frame_check=None, prompt=None, depth=None,
+    async def drive(self, receive, *, reply=None, frame_check=None, prompt=None, depth=None,
                     library=False):
         """Exercise live transport with isolated evidence storage.
 
         Args:
             receive: Async function supplying simulated browser messages.
-            workflow: Optional background workflow implementation.
             reply: Optional conversation implementation.
             frame_check: Optional D1 decision double; by default every check fails.
             prompt: Optional D6 decision double; by default it asks for missing titles only.
@@ -76,7 +75,6 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
              patch.dict('os.environ', {'DREX_API_KEY': ''}), \
              patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name)), \
              patch.object(s, '_has_api_key', return_value=True), \
-             patch.object(s, 'run_claim_workflow', side_effect=workflow or AsyncMock(return_value=s.build_initial_workflow_state())), \
              patch.object(s, 'complete', side_effect=reply or AsyncMock(return_value='What happened?')):
             await asyncio.wait_for(s.live_voice(WS()), 3)
         return session, sent
@@ -95,9 +93,9 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(m['type']=='state' for m in sent))
         self.assertFalse([m for m in sent if m['type']=='processing'][-1]['active'])
 
-    async def test_slow_workflow_does_not_block_camera_or_close(self):
+    async def test_slow_reply_does_not_block_camera_or_close(self):
         started=asyncio.Event();count=0
-        async def workflow(*args,**kwargs):
+        async def reply(*args,**kwargs):
             started.set();await asyncio.Event().wait()
         async def receive(session,sent):
             nonlocal count
@@ -108,7 +106,7 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
                 return {'type':'video','data':base64.b64encode(b'\xff\xd8\xffTEST').decode()}
             self.assertEqual(session.last_frame,b'\xff\xd8\xffTEST')
             return {'type':'close'}
-        session,_=await self.drive(receive,workflow=workflow)
+        session,_=await self.drive(receive,reply=reply)
         self.assertIsNone(session.live_socket)
         self.assertIsNone(session.last_frame)
         self.assertFalse(session.tasks)
@@ -193,19 +191,6 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             session,sent=await self.drive(receive)
         self.assertEqual([t['text'] for t in session.transcript],['No injuries.','What happened?'])
         self.assertTrue(any(m['type']=='audio' for m in sent))
-        self.assertFalse(session.tasks)
-
-    async def test_reply_does_not_wait_for_background_packet(self):
-        count=0
-        async def workflow(*args,**kwargs):await asyncio.Event().wait()
-        async def receive(session,sent):
-            nonlocal count
-            count+=1
-            if count==1:return {'type':'text','text':'Hello','id':'one'}
-            while not any(m['type']=='transcript' and m['speaker']=='Agent' for m in sent):await asyncio.sleep(.001)
-            return {'type':'close'}
-        session,_=await self.drive(receive,workflow=workflow)
-        self.assertEqual(session.transcript[-1]['text'],'What happened?')
         self.assertFalse(session.tasks)
 
 

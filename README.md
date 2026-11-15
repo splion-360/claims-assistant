@@ -150,7 +150,7 @@ A value the system did not produce counts as a miss, and a bar without ground tr
 | --- | --- |
 | Kept | The interaction pattern: a live voice and camera session, a claim file building itself on screen, background work assembling the packet. The FastAPI server and browser console started from it; Deepgram speech replaced its voice layer. |
 | Changed | The agent directs the capture instead of describing frames; every decision goes through Drex with thresholds in config; output is an itemised, priced, measured packet with sources instead of a narrative. |
-| Thrown away | Damage description, the adjuster narrative and policy checks are no longer reached: every session starts as a library sweep. Their modules (`agent.py`, `policies.py`, `policy_directory.py`, `schemas.py`) are still in the repository and imported by the server; removing them is outstanding work. |
+| Thrown away | Damage description, the adjuster narrative, policy lookup, coverage and fraud rules, and the claim-intake workflow, with their modules and tests. |
 
 ## Configuration
 
@@ -178,7 +178,7 @@ tests/
 ## Tests
 
 ```sh
-.venv/bin/python -m unittest discover -s tests   # 474 tests
+.venv/bin/python -m unittest discover -s tests   # 454 tests
 node tests/client-regressions.cjs                #  29, sweep console
 node tests/inventory-regressions.cjs             #  13, inventory tables
 node tests/capture-regressions.cjs               #   5, phone capture
