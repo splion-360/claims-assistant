@@ -12,6 +12,7 @@ from pathlib import Path
 
 import httpx
 
+from library_claim import telemetry
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.decisions.drex import DrexError
 from library_claim.decisions.listing_match import listing_probabilities
@@ -76,6 +77,7 @@ def amazon_item_price(item: dict, chosen: Market, *, client: httpx.Client | None
         raise PriceUnavailable('Listing match could not be decided', transient=True) from error
     accepted = [listing for listing, value in zip(listings, probabilities)
                 if value is not None and value >= CONFIG.drex.listing_match_min]
+    telemetry.emit('listing_match', 'outcome', 'priced' if accepted else 'review')
     if not accepted:
         raise PriceUnavailable(f'No listing for "{keyword}" on {chosen.amazon_domain} matched the object')
     now = datetime.now(timezone.utc)

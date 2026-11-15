@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from library_claim import telemetry
 from library_claim.capture.quality import QualityAssessor
 from library_claim.capture.tracking.geometry import intersection_area, transform
 from library_claim.config import CONFIG, CONFIG_DIGEST
@@ -192,6 +193,8 @@ def association_choices(frame: Frame, analysis: BookFrameAnalysis, frames: dict,
                 decision = choose_same_book(probabilities, strong)
             except (DrexError, ValueError, OSError, cv2.error):
                 decision = 'unresolved'
+            telemetry.emit('d2', 'outcome', 'unresolved' if decision == 'unresolved' else
+                           'new' if decision is None else 'same')
             if decision == 'unresolved':
                 method = 'unresolved'
             elif decision is None:

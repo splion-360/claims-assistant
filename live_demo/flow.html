@@ -6,154 +6,334 @@
 <title>Pipeline Flow</title>
 <style>
   :root {
-    --bg: #0f1216; --panel: #171b21; --card: #1e232b; --line: #2c333d; --text: #e7ebf0; --muted: #8c96a3;
+    --bg: #0d1117; --panel: #161b22; --card: #1c2128; --line: #30363d; --edge: #484f58; --text: #e6edf3; --muted: #8b949e;
     --decision: #b388ff; --vision: #4fc3f7; --language: #4dd0e1; --local: #9aa5b1; --speech: #ffb74d; --web: #81c784; --depth: #f06292;
-    --done: #4caf50; --error: #ef5350;
+    --done: #3fb950; --error: #f85149; --running: #d29922;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  /* The whole view fits the window: strips take their natural height, the log takes the rest. */
+  /* Header, graph and log share one screen: the graph scales to fit, the log takes what is left. */
   body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.35 system-ui, -apple-system, Segoe UI, sans-serif;
-         display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
-  header { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); }
-  h1 { font-size: 15px; margin: 0 8px 0 0; }
+         display: grid; grid-template-rows: auto minmax(0, 1fr) auto 120px; overflow: hidden; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 10px 18px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 16px; margin: 0; }
+  .sub { color: var(--muted); font-size: 12px; }
   .stat { color: var(--muted); font-size: 12px; }
-  .stat b { color: var(--text); font-variant-numeric: tabular-nums; }
-  #status { margin-left: auto; font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--card); }
+  .stat b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+  #run { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+  #run::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  #run.live::before { background: var(--running); }
+  #run.ready { border-color: var(--done); color: var(--done); }
+  #run.ready::before { background: var(--done); }
+  #status { margin-left: auto; font-size: 11px; color: var(--muted); }
   #status.live { color: var(--done); }
-  #strips { padding: 8px 16px 0; display: grid; gap: 8px; }
-  .strip { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px 8px; }
-  .strip h2 { margin: 0 0 5px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-  .row { display: flex; align-items: stretch; }
-  .arrow { flex: 0 0 16px; display: flex; align-items: center; justify-content: center; color: var(--line); font-size: 14px; }
-  .card { flex: 1 1 0; min-width: 0; background: var(--card); border: 2px solid var(--line); border-radius: 8px; padding: 5px 8px;
-          display: flex; flex-direction: column; gap: 1px; transition: border-color .3s, box-shadow .3s, opacity .3s; }
-  .card .who { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-  .card .name { font-weight: 600; font-size: 12px; }
-  .card .model { font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
-  .card .detail { color: var(--muted); font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .card .model { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card .name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .card .meta { margin-top: auto; display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .card.decision { border-style: dashed; }
-  .card.active { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); animation: pulse 1s ease-in-out infinite; }
-  .card.done { border-color: var(--done); }
-  .card.error { border-color: var(--error); }
-  .card.error .detail { color: var(--error); }
-  .card.off { opacity: .35; }
-  @keyframes pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 10%, transparent); } }
-  #logWrap { padding: 8px 16px 10px; min-height: 0; display: flex; }
+  #stage { position: relative; min-height: 0; margin: 10px 18px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+  #canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  #edges { position: absolute; left: 0; top: 0; overflow: visible; }
+  .lane { position: absolute; left: 14px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .divider { position: absolute; left: 14px; right: 14px; border-top: 1px dashed var(--line); }
+  path.edge { fill: none; stroke: var(--edge); stroke-width: 2; transition: stroke .3s, opacity .3s; }
+  path.edge.taken { stroke: var(--done); }
+  path.edge.skipped { stroke-dasharray: 5 5; opacity: .45; }
+  .pill { position: absolute; transform: translate(-50%, -50%); font-size: 10px; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line);
+          background: var(--card); color: var(--muted); white-space: nowrap; transition: all .3s; }
+  .pill.taken { border-color: var(--done); color: var(--done); background: color-mix(in srgb, var(--done) 12%, var(--card)); }
+  .pill.skipped { opacity: .5; }
+  .node { position: absolute; width: 124px; height: 64px; transform: translate(-50%, -50%); background: var(--card); border: 1.5px solid var(--line);
+          border-left: 4px solid var(--accent); border-radius: 8px; padding: 5px 8px 4px 26px; display: flex; flex-direction: column; justify-content: center;
+          transition: border-color .3s, box-shadow .3s, opacity .3s; }
+  .node .icon { position: absolute; left: 7px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; border-radius: 50%;
+                border: 1.5px solid var(--muted); display: grid; place-items: center; font-size: 9px; line-height: 1; color: #0d1117; }
+  .node .name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node .model { font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node .meta { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Decisions are hexagons: an outer shape in the border colour and an inner one in the card colour. */
+  .node.decision { border: 0; background: var(--state, var(--decision)); clip-path: polygon(12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%, 0 50%); padding: 0; }
+  .node.decision .inner { position: absolute; inset: 2px; background: var(--card); clip-path: polygon(12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%, 0 50%);
+                          padding: 5px 16px 4px 30px; display: flex; flex-direction: column; justify-content: center; }
+  .node.decision .icon { left: 14px; }
+  .node.terminal { border-style: dashed; border-left-width: 1.5px; padding-left: 26px; }
+  .node.running { border-color: var(--running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 25%, transparent); }
+  .node.running .icon { border-color: var(--running); border-top-color: transparent; animation: spin .9s linear infinite; }
+  .node.done .icon { background: var(--done); border-color: var(--done); }
+  .node.done .icon::after { content: "✓"; }
+  .node.done { border-color: color-mix(in srgb, var(--done) 70%, var(--line)); }
+  .node.error .icon { background: var(--error); border-color: var(--error); }
+  .node.error .icon::after { content: "!"; font-weight: 700; }
+  .node.error { border-color: var(--error); }
+  .node.error .meta { color: var(--error); }
+  .node.skipped { opacity: .55; }
+  .node.skipped .icon { border-color: var(--muted); }
+  .node.skipped .icon::after { content: "⊘"; color: var(--muted); font-size: 12px; }
+  .node.off { opacity: .4; border-style: dashed; }
+  .node.decision.running { --state: var(--running); }
+  .node.decision.done { --state: var(--done); }
+  .node.decision.error { --state: var(--error); }
+  @keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
+  footer { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 8px 18px; color: var(--muted); font-size: 12px; align-items: center; }
+  footer span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-block; }
+  .dot.ok { background: var(--done); border-color: var(--done); }
+  .dot.run { border-color: var(--running); }
+  .dot.err { background: var(--error); border-color: var(--error); }
+  .dot.off { border-style: dashed; }
+  .hex { width: 16px; height: 12px; background: var(--decision); clip-path: polygon(20% 0, 80% 0, 100% 50%, 80% 100%, 20% 100%, 0 50%); display: inline-block; }
+  #logWrap { padding: 0 18px 12px; min-height: 0; display: flex; }
   #log { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; overflow-y: auto;
          font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
   #log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #log .t { color: var(--muted); }
-  @media (prefers-reduced-motion: reduce) { .card.active { animation: none; } }
-  @media (max-width: 900px) { body { overflow: auto; } .row { flex-wrap: wrap; gap: 6px; } .arrow { display: none; } .card { flex-basis: 140px; } }
+  @media (prefers-reduced-motion: reduce) { .node.running .icon { animation: none; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>Library agent · live pipeline</h1>
-  <span class="stat">Decision model calls <b id="drexCount">0</b></span>
-  <span class="stat">Decision avg <b id="drexAvg">0</b></span>
-  <span class="stat">Vision/language model calls <b id="modelCount">0</b></span>
-  <span class="stat">Model fallbacks <b id="fallbackCount">0</b></span>
+  <div><h1>Library agent · live pipeline</h1><div class="sub" id="runline">Waiting for a sweep</div></div>
+  <span id="run">Idle</span>
+  <span class="stat">Sweep <b id="duration">-</b></span>
+  <span class="stat">Time to packet <b id="ttp">-</b></span>
+  <span class="stat">Market <b id="market">-</b></span>
+  <span class="stat">Decisions <b id="drexCount">0</b> · avg <b id="drexAvg">-</b></span>
+  <span class="stat">Model calls <b id="modelCount">0</b></span>
+  <span class="stat">Fallbacks <b id="fallbackCount">0</b></span>
   <span id="status">Connecting…</span>
 </header>
-<main id="strips"></main>
+<div id="stage"><div id="canvas"><svg id="edges"></svg></div></div>
+<footer>
+  <span><i class="dot ok"></i>Succeeded</span><span><i class="dot run"></i>Running</span><span><i class="dot err"></i>Failed</span>
+  <span>⊘ Skipped (branch not taken)</span><span><i class="dot off"></i>Disabled in config</span>
+  <span><i class="hex"></i>Decision model (Drex)</span>
+</footer>
 <div id="logWrap"><div id="log" aria-live="polite"></div></div>
 <script>
-// Each step is labelled by its role; the model line shows whichever model actually answered.
+// Canvas coordinates: the whole graph is laid out at this size and scaled to fit the window.
+// Per-frame work runs along the first band; identification, pricing and the finish run along the
+// second, fed through the connector between them; voice and guidance share the last band.
+const W = 1560, H = 650, X0 = 115, DX = 172, NODE_W = 140, NODE_H = 58;
+const ROWS = { a: 58, b: 140, c: 222, d: 318, e: 400, f: 482, g: 600 };
+const GUTTER = 270;
+const x = col => X0 + col * DX;
 const WHO = { decision: "Decision model", vision: "Vision model", language: "Language model", local: "Local",
-              speech: "Speech model", web: "Catalogue", depth: "Depth model" };
-const STRIPS = [
-  { title: "1 · Capture, every camera frame", blocks: [
-    ["camera", "local", "Browser camera"], ["tracking", "local", "Tracking (SIFT / optical flow)"],
-    ["gate", "local", "Local gate (sharpness, exposure)"], ["d1", "decision", "Book visible? What's wrong?"],
-    ["save", "local", "Evidence store"]] },
-  { title: "2 · Identification, per frame with books", blocks: [
-    ["spine_reading", "vision", "Spine reading"], ["d2", "decision", "Same book as one seen before?"],
-    ["inventory", "local", "Inventory update"], ["depth", "depth", "Spine measurement"],
-    ["catalogue", "web", "Catalogue search"],
-    ["d3", "decision", "Which catalogue entry matches?"]] },
-  { title: "3 · Voice, what the user says", blocks: [
-    ["stt", "speech", "Speech to text"], ["d5", "decision", "What did the user mean?"],
-    ["correction", "local", "Correction applied"], ["reply", "language", "Reply"], ["tts", "speech", "Speech out"]] },
-  { title: "4 · Guidance, when the agent speaks up", blocks: [
-    ["d6", "decision", "Speak now? Which prompt?"], ["guidance", "local", "Prompt chosen → Speech out"],
-    ["announce", "local", "Book announced → Speech out"]] },
+              speech: "Speech model", web: "Catalogue / prices", depth: "Depth", terminal: "Outcome" };
+// Nodes: [id, column, row, role, name]. Terminals are outcomes, lit when a decision sends work there.
+const NODES = [
+  ["camera", 0, "b", "local", "Browser camera"], ["tracking", 1, "b", "local", "Tracking"],
+  ["gate", 2, "b", "local", "Local gate"], ["d1", 3, "b", "decision", "Book visible?"],
+  ["save", 4, "b", "local", "Evidence store"], ["dropped", 4, "c", "terminal", "Frame not used"],
+  ["spine_reading", 5, "b", "vision", "Spine reading"], ["item_detection", 5, "a", "vision", "Object detection"],
+  ["items", 6, "a", "local", "Object list"], ["d2", 6, "b", "decision", "Same book?"],
+  ["listing_match", 7, "a", "decision", "Listing matches?"], ["inventory", 7, "b", "local", "Inventory"],
+  ["catalogue", 0, "e", "web", "Catalogue search"], ["depth", 0, "f", "depth", "Spine size"],
+  ["d3", 1, "e", "decision", "Catalogue match?"], ["review", 2, "d", "terminal", "Review queue"],
+  ["pricing", 2, "e", "web", "Book prices"], ["room", 3, "d", "depth", "Room geometry"],
+  ["finish", 4, "e", "local", "Finish sweep"], ["summary", 5, "e", "local", "Summary spoken"],
+  ["claim_packet", 5, "f", "local", "Claim packet"],
+  ["stt", 0, "g", "speech", "Speech to text"], ["d5", 1, "g", "decision", "Correction?"],
+  ["correction", 2, "g", "local", "Correction saved"], ["reply", 3, "g", "language", "Reply"],
+  ["tts", 4, "g", "speech", "Speech out"],
+  ["d6", 5.4, "g", "decision", "Speak now?"], ["guidance", 6.4, "g", "local", "Capture prompt"],
+  ["announce", 7.4, "g", "local", "Book announced"],
 ];
-const cards = {}, timers = {};
-const LABELS = { fallback: "Model fallback" };
-let fallbackCount = 0;
+// Edges: [from, to, label, outcomes, route]. An edge with outcomes lights when its decision answers
+// one of them and is marked skipped when it answers anything else. Routes: "arc" lifts an edge over
+// its row, "wrap" carries it through the connector to the second band, "top" enters a node from above,
+// "below" puts a straight edge's label under it when the label above would meet a sibling's.
+const EDGES = [
+  ["camera", "tracking"], ["tracking", "gate"], ["gate", "d1"],
+  ["d1", "save", "admit", ["admit"]], ["d1", "dropped", "drop", ["drop"]],
+  ["save", "spine_reading"], ["save", "item_detection"], ["item_detection", "items"],
+  ["items", "listing_match"],
+  ["spine_reading", "d2"], ["d2", "inventory", "same / new", ["same", "new", "unresolved"]],
+  ["inventory", "catalogue", null, null, "wrap"], ["inventory", "depth", null, null, "wrap"],
+  ["listing_match", "finish", "priced", ["priced"], "top"],
+  ["catalogue", "d3"], ["d3", "pricing", "matched", ["matched"], "below"], ["d3", "review", "no match", ["review"]],
+  ["pricing", "finish"], ["depth", "finish"], ["room", "finish"],
+  ["finish", "summary"], ["finish", "claim_packet"],
+  ["stt", "d5"], ["d5", "correction", "correction", ["correction"]],
+  ["d5", "reply", "chat", ["chat"], "arc"], ["correction", "reply"], ["reply", "tts"],
+  ["d6", "guidance", "speak", ["speak"]], ["guidance", "announce"],
+];
+const LABELS = { fallback: "Model fallback", locale: "Market confirmed", items: "Object list" };
+const cards = {}, edgeEls = [], timers = {};
+let drexCount = 0, drexTotalMs = 0, modelCount = 0, fallbackCount = 0;
+let sweepStart = null, sweepEnd = null;
 
-// Build the strips once; each card is updated in place by stage events.
-const root = document.getElementById("strips");
-for (const strip of STRIPS) {
-  const section = document.createElement("section");
-  section.className = "strip";
-  section.innerHTML = `<h2>${strip.title}</h2><div class="row"></div>`;
-  const row = section.querySelector(".row");
-  strip.blocks.forEach(([id, who, name], index) => {
-    if (index) row.insertAdjacentHTML("beforeend", '<div class="arrow" aria-hidden="true">→</div>');
-    const card = document.createElement("div");
-    card.className = `card ${who === "decision" ? "decision" : ""}`;
-    card.style.setProperty("--accent", `var(--${who})`);
-    card.innerHTML = `<span class="who" style="color: var(--${who})">${WHO[who]}</span><span class="name"></span>
-      <span class="model"></span><span class="detail">idle</span><span class="meta"><span class="ms"></span><span class="count">0×</span></span>`;
-    card.querySelector(".name").textContent = name;
-    card.title = `${WHO[who]}: ${name}`;
-    card.dataset.count = "0";
-    row.appendChild(card);
-    cards[id] = card;
-    LABELS[id] = who === "decision" ? `Decision model: ${name}` : name;
-  });
-  root.appendChild(section);
+function build() {
+  const canvas = document.getElementById("canvas"), svg = document.getElementById("edges");
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  for (const [text, left, top] of [["Each admitted frame", 14, 14], ["Identify, price and finish", 14, GUTTER + 14],
+                                   ["Voice", 14, ROWS.g - 54], ["Guidance", x(5.4) - 60, ROWS.g - 54]]) {
+    canvas.insertAdjacentHTML("beforeend", `<div class="lane" style="left:${left}px;top:${top}px">${text}</div>`);
+  }
+  canvas.insertAdjacentHTML("beforeend", `<div class="divider" style="top:${ROWS.g - 62}px"></div>`);
+  for (const [id, col, row, who, name] of NODES) {
+    const node = document.createElement("div");
+    node.className = `node ${who === "decision" ? "decision" : ""} ${who === "terminal" ? "terminal" : ""}`;
+    node.style.left = x(col) + "px"; node.style.top = ROWS[row] + "px";
+    node.style.width = NODE_W + "px"; node.style.height = NODE_H + "px";
+    node.style.setProperty("--accent", who === "terminal" ? "var(--line)" : `var(--${who})`);
+    const body = `<span class="icon"></span><span class="name"></span><span class="model"></span><span class="meta">idle</span>`;
+    node.innerHTML = who === "decision" ? `<div class="inner">${body}</div>` : body;
+    node.querySelector(".name").textContent = name;
+    node.title = `${WHO[who]}: ${name}`;
+    node.dataset.count = "0";
+    canvas.appendChild(node);
+    cards[id] = node;
+    LABELS[id] = who === "decision" ? `Decision: ${name}` : name;
+  }
+  // Edges leave a node's right side and enter the next one's left side, curving between rows.
+  const half = NODE_W / 2;
+  for (const [from, to, label, outcomes, route] of EDGES) {
+    const a = NODES.find(n => n[0] === from), b = NODES.find(n => n[0] === to);
+    const x1 = x(a[1]) + half, y1 = ROWS[a[2]], x2 = x(b[1]) - half, y2 = ROWS[b[2]];
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    let d, mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    if (route === "wrap") {
+      // Down from the end of the first band, back along the connector, into the second band.
+      const turn = x1 + 22, left = X0 - half - 30, r = 10;
+      d = `M${x1},${y1} H${turn - r} Q${turn},${y1} ${turn},${y1 + r} V${GUTTER - r} Q${turn},${GUTTER} ${turn - r},${GUTTER}` +
+          ` H${left + r} Q${left},${GUTTER} ${left},${GUTTER + r} V${y2 - r} Q${left},${y2} ${left + r},${y2} H${x2}`;
+    } else if (route === "top") {
+      // From a node in the first band down through the connector into the top of a node below.
+      const turn = x1 + 22, cx = x(b[1]), top = y2 - NODE_H / 2, r = 10;
+      d = `M${x1},${y1} H${turn - r} Q${turn},${y1} ${turn},${y1 + r} V${GUTTER - 14 - r} Q${turn},${GUTTER - 14} ${turn - r},${GUTTER - 14}` +
+          ` H${cx + r} Q${cx},${GUTTER - 14} ${cx},${GUTTER - 14 + r} V${top}`;
+      mx = cx + 40; my = GUTTER - 14;
+    } else if (route === "arc") {
+      const lift = Math.min(y1, y2) - NODE_H / 2 - 16;
+      d = `M${x1},${y1} C${x1 + 30},${lift} ${x2 - 30},${lift} ${x2},${y2}`; my = lift + 6;
+    } else if (y1 === y2) {
+      d = `M${x1},${y1} L${x2},${y2}`;
+      // Labels on a straight edge sit in the gap above (or below) the row, clear of both nodes.
+      my = route === "below" ? y1 + NODE_H / 2 + 12 : y1 - NODE_H / 2 - 12;
+    } else {
+      const bend = Math.max(18, (x2 - x1) / 2);
+      d = `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`;
+      // A label on a diagonal sits beside the bend, not on the line.
+      mx -= 34;
+    }
+    path.setAttribute("d", d); path.setAttribute("class", "edge");
+    svg.appendChild(path);
+    let pill = null;
+    if (label) {
+      pill = document.createElement("div");
+      pill.className = "pill"; pill.textContent = label;
+      pill.style.left = mx + "px"; pill.style.top = my + "px";
+      canvas.appendChild(pill);
+    }
+    edgeEls.push({ from, to, outcomes: outcomes || null, path, pill });
+  }
+  fit();
 }
 
-let drexCount = 0, drexTotalMs = 0, modelCount = 0;
-function setState(card, state, holdMs) {
-  card.classList.remove("active", "done", "error");
+function fit() {
+  const stage = document.getElementById("stage"), canvas = document.getElementById("canvas");
+  const scale = Math.min(stage.clientWidth / W, stage.clientHeight / H);
+  canvas.style.transform = `scale(${scale})`;
+  canvas.style.left = Math.max(0, (stage.clientWidth - W * scale) / 2) + "px";
+}
+
+function setState(id, state, holdMs) {
+  const card = cards[id];
+  if (!card) return;
+  card.classList.remove("running", "done", "error", "skipped");
   if (state) card.classList.add(state);
-  clearTimeout(timers[card.dataset.timer]);
-  if (holdMs) {
-    const key = Math.random().toString(36).slice(2);
-    card.dataset.timer = key;
-    timers[key] = setTimeout(() => card.classList.remove("done", "error"), holdMs);
+  clearTimeout(timers[id]);
+  if (holdMs) timers[id] = setTimeout(() => card.classList.remove("done", "error", "skipped"), holdMs);
+}
+
+function markEdges(predicate, cls, holdMs) {
+  for (const edge of edgeEls) {
+    if (!predicate(edge)) continue;
+    for (const el of [edge.path, edge.pill]) {
+      if (!el) continue;
+      el.classList.remove("taken", "skipped");
+      if (cls) el.classList.add(cls);
+    }
+    clearTimeout(edge.timer);
+    if (holdMs) edge.timer = setTimeout(() => {
+      for (const el of [edge.path, edge.pill]) el && el.classList.remove("taken", "skipped");
+    }, holdMs);
   }
 }
 
+function seconds(value) {
+  if (value == null) return "-";
+  return value >= 60 ? `${Math.floor(value / 60)}m ${String(Math.round(value % 60)).padStart(2, "0")}s` : `${value.toFixed(1)} s`;
+}
+
+function tick() {
+  if (sweepStart != null) document.getElementById("duration").textContent = seconds((sweepEnd ?? Date.now() / 1000) - sweepStart);
+}
+
+function header(event, replay) {
+  const run = document.getElementById("run"), line = document.getElementById("runline");
+  if (event.stage === "camera" && sweepStart == null) {
+    sweepStart = event.t; sweepEnd = null;
+    run.textContent = "Sweeping"; run.className = "live";
+    line.textContent = `Started ${new Date(event.t * 1000).toLocaleTimeString()}`;
+  }
+  if (event.stage === "finish" && event.phase === "start" && sweepStart != null && sweepEnd == null) {
+    sweepEnd = event.t; run.textContent = "Finishing"; run.className = "live";
+  }
+  if (event.stage === "locale" && event.detail) document.getElementById("market").textContent = event.detail.split(" ")[0];
+  if (event.stage === "summary" && event.phase === "done") {
+    const match = /([\d.]+) s to packet/.exec(event.detail || "");
+    if (match) document.getElementById("ttp").textContent = seconds(Number(match[1]));
+    run.textContent = "Packet ready"; run.className = "ready";
+    if (sweepEnd == null) sweepEnd = event.t;
+  }
+  tick();
+}
+
 function apply(event, replay = false) {
-  // A model fallback has no block of its own; count it and log which model took over.
+  if (event.stage === "usage") return;
+  header(event, replay);
   if (event.stage === "fallback") {
     document.getElementById("fallbackCount").textContent = ++fallbackCount;
     if (!replay) log(event);
     return;
   }
+  // A decision's outcome lights the branch it chose and marks the others as not taken.
+  if (event.phase === "outcome") {
+    const hold = replay ? 0 : 2500;
+    markEdges(e => e.from === event.stage && e.outcomes, null);
+    markEdges(e => e.from === event.stage && e.outcomes && e.outcomes.includes(event.detail), "taken", hold);
+    markEdges(e => e.from === event.stage && e.outcomes && !e.outcomes.includes(event.detail), "skipped", hold);
+    for (const edge of edgeEls.filter(e => e.from === event.stage && e.outcomes)) {
+      const target = cards[edge.to];
+      if (target && target.classList.contains("terminal") && edge.outcomes.includes(event.detail)) setState(edge.to, "done", hold);
+      else if (target && !edge.outcomes.includes(event.detail) && !target.classList.contains("running")) setState(edge.to, "skipped", hold);
+    }
+    if (!replay) log(event);
+    return;
+  }
   const card = cards[event.stage];
-  if (!card) return;
-  const detail = card.querySelector(".detail");
+  if (!card) { if (!replay && LABELS[event.stage]) log(event); return; }
+  const meta = card.querySelector(".meta");
   if (event.phase === "start") {
-    setState(card, "active");
-    detail.textContent = event.detail || "running…";
+    setState(event.stage, "running");
+    meta.textContent = event.detail || "running…";
+    // Work arriving at a node lights the plain edges that feed it.
+    markEdges(e => e.to === event.stage && !e.outcomes, "taken", replay ? 0 : 1500);
     return;
   }
   if (event.model) card.querySelector(".model").textContent = event.model;
-  // A finished step keeps its last result visible after the highlight fades.
-  if (event.detail) detail.textContent = event.detail;
-  else if (event.phase === "done") detail.textContent = "done";
-  if (event.ms != null) card.querySelector(".ms").textContent = `${event.ms} ms`;
   card.dataset.count = String(Number(card.dataset.count) + 1);
-  card.querySelector(".count").textContent = `${card.dataset.count}×`;
-  setState(card, event.phase === "error" ? "error" : event.phase === "done" ? "done" : null,
-           replay ? 0 : event.phase === "error" ? 4000 : 1200);
+  const ms = event.ms != null ? (event.ms >= 1000 ? `${(event.ms / 1000).toFixed(1)} s` : `${event.ms} ms`) : "";
+  meta.textContent = [ms, `${card.dataset.count}×`, event.detail].filter(Boolean).join(" · ");
+  card.title = `${LABELS[event.stage]}: ${event.detail || event.phase}`;
+  setState(event.stage, event.phase === "error" ? "error" : event.phase === "done" ? "done" : null,
+           replay ? 0 : event.phase === "error" ? 5000 : 1500);
+  if (event.phase === "done") markEdges(e => e.to === event.stage && !e.outcomes, "taken", replay ? 0 : 1500);
   if (!replay) log(event);
-  if (/^d\d$/.test(event.stage) && event.phase === "done") {
+  if (/^d\d$|^listing_match$/.test(event.stage) && event.phase === "done") {
     drexCount += 1; drexTotalMs += event.ms || 0;
     document.getElementById("drexCount").textContent = drexCount;
     document.getElementById("drexAvg").textContent = `${Math.round(drexTotalMs / drexCount)} ms`;
   }
-  if ((event.stage === "spine_reading" || event.stage === "reply") && event.phase === "done") {
+  if (["spine_reading", "item_detection", "reply"].includes(event.stage) && event.phase === "done") {
     document.getElementById("modelCount").textContent = ++modelCount;
   }
 }
@@ -163,13 +343,12 @@ function log(event) {
   if (event.stage === "camera" || event.stage === "tracking") return;
   const box = document.getElementById("log");
   const line = document.createElement("div");
-  const time = new Date(event.t * 1000).toLocaleTimeString();
   const ms = event.ms != null ? ` · ${event.ms} ms` : "";
   const model = event.model ? ` · ${event.model}` : "";
-  line.innerHTML = `<span class="t">${time}</span> `;
-  line.append(`${LABELS[event.stage]}: ${event.phase}${event.detail ? ": " + event.detail : ""}${ms}${model}`);
+  line.innerHTML = `<span class="t">${new Date(event.t * 1000).toLocaleTimeString()}</span> `;
+  line.append(`${LABELS[event.stage] || event.stage} · ${event.phase}${event.detail ? ": " + event.detail : ""}${ms}${model}`);
   box.prepend(line);
-  while (box.childElementCount > 80) box.lastElementChild.remove();
+  while (box.childElementCount > 120) box.lastElementChild.remove();
 }
 
 function connect() {
@@ -181,15 +360,21 @@ function connect() {
     for (const [stage, model] of Object.entries(setup.models || {})) {
       if (cards[stage] && model) cards[stage].querySelector(".model").textContent = model;
     }
-    if (!setup.measurement) {
-      cards.depth.classList.add("off");
-      cards.depth.querySelector(".detail").textContent = "off in config.yml";
+    const disabled = new Set(setup.disabled || (setup.measurement ? [] : ["depth"]));
+    for (const stage of disabled) {
+      if (!cards[stage]) continue;
+      cards[stage].classList.add("off");
+      cards[stage].querySelector(".meta").textContent = "off in config";
     }
-    setup.recent.forEach(event => apply(event, true));
+    (setup.recent || []).forEach(event => apply(event, true));
   });
   source.onmessage = message => apply(JSON.parse(message.data));
   source.onerror = () => { status.textContent = "Reconnecting…"; status.className = ""; };
 }
+
+build();
+window.addEventListener("resize", fit);
+setInterval(tick, 1000);
 connect();
 </script>
 </body>

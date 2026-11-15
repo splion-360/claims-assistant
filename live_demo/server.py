@@ -1113,22 +1113,25 @@ def download_claim_packet(session_id: str, request: Request):
     session = owned_session(session_id, request.cookies.get("intake_owner"))
     started = time.monotonic()
     meter = session_meter(session)
-    # Complete anything the live loop left unfinished (failed lookups, a restart mid-sweep).
-    try:
-        with telemetry.listening(meter.record):
-            finish_sweep(CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR, session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="No saved sweep evidence for this session.")
-    meter.save(CAPTURE_DATA_DIR / "claims.sqlite3")
-    try:
-        archive = packet_archive(
-            CAPTURE_DATA_DIR / "claims.sqlite3", CAPTURE_DATA_DIR / "frames", session_id
+    database = CAPTURE_DATA_DIR / "claims.sqlite3"
+
+    def listener(event):
+        """Report the download's stages to the flow view and its usage to the sweep's meter."""
+        if event.get("stage") != "usage":
+            FLOW.publish(event)
+        meter.record(event)
+
+    with telemetry.listening(listener):
+        # Complete anything the live loop left unfinished (failed lookups, a restart mid-sweep).
+        finish_sweep(database, CAPTURE_DATA_DIR, session_id)
+        meter.save(database)
+        try:
+            archive = packet_archive(database, CAPTURE_DATA_DIR / "frames", session_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="No saved sweep evidence for this session.")
+        telemetry.emit(
+            "claim_packet", "done", f"packet built in {round((time.monotonic() - started) * 1000)} ms"
         )
-    except KeyError:
-        raise HTTPException(status_code=404, detail="No saved sweep evidence for this session.")
-    telemetry.emit(
-        "claim_packet", "done", f"packet built in {round((time.monotonic() - started) * 1000)} ms"
-    )
     return Response(
         archive,
         media_type="application/zip",
@@ -1579,7 +1582,9 @@ async def live_voice(websocket: WebSocket) -> None:
 
     def listener(event):
         """Send each stage event to the flow view and to this sweep's meter."""
-        FLOW.publish(event)
+        # Usage counters are for the meter only; they would crowd stage events out of the replay.
+        if event.get("stage") != "usage":
+            FLOW.publish(event)
         meter.record(event)
     telemetry.attach(listener)
     await websocket.accept()
@@ -1772,6 +1777,7 @@ async def live_voice(websocket: WebSocket) -> None:
             seconds_since_prompt=None if last_prompt_at is None else round(now - last_prompt_at, 1),
             phase=session.sweep_phase)
         label = await asyncio.to_thread(choose_prompt, signals)
+        telemetry.emit("d6", "outcome", "quiet" if label == "stay_quiet" else "speak")
         telemetry.emit("guidance", "done", label.replace("_", " "))
         # The situation may have changed while Drex was deciding.
         if session.sweep_phase != "Sweeping" or not should_speak(
@@ -1991,7 +1997,10 @@ async def live_voice(websocket: WebSocket) -> None:
             if check.issue not in ("none", "no_books"):
                 recent_issues.append((check.issue, round(time.monotonic(), 1)))
                 trigger_guidance()
-            if is_book_candidate(check) and not pending.saved:
+            admitted = is_book_candidate(check)
+            # The flow view lights the branch Drex's answer sent this frame down.
+            telemetry.emit("d1", "outcome", "admit" if admitted else "drop")
+            if admitted and not pending.saved:
                 await asyncio.to_thread(stream.save_book_candidate, pending)
                 telemetry.emit("save", "done", "book candidate")
                 pending = dataclasses.replace(pending, saved=True)
@@ -2218,6 +2227,7 @@ async def live_voice(websocket: WebSocket) -> None:
             were meant, or None when nothing was applied.
         """
         intent = await asyncio.to_thread(classify_intent, text)
+        telemetry.emit("d5", "outcome", "chat" if intent == "question_or_chat" else "correction")
         if intent == "question_or_chat":
             return None
         frame_id = target_frame(list(detection_frames), time.monotonic())
@@ -2691,12 +2701,21 @@ async def flow_events(request: Request) -> StreamingResponse:
     async def stream():
         try:
             # Default model per block; each finished call then reports the model that actually answered.
-            models = {"d1": CONFIG.drex.model, "d2": CONFIG.drex.model, "d3": CONFIG.drex.model,
-                      "d5": CONFIG.drex.model, "d6": CONFIG.drex.model, "spine_reading": VISION_MODEL,
-                      "reply": MODEL, "stt": CONFIG.speech.stt_model, "tts": CONFIG.speech.tts_model,
-                      "depth": CONFIG.measurement.depth_pro_model,
-                      "catalogue": "Google Books → Open Library"}
-            setup = {"measurement": CONFIG.measurement.enabled, "models": models, "recent": list(FLOW.recent)}
+            drex = CONFIG.drex.model
+            models = {"d1": drex, "d2": drex, "d3": drex, "d5": drex, "d6": drex, "listing_match": drex,
+                      "spine_reading": VISION_MODEL, "item_detection": VISION_MODEL, "reply": MODEL,
+                      "stt": CONFIG.speech.stt_model, "tts": CONFIG.speech.tts_model,
+                      "depth": CONFIG.measurement.depth_pro_model, "room": "WebXR depth and pose",
+                      "catalogue": "Google Books, Open Library",
+                      "pricing": "Amazon, Google Books, AbeBooks"}
+            # Blocks switched off in config are drawn dashed rather than idle.
+            disabled = [stage for stage, off in (
+                ("depth", not CONFIG.measurement.enabled),
+                ("item_detection", not CONFIG.items.enabled), ("items", not CONFIG.items.enabled),
+                ("listing_match", not CONFIG.items.enabled or not CONFIG.pricing.item_providers),
+                ("stt", not speech.enabled()), ("tts", not speech.enabled())) if off]
+            setup = {"measurement": CONFIG.measurement.enabled, "models": models, "disabled": disabled,
+                     "recent": list(FLOW.recent)}
             yield f"event: setup\ndata: {json.dumps(setup)}\n\n"
             while not await request.is_disconnected():
                 try:

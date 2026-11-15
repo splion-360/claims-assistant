@@ -215,11 +215,11 @@ def choose_work_scored(readings: dict, candidates: list[WorkCandidate], *,
     result = decide({'match': choice('Which catalogue work is the book whose spine was read?', criteria)},
                     state={'spine_readings': readings}, client=client, stage='d3')
     answer = result.answers['match']
-    if answer.choice == 'none' or answer.choice not in criteria:
+    probability = answer.probabilities.get(answer.choice, 0) if answer.choice in criteria else 0
+    if answer.choice == 'none' or answer.choice not in criteria or probability < CONFIG.drex.catalogue_min:
+        telemetry.emit('d3', 'outcome', 'review')
         return None, None
-    probability = answer.probabilities.get(answer.choice, 0)
-    if probability < CONFIG.drex.catalogue_min:
-        return None, None
+    telemetry.emit('d3', 'outcome', 'matched')
     return candidates[int(answer.choice[1:])], probability
 
 
