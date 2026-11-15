@@ -2244,9 +2244,9 @@ async def flow_events(request: Request) -> StreamingResponse:
             models = {"d1": drex, "d2": drex, "d3": drex, "d5": drex, "d6": drex, "listing_match": drex,
                       "spine_reading": VISION_MODEL, "item_detection": VISION_MODEL, "reply": MODEL,
                       "stt": CONFIG.speech.stt_model, "tts": CONFIG.speech.tts_model,
-                      "depth": CONFIG.measurement.depth_pro_model, "room": "WebXR depth and pose",
-                      "catalogue": "Google Books, Open Library",
-                      "pricing": "Amazon, Google Books, AbeBooks"}
+                      "depth": CONFIG.measurement.depth_pro_model, "room": "WebXR depth",
+                      "catalogue": "Google, OpenLib",
+                      "pricing": "Amazon, AbeBooks"}
             # Blocks switched off in config are drawn dashed rather than idle.
             disabled = [stage for stage, off in (
                 ("depth", not CONFIG.measurement.enabled),
