@@ -37,7 +37,7 @@ def title_prompt(signals):
 
 
 class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
-    async def drive(self, receive, *, reply=None, frame_check=None, prompt=None, depth=None,
+    async def drive(self, receive, *, reply=None, frame_check=None, prompt=None,
                     library=False):
         """Exercise live transport with isolated evidence storage.
 
@@ -46,7 +46,6 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             reply: Optional conversation implementation.
             frame_check: Optional D1 decision double; by default every check fails.
             prompt: Optional D6 decision double; by default it asks for missing titles only.
-            depth: Optional Depth Pro double; by default depth is unavailable.
             library: Start the session in library-sweep mode, as the app does.
 
         Returns:
@@ -70,7 +69,6 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             async def receive_text(self): return json.dumps(await receive(session, sent))
         with patch.object(s, 'check_frame', side_effect=frame_check or unavailable_check), \
              patch.object(s, 'choose_prompt', side_effect=prompt or title_prompt), \
-             patch.object(s, 'estimate_depth', depth or Mock(side_effect=s.DepthUnavailable('test'))), \
              patch.object(s, 'resolve_book'), \
              patch.dict('os.environ', {'DREX_API_KEY': ''}), \
              patch.object(s, 'CAPTURE_DATA_DIR', Path(directory.name)), \

@@ -211,14 +211,13 @@ class DrexConfig(Settings):
 
 
 class MeasurementConfig(Settings):
-    """Configure metric depth sampling and the fallback depth model."""
+    """Configure measurement from the phone's WebXR depth: spine sampling and room geometry."""
     enabled: bool
     depth_inset: Annotated[float, Field(ge=0, lt=0.5)]
     depth_window_px: PositiveInt
     depth_tolerance: Unit
     height_range_cm: tuple[PositiveFloat, PositiveFloat]
     thickness_range_cm: tuple[PositiveFloat, PositiveFloat]
-    depth_pro_model: Text
     # Room geometry: depth readings outside this range are ignored, and an estimate
     # needs at least this many posed frames and points before it is reported.
     room_depth_range_m: tuple[PositiveFloat, PositiveFloat]

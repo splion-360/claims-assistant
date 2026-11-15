@@ -111,7 +111,7 @@ const NODES = [
   ["d2", 0, "books", "decision", "Same book?"], ["inventory", 1, "books", "local", "Inventory"],
   ["catalogue", 2, "books", "web", "Catalogue"], ["d3", 3, "books", "decision", "Which work?"],
   ["pricing", 4, "books", "web", "Book prices"],
-  ["depth", 2, "books2", "depth", "Depth Pro size"], ["review", 4, "books2", "terminal", "Review queue"],
+  ["depth", 2, "books2", "depth", "Spine size"], ["review", 4, "books2", "terminal", "Review queue"],
   ["item_detection", 0, "objects", "vision", "Find objects"], ["items", 1, "objects", "local", "Object list"],
   ["listing_match", 2, "objects", "decision", "Listing fits?"],
   ["room", 0, "finish", "depth", "Room size"], ["finish", 1, "finish", "local", "Finish"],
@@ -129,7 +129,7 @@ const EDGES = [
   ["camera", "tracking"], ["tracking", "gate"], ["gate", "d1"],
   ["d1", "save", "admit", ["admit"]], ["d1", "dropped", "drop", ["drop"]], ["save", "spine_reading"],
   ["spine_reading", "d2", null, null, "wrap", "books"], ["save", "item_detection", null, null, "wrap", "objects"],
-  ["d2", "inventory", "same/new", ["same", "new", "unresolved"]], ["inventory", "catalogue"], ["inventory", "depth"],
+  ["d2", "inventory", "same/new", ["same", "new", "unresolved"]], ["inventory", "catalogue"], ["spine_reading", "depth", null, null, "wrap", "books"],
   ["catalogue", "d3"], ["d3", "pricing", "matched", ["matched"]], ["d3", "review", "no match", ["review"]],
   ["item_detection", "items"], ["items", "listing_match"],
   ["pricing", "finish", null, null, "top"], ["depth", "finish", null, null, "top"],
@@ -142,9 +142,9 @@ const EDGES = [
 // Full names for the log and tooltips; the graph shows the short ones.
 const LABELS = { fallback: "Model fallback", locale: "Market confirmed", d1: "Drex: book visible?", d2: "Drex: same book?",
   d3: "Drex: which catalogue work?", d5: "Drex: is it a correction?", d6: "Drex: speak now?", listing_match: "Drex: does the listing fit?",
-  depth: "Spine size from Depth Pro", item_detection: "Object detection", claim_packet: "Claim packet download" };
+  depth: "Spine size from phone depth (WebXR)", item_detection: "Object detection", claim_packet: "Claim packet download" };
 // Model names lose their organisation prefix; long method names get a short form.
-const SHORT = { webxr_depth_pose_cloud: "WebXR depth", "no posed depth": "no depth", "apple/DepthPro-hf": "Depth Pro" };
+const SHORT = { webxr_depth_pose_cloud: "WebXR depth", "no posed depth": "no depth" };
 const short = model => SHORT[model] || String(model || "").replace(/^[^/]+\//, "");
 const cards = {}, edgeEls = [], timers = {};
 

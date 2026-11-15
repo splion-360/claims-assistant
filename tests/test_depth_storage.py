@@ -25,14 +25,3 @@ class DepthStorageTests(unittest.TestCase):
         self.assertEqual((loaded.image_width, loaded.image_height, loaded.method), (640, 480, 'webxr_depth'))
 
 
-class DepthProTests(unittest.TestCase):
-    """Check the Depth Pro adapter's failure contract without loading weights."""
-
-    def test_load_failure_raises_depth_unavailable(self):
-        """Turn any model loading error into DepthUnavailable."""
-        from unittest.mock import patch
-        from library_claim.measurement import depth_pro
-
-        with patch.object(depth_pro, '_run', side_effect=OSError('no weights')):
-            with self.assertRaises(depth_pro.DepthUnavailable):
-                depth_pro.estimate_depth(b'\xff\xd8\xff')

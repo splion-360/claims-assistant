@@ -348,7 +348,7 @@ class BookMeasurementTests(unittest.TestCase):
         """
         from library_claim.measurement.spine import DepthMap
         return DepthMap(depth_m=np.ones((360, 480), np.float32), fx=1000, fy=1000, cx=240, cy=180,
-                        image_width=480, image_height=360, method='depth_pro')
+                        image_width=480, image_height=360, method='webxr_depth')
 
     def test_save_analysis_stores_measurements(self):
         """A 216×96 px spine at 1 m with f=1000 px measures 21.6×9.6 cm."""
@@ -359,10 +359,10 @@ class BookMeasurementTests(unittest.TestCase):
             row = repo.list_for_sweep(BookObservation, 'sweep')[0]
         self.assertAlmostEqual(row.spine_height_cm, 21.6, delta=0.3)
         self.assertAlmostEqual(row.spine_thickness_cm, 9.6, delta=0.2)
-        self.assertEqual(row.scale_method, 'depth_pro')
+        self.assertEqual(row.scale_method, 'webxr_depth')
         book = result['inventory'][0]
         self.assertAlmostEqual(book['spine_height_cm'], 21.6, delta=0.3)
-        self.assertEqual(book['scale_method'], 'depth_pro')
+        self.assertEqual(book['scale_method'], 'webxr_depth')
         self.assertNotIn('No metric depth for this frame', book['review_reasons'])
 
     def test_missing_depth_adds_review_reason(self):
@@ -371,18 +371,17 @@ class BookMeasurementTests(unittest.TestCase):
         self.assertIsNone(book['spine_height_cm'])
         self.assertIn('No depth was captured for this frame', book['review_reasons'])
 
-    def test_background_measurement_fills_dimensions(self):
-        """A later measure job adds dimensions and clears the missing-depth reason."""
-        from library_claim.identification.storage import inventory, save_measurements
-        self.persist()
-        save_measurements(self.store.database, 'sweep', 'reference', self.depth())
-        save_measurements(self.store.database, 'sweep', 'reference', self.depth())
-        with Repository(self.store.database) as repo:
-            book = inventory(repo, 'sweep')[0]
-            jobs = [job for job in repo.list_for_sweep(ProcessingJob, 'sweep') if job.task == 'measure']
-        self.assertEqual(len(jobs), 1)
-        self.assertAlmostEqual(book['spine_height_cm'], 21.6, delta=0.3)
-        self.assertNotIn('No metric depth for this frame', book['review_reasons'])
+    def test_phone_depth_measurement_is_reported_to_the_flow_view(self):
+        """Measuring spines from a frame's phone depth emits a 'depth' stage naming WebXR."""
+        from library_claim import telemetry
+        events = []
+        with telemetry.listening(events.append):
+            save_analysis(self.store.database, 'sweep', 'reference',
+                          BookFrameAnalysis(books=[detection()], complete=True), self.jpeg, 'test-model',
+                          depth=self.depth())
+        depth = [event for event in events if event['stage'] == 'depth']
+        self.assertEqual([(event['phase'], event['model']) for event in depth], [('done', 'WebXR depth')])
+        self.assertEqual(depth[0]['detail'], '1/1 spine(s) measured')
 
     def test_inventory_totals_exclude_excluded_books(self):
         """Count and sum shelf run only over books the user has not excluded."""

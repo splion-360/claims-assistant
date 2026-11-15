@@ -15,7 +15,7 @@ only `capture.browser` through `/api/health`; it has no duplicate camera default
 | `inference` | Crusoe text/vision models and their fallback models (tried in order when a call fails), token budgets, temperature, Qwen thinking and request timeouts |
 | `speech` | Deepgram STT/TTS models, speech request chunk length and timeouts |
 | `drex` | Drex model, endpoint, client name, timeouts, decision probability thresholds and guidance cooldowns |
-| `measurement` | Depth sampling inset/window, Depth Pro model, and the room geometry limits: usable depth range, minimum posed frames and points, heading bins and the coverage below which a floor outline is flagged as partial (the AR depth-grid size is under `capture.browser`) |
+| `measurement` | The on/off switch, depth sampling inset/window, and the room geometry limits: usable depth range, minimum posed frames and points, heading bins and the coverage below which a floor outline is flagged as partial (the AR depth-grid size is under `capture.browser`) |
 | `pricing` | Default country, per-country currency and price providers, appraisal keywords and threshold, conversion markets, exchange-rate endpoint and request timeouts |
 | `items` | Non-book detection on/off, per-frame cap, detection cadence, association overlap and the wording that releases a framed piece from appraisal |
 
@@ -73,8 +73,8 @@ On Android phones whose Chrome supports WebXR `immersive-ar` with `depth-sensing
 and `camera-access`, the camera button starts an AR session and sends a
 `capture.browser.depth_grid_width` × `depth_grid_height` depth grid with every frame.
 Saved frames keep it as `.claim-data/depth/<frame_id>.npz`, and books are measured
-immediately (`scale_method: webxr_depth`). Other browsers use the normal camera;
-their saved book frames are measured in the background with Depth Pro.
+immediately (`scale_method: webxr_depth`). Other browsers use the normal camera,
+and their books are saved without dimensions, each with the reason in the review queue.
 
 WebXR needs a secure context. Serve the phone over USB so it can use `localhost`:
 
@@ -92,12 +92,10 @@ context, the origin check and the socket check together. A phone reaching the
 laptop over Wi-Fi at `http://192.168.x.x:4177` is refused on all three counts,
 and would get no camera or microphone permission without TLS in any case.
 
-The AR depth path does not depend on `measurement.enabled`. A phone in an AR
-session sends its depth grid with every frame, and those books are measured from
-it immediately. `measurement.enabled` controls only the Depth Pro fallback used
-for frames that arrive without a depth grid, such as a desktop browser or an
-Android device whose Chrome lacks `depth-sensing`. Turn it on to measure those
-too, at the cost of loading Depth Pro.
+`measurement.enabled` switches depth measurement on or off: spine sizes from each
+frame's depth grid and room geometry from the posed depth frames. There is no
+image-only fallback, so a sweep without phone depth reports no dimensions rather
+than estimated ones.
 
 Capture settings are worth lowering for a phone on a slower link.
 `capture.browser` holds `frame_width`, `jpeg_quality` and `frame_interval_ms`;

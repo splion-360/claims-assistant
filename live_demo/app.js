@@ -173,8 +173,7 @@ function cropImage(book, className = "") {
 function bookSize(book) {
   // Sizes come only from measured depth; say so when a book has none yet.
   if (!book.spine_height_cm) return "Not measured yet";
-  const source = book.scale_method === "webxr_depth" ? "AR depth" : "Depth Pro";
-  return `${Number(book.spine_height_cm).toFixed(1)} × ${Number(book.spine_thickness_cm).toFixed(1)} cm · ${source}`;
+  return `${Number(book.spine_height_cm).toFixed(1)} × ${Number(book.spine_thickness_cm).toFixed(1)} cm · AR depth`;
 }
 
 function renderBookInventory() {

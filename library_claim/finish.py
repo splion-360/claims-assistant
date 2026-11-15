@@ -13,6 +13,7 @@ import time
 
 import httpx
 
+from library_claim.config import CONFIG
 from library_claim.domain.models import Sweep
 from library_claim.identification.catalogue import resolve_book
 from library_claim.identification.storage import inventory
@@ -89,7 +90,8 @@ def finish_sweep(database: Path, data_dir: Path, sweep_id: str, country: str | N
     try:
         with Repository(database) as repo:
             has_room = stored_room(repo, sweep_id) is not None
-        if not has_room:
+        # Room geometry comes from phone depth; the measurement switch turns it off with the spines.
+        if not has_room and CONFIG.measurement.enabled:
             summary['room'] = measure(database, data_dir, sweep_id, refresh=False) is not None
     except Exception as error:  # noqa: BLE001 - a room failure must not stop pricing
         summary['errors'].append(f'room: {type(error).__name__}')

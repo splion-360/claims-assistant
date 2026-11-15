@@ -132,8 +132,9 @@ drex:
   quiet_streak: 3
   quiet_interval_s: 3.0
 measurement:
-  # Off: books are saved without dimensions and Depth Pro never loads.
-  enabled: false
+  # Spine sizes and room geometry from the phone's WebXR depth. Off: books are saved
+  # without dimensions and no room is measured.
+  enabled: true
   # Fraction of each spine axis trimmed at both ends so depth is sampled on the book, not behind it.
   depth_inset: 0.15
   depth_window_px: 5
@@ -143,7 +144,6 @@ measurement:
   # Sizes outside these ranges are refused as implausible for a book.
   height_range_cm: [5, 60]
   thickness_range_cm: [0.3, 15]
-  depth_pro_model: apple/DepthPro-hf
   # Room geometry from the AR session's depth and poses.
   room_depth_range_m: [0.4, 12.0]
   room_min_frames: 4

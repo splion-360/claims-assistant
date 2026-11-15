@@ -20,7 +20,7 @@ def depth_map(depth: np.ndarray) -> DepthMap:
         A depth map for a 1000×1000 image.
     """
     return DepthMap(depth_m=depth.astype(np.float32), fx=1000, fy=1000, cx=500, cy=500,
-                    image_width=SIZE, image_height=SIZE, method='depth_pro')
+                    image_width=SIZE, image_height=SIZE, method='webxr_depth')
 
 
 class SpineMeasurementTests(unittest.TestCase):
@@ -31,7 +31,7 @@ class SpineMeasurementTests(unittest.TestCase):
         result = measure_spine(BOX, 'spine', [], depth_map(np.ones((SIZE, SIZE))))
         self.assertAlmostEqual(result.height_cm, 20.0, delta=0.2)
         self.assertAlmostEqual(result.thickness_cm, 4.0, delta=0.04)
-        self.assertEqual(result.method, 'depth_pro')
+        self.assertEqual(result.method, 'webxr_depth')
 
     def test_background_at_box_edges_does_not_inflate(self):
         """Ignore a far wall visible in the outer rim of a loose box."""
@@ -68,10 +68,10 @@ class SpineMeasurementTests(unittest.TestCase):
     def test_book_dimensions_median_and_shelf_run(self):
         """Use the median of measured observations and sum thicknesses for shelf run."""
         rows = [BookObservation(sweep_id='s', book_id='b', frame_id=f'f{i}', bbox=BOX, spine_height_cm=h,
-                                spine_thickness_cm=3.0, scale_method='depth_pro')
+                                spine_thickness_cm=3.0, scale_method='webxr_depth')
                 for i, h in enumerate((20.0, 21.0, 22.0))]
         rows.append(BookObservation(sweep_id='s', book_id='b', frame_id='f9', bbox=BOX))
-        self.assertEqual(book_dimensions(rows), (21.0, 3.0, 'depth_pro'))
+        self.assertEqual(book_dimensions(rows), (21.0, 3.0, 'webxr_depth'))
         self.assertIsNone(book_dimensions(rows[-1:]))
         self.assertAlmostEqual(shelf_run_m([3.0, 2.5]), 0.055)
 

@@ -87,11 +87,10 @@ from library_claim.config import CONFIG
 from library_claim.identification.models import INSTRUCTION as BOOK_INSTRUCTION
 from library_claim.identification.models import BookFrameAnalysis
 from library_claim.identification.storage import save_analysis as save_book_analysis
-from library_claim.identification.storage import current_inventory, inventory_totals, save_measurements
+from library_claim.identification.storage import current_inventory, inventory_totals
 from library_claim.identification.catalogue import resolve_book
 from library_claim.identification.corrections import apply_correction
 from library_claim.decisions.corrections import classify_intent, extract_stated_title, resolve_target, target_frame
-from library_claim.measurement.depth_pro import DepthUnavailable, estimate_depth
 from library_claim.measurement.room_storage import measure_room
 from library_claim.items.models import INSTRUCTION as ITEM_INSTRUCTION
 from library_claim.items.models import ItemFrameAnalysis
@@ -751,6 +750,8 @@ async def measure_sweep_room(session: IntakeSession) -> None:
     Args:
         session: Sweep whose frames to measure.
     """
+    if not CONFIG.measurement.enabled:
+        return
     try:
         with telemetry.span("room") as reported:
             room = await asyncio.to_thread(
@@ -888,8 +889,8 @@ async def _pin_evidence_photo(
                 BookFrameAnalysis(books=observation.books, complete=observation.complete),
                 frame,
                 VISION_MODEL,
-                # WebXR depth captured with the frame measures books immediately.
-                load_depth(CAPTURE_DATA_DIR, frame_id),
+                # WebXR depth captured with the frame measures books immediately, unless switched off.
+                load_depth(CAPTURE_DATA_DIR, frame_id) if CONFIG.measurement.enabled else None,
             )
         if (
             session.deleted
@@ -1159,9 +1160,6 @@ async def live_voice(websocket: WebSocket) -> None:
     guidance_task = None
     last_prompt, last_prompt_at = None, None
     last_capture_frame_id = None
-    # Depth Pro is slow on CPU: one measurement runs, only the newest frame waits.
-    measure_task = None
-    measure_next = None
     # Last title sent to the catalogue per book, so a lookup repeats only when the reading changes.
     resolved_titles = {}
     # Saved frames with detections and when they were read, for resolving "that" in corrections.
@@ -1342,39 +1340,6 @@ async def live_voice(websocket: WebSocket) -> None:
                 await request_capture(book)
         elif label in QUALITY_PROMPTS:
             await speak_quality(label)
-
-    def schedule_measure(frame_id, jpeg):
-        """Queue background metric measurement for a frame without WebXR depth.
-
-        Args:
-            frame_id: Saved frame with book observations.
-            jpeg: Its encoded bytes.
-        """
-        nonlocal measure_task, measure_next
-        if not CONFIG.measurement.enabled or load_depth(CAPTURE_DATA_DIR, frame_id) is not None:
-            return
-        measure_next = (frame_id, jpeg)
-        if measure_task is None or measure_task.done():
-            measure_task = track(run_measure())
-
-    async def run_measure():
-        """Estimate depth, store measurements and refresh the inventory, newest frame first."""
-        nonlocal measure_next
-        while measure_next is not None:
-            frame_id, jpeg = measure_next
-            measure_next = None
-            try:
-                with telemetry.span("depth") as reported:
-                    depth = await asyncio.to_thread(estimate_depth, jpeg)
-                    reported.detail = f"focal {depth.fx:.0f} px"
-            except DepthUnavailable as error:
-                quality_logger.warning("depth unavailable frame=%s reason=%s", frame_id, error)
-                continue
-            database = CAPTURE_DATA_DIR / "claims.sqlite3"
-            await asyncio.to_thread(save_measurements, database, session.session_id, frame_id, depth)
-            if not session.deleted:
-                session.book_inventory = await asyncio.to_thread(current_inventory, database, session.session_id)
-                await send({"type": "state", "state": _current_ui_state(session)})
 
     async def announce_books():
         """Say the names of newly read books, unless someone is already speaking."""
@@ -1991,10 +1956,9 @@ async def live_voice(websocket: WebSocket) -> None:
             )
             success = bool(result.get("pinned"))
             if success and session.library_sweep:
-                # Only frames with books are worth a slow Depth Pro run or a "that" reference.
+                # Frames with books can be the target of a spoken "that" correction.
                 if any(candidate.frame_id in book.get("frame_ids", []) for book in session.book_inventory):
                     detection_frames.append((candidate.frame_id, time.monotonic()))
-                    schedule_measure(candidate.frame_id, candidate.data)
                 schedule_catalogue()
                 await announce_books()
                 await ask_about_art()
@@ -2244,12 +2208,12 @@ async def flow_events(request: Request) -> StreamingResponse:
             models = {"d1": drex, "d2": drex, "d3": drex, "d5": drex, "d6": drex, "listing_match": drex,
                       "spine_reading": VISION_MODEL, "item_detection": VISION_MODEL, "reply": MODEL,
                       "stt": CONFIG.speech.stt_model, "tts": CONFIG.speech.tts_model,
-                      "depth": CONFIG.measurement.depth_pro_model, "room": "WebXR depth",
+                      "depth": "WebXR depth", "room": "WebXR depth",
                       "catalogue": "Google, OpenLib",
                       "pricing": "Amazon, AbeBooks"}
             # Blocks switched off in config are drawn dashed rather than idle.
             disabled = [stage for stage, off in (
-                ("depth", not CONFIG.measurement.enabled),
+                ("depth", not CONFIG.measurement.enabled), ("room", not CONFIG.measurement.enabled),
                 ("item_detection", not CONFIG.items.enabled), ("items", not CONFIG.items.enabled),
                 ("listing_match", not CONFIG.items.enabled or not CONFIG.pricing.item_providers),
                 ("stt", not speech.enabled()), ("tts", not speech.enabled())) if off]

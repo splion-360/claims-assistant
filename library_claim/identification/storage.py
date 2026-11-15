@@ -344,35 +344,6 @@ def current_inventory(database: Path, sweep_id: str) -> list[dict]:
         return inventory(repo, sweep_id)
 
 
-def save_measurements(database: Path, sweep_id: str, frame_id: str, depth: DepthMap) -> None:
-    """Measure a frame's saved spine observations from depth that arrived after extraction.
-
-    Args:
-        database: SQLite database holding the observations.
-        sweep_id: Owning sweep.
-        frame_id: Frame whose observations to measure.
-        depth: Metric depth for that exact frame.
-    """
-    job_id = f'measure_{frame_id}'
-    with Repository(database) as repo:
-        try:
-            repo.get(ProcessingJob, job_id)
-            return
-        except KeyError:
-            pass
-        measurements = {}
-        for row in repo.list_for_sweep(BookObservation, sweep_id):
-            if row.frame_id != frame_id or row.provenance != 'visual':
-                continue
-            size = measure_spine(row.bbox, row.view, row.visual_issues, depth)
-            if size:
-                measurements[row.id] = {'spine_height_cm': size.height_cm, 'spine_thickness_cm': size.thickness_cm,
-                                        'scale_method': size.method}
-        repo.add(ProcessingJob(id=job_id, sweep_id=sweep_id, frame_id=frame_id, task='measure', status='succeeded',
-                               created_at=datetime.now(timezone.utc), model=depth.method,
-                               configuration_version=CONFIG_DIGEST, result={'measurements': measurements}))
-
-
 def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFrameAnalysis,
                   jpeg: bytes, model: str, depth: DepthMap | None = None,
                   decide_same=same_book_probabilities) -> dict:
@@ -465,5 +436,9 @@ def save_analysis(database: Path, sweep_id: str, frame_id: str, analysis: BookFr
                                      status='succeeded', created_at=datetime.now(timezone.utc), model=model,
                                      configuration_version=CONFIG_DIGEST, result=result))
         repo.add_many(records)
+        if depth is not None:
+            # Phone depth measures spines inside the read; report it as its own block in the flow view.
+            measured = sum(1 for row in records if isinstance(row, BookObservation) and row.spine_height_cm)
+            telemetry.emit('depth', 'done', f'{measured}/{len(analysis.books)} spine(s) measured', model='WebXR depth')
         reconcile(repo, sweep_id, frame, image, database, decide_same)
         return {**result, 'inventory': inventory(repo, sweep_id)}

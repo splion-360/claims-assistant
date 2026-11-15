@@ -20,7 +20,7 @@ class DepthMap:
     cy: float
     image_width: int
     image_height: int
-    method: Literal['webxr_depth', 'depth_pro']
+    method: Literal['webxr_depth']
     # Camera-to-world transform of the AR reference space, column-major, when the
     # device reported one. Room geometry needs it; spine sizes do not.
     pose: tuple[float, ...] | None = None

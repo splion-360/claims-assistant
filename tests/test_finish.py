@@ -128,6 +128,14 @@ class FinishTests(unittest.TestCase):
             self.finish(http)
         self.assertEqual(self.measured, ['s'])
 
+    def test_room_is_skipped_when_measurement_is_off(self):
+        """With depth measurement switched off in config, no room is measured."""
+        from library_claim import finish
+        off = finish.CONFIG.model_copy(update={'measurement': finish.CONFIG.measurement.model_copy(update={'enabled': False})})
+        with patch.object(finish, 'CONFIG', off), transport(down) as http:
+            self.finish(http)
+        self.assertEqual(self.measured, [])
+
     def test_a_crashing_step_does_not_stop_the_others(self):
         """A catalogue step that raises still lets pricing and the room run."""
         def broken(*args, **kwargs):
