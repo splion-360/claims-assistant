@@ -324,6 +324,7 @@ class PricedPacketTests(unittest.TestCase):
         self.assertEqual(line['replacement_cost']['amount'], 18.99)
         self.assertEqual(line['replacement_cost']['source'], 'Google Books')
         self.assertEqual(line['replacement_cost']['url'], 'https://books.example/buy')
+        self.assertEqual(line['replacement_cost']['condition_assumed'], 'New')
         self.assertTrue(line['replacement_cost']['retrieved_at'])
         self.assertEqual(packet['totals']['books_replacement_cost'], 18.99)
         self.assertEqual(packet['totals']['excluded_from_totals'], 0)

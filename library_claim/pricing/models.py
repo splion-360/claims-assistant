@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 Amount = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+NEW_CONDITION = 'New'
 
 
 class Price(BaseModel):
@@ -31,7 +32,9 @@ class Price(BaseModel):
         """
         return {'amount': round(self.amount, 2), 'currency': self.currency, 'source': self.source,
                 'url': self.url, 'retrieved_at': self.retrieved_at.isoformat(), 'converted': self.converted,
-                'converted_from': self.converted_from, 'fx_rate': self.fx_rate, 'fx_source': self.fx_source}
+                'converted_from': self.converted_from, 'fx_rate': self.fx_rate, 'fx_source': self.fx_source,
+                # Replacement cost is the price of buying it new today.
+                'condition_assumed': self.condition_assumed or NEW_CONDITION}
 
     def as_used_block(self) -> dict:
         """Render the packet's used value block.

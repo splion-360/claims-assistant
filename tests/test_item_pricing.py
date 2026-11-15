@@ -124,6 +124,13 @@ class ItemPricingTests(unittest.TestCase):
         self.assertTrue(valuation.needs_appraisal)
         self.assertEqual(urls, [])
 
+    def test_expensive_object_is_withheld_for_appraisal(self):
+        """A listing above the contents threshold sends the object to an appraiser."""
+        http, _ = store(amazon_result('B000000009', 'Brass Floor Lamp, designer', '$9,500.00'))
+        decider, _ = drex([0.9])
+        valuation = price_item(lamp(), 'US', client=http, drex=decider)
+        self.assertTrue(valuation.needs_appraisal)
+
     def test_gb_uses_the_uk_store_and_pounds(self):
         """The UK market searches amazon.co.uk and reads prices in pounds."""
         html = amazon_result('B000000001', 'Brass Floor Lamp', '£65.00')

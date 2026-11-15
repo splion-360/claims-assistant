@@ -13,7 +13,7 @@ from library_claim.identification.storage import inventory, inventory_totals
 from library_claim.items.pricing import value_items
 from library_claim.items.storage import inventory as item_inventory
 from library_claim.measurement.room_storage import stored_room
-from library_claim.pricing.models import Valuation
+from library_claim.pricing.models import NEW_CONDITION, Valuation
 from library_claim.pricing.compare import compare_markets
 from library_claim.pricing.storage import CACHE_FILE, value_sweep
 from library_claim.storage.repository import Repository
@@ -115,7 +115,8 @@ def _item_line(item: dict, evidence: dict[str, str], valuation: Valuation | None
         'replacement_cost': ({'low': round(low.amount, 2), 'high': round(high.amount, 2),
                               'currency': low.currency, 'source': low.source, 'url': low.url,
                               'url_high': high.url, 'retrieved_at': low.retrieved_at.isoformat(),
-                              'converted': low.converted, 'converted_from': low.converted_from}
+                              'converted': low.converted, 'converted_from': low.converted_from,
+                              'condition_assumed': low.condition_assumed or NEW_CONDITION}
                              if low is not None else
                              {'low': None, 'high': None, 'source': '', 'url': '', 'retrieved_at': '',
                               'converted': False}),
