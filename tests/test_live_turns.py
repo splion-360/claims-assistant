@@ -355,7 +355,8 @@ class FlowViewTests(unittest.IsolatedAsyncioTestCase):
         from fastapi.testclient import TestClient
         response = TestClient(s.app, base_url='http://127.0.0.1:4177').get('/flow')
         self.assertEqual(response.status_code, 200)
-        self.assertIn('live pipeline', response.text)
+        self.assertIn('id="graph"', response.text)
+        self.assertIn('id="log"', response.text)
 
 
 class ReadLimitTests(unittest.IsolatedAsyncioTestCase):
