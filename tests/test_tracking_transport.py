@@ -2,7 +2,7 @@
 import asyncio
 import base64
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import cv2
 
@@ -282,3 +282,40 @@ class BookAnnouncementTests(unittest.IsolatedAsyncioTestCase):
             _, sent = await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=lambda jpeg: check(0.9))
         announcements = [line for line in agent_lines(sent) if line.startswith('I found')]
         self.assertEqual(announcements, ['I found a book called Did I Say You Could Go.'])
+
+
+class ObjectFrameTests(unittest.IsolatedAsyncioTestCase):
+    """Clear frames without books still reach object detection."""
+
+    async def test_clear_frame_without_books_is_inspected_for_objects(self):
+        """A frame Drex calls clear but bookless is saved and sent to object detection."""
+        from library_claim.decisions.frame_check import FrameCheck
+        _, encoded = cv2.imencode('.jpg', textured_view())
+        no_books = FrameCheck(book_visible=0.02, spine_legible=0.0, issue='no_books', issue_probabilities={},
+                              model='drex-max-v1.1', request_id=None, latency_ms=1, input_tokens=1)
+        inspected = asyncio.Event()
+        calls = []
+
+        async def record(session, frame_id, frame):
+            """Record which saved frame was inspected."""
+            calls.append(frame_id)
+            inspected.set()
+
+        count = 0
+
+        async def receive(session, sent):
+            """Send one bookless frame during a sweep and close once it was inspected."""
+            nonlocal count
+            count += 1
+            if count == 1:
+                session.library_sweep = True
+                return {'type': 'video', 'data': base64.b64encode(encoded).decode()}
+            await asyncio.wait_for(inspected.wait(), 2)
+            return {'type': 'close'}
+
+        pin = AsyncMock()
+        with patch.object(server, 'record_items', side_effect=record), \
+             patch.object(server, '_pin_evidence_photo', pin):
+            await test_live_turns.LiveTurnTests.drive(self, receive, frame_check=lambda jpeg: no_books)
+        self.assertEqual(len(calls), 1)
+        pin.assert_not_called()

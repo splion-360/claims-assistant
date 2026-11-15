@@ -1521,6 +1521,16 @@ async def live_voice(websocket: WebSocket) -> None:
                 await asyncio.to_thread(stream.save_book_candidate, pending)
                 telemetry.emit("save", "done", "book candidate")
                 pending = dataclasses.replace(pending, saved=True)
+            # A clear frame with no books still shows the room's contents (and its depth feeds
+            # the room estimate), so it is saved and inspected for objects on the same cadence.
+            now = time.monotonic()
+            if (not admitted and check.issue == "no_books" and CONFIG.items.enabled and session.library_sweep
+                    and now - session.last_items_at >= CONFIG.items.detection_interval_s):
+                session.last_items_at = now
+                if not pending.saved:
+                    await asyncio.to_thread(stream.save_book_candidate, pending)
+                    pending = dataclasses.replace(pending, saved=True)
+                track(record_items(session, pending.frame_id, pending.jpeg))
             if pending.saved:
                 await asyncio.to_thread(save_frame_check, CAPTURE_DATA_DIR / "claims.sqlite3",
                                         session.session_id, pending.frame_id, check)
