@@ -2215,7 +2215,7 @@ async def flow_events(request: Request) -> StreamingResponse:
         try:
             # Default model per block; each finished call then reports the model that actually answered.
             drex = CONFIG.drex.model
-            models = {"d1": drex, "d2": drex, "d3": drex, "d5": drex, "d6": drex, "listing_match": drex,
+            models = {"d1": drex, "d2": drex, "d3": drex, "d5": drex, "d6": drex, "listing_match": drex, "same_object": drex,
                       "spine_reading": VISION_MODEL, "item_detection": VISION_MODEL, "reply": MODEL,
                       "stt": CONFIG.speech.stt_model, "tts": CONFIG.speech.tts_model,
                       "depth": "WebXR depth", "room": "WebXR depth",
@@ -2224,7 +2224,7 @@ async def flow_events(request: Request) -> StreamingResponse:
             # Blocks switched off in config are drawn dashed rather than idle.
             disabled = [stage for stage, off in (
                 ("depth", not CONFIG.measurement.enabled), ("room", not CONFIG.measurement.enabled),
-                ("item_detection", not CONFIG.items.enabled), ("items", not CONFIG.items.enabled),
+                ("item_detection", not CONFIG.items.enabled), ("same_object", not CONFIG.items.enabled),
                 ("listing_match", not CONFIG.items.enabled or not CONFIG.pricing.item_providers),
                 ("stt", not speech.enabled()), ("tts", not speech.enabled())) if off]
             setup = {"measurement": CONFIG.measurement.enabled, "models": models, "disabled": disabled,

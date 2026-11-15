@@ -52,7 +52,7 @@ def same_object_probabilities(detection_crop: bytes, category: str, description:
                  noul(f'Is the object in image 1 the same physical object as the object in image {index + 2}?')
                  for index in range(len(candidates))}
     result = decide(questions, state=state, images=[detection_crop, *(item.crop_jpeg for item in candidates)],
-                    client=client, stage='d2')
+                    client=client, stage='same_object')
     return [result.answers[f'same_{index + 1}'].noul for index in range(len(candidates))]
 
 

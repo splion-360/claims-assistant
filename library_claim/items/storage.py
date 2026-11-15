@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from library_claim.capture.quality import QualityAssessor
+from library_claim import telemetry
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.domain.models import (Frame, FrameAssociation, Item, ItemObservation,
                                          ProcessingJob, Quality)
@@ -116,6 +117,8 @@ def _match(detection, frame: Frame, previous: list[ItemObservation], frames: dic
         logger.warning('same-object decision failed: %s', type(error).__name__)
         return None, 'new_provisional'
     chosen = choose_same_object(probabilities)
+    # The flow view lights whether Drex matched an earlier object or recorded a new one.
+    telemetry.emit('same_object', 'outcome', 'same' if chosen is not None else 'new')
     return (candidates[chosen].item_id, 'appearance') if chosen is not None else (None, 'new_provisional')
 
 def save_items(database: Path, sweep_id: str, frame_id: str, analysis: ItemFrameAnalysis,

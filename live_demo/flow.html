@@ -38,10 +38,11 @@
   .node .name { font-weight: 600; font-size: 14px; white-space: nowrap; }
   .node .model, .node .meta { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
   .node .model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .node .meta { font-size: 12px; }
   /* Decisions are hexagons: an outer shape in the border colour and an inner one in the card colour. */
   .node.decision { border: 0; background: var(--state, var(--decision)); clip-path: polygon(10% 0, 90% 0, 100% 50%, 90% 100%, 10% 100%, 0 50%); padding: 0; }
   .node.decision .inner { position: absolute; inset: 2px; background: var(--card); clip-path: polygon(10% 0, 90% 0, 100% 50%, 90% 100%, 10% 100%, 0 50%);
-                          padding: 4px 14px 4px 34px; display: flex; flex-direction: column; justify-content: center; }
+                          padding: 4px 12px 4px 32px; display: flex; flex-direction: column; justify-content: center; }
   .node.decision .icon { left: 16px; }
   .node.terminal { border-style: dashed; border-left-width: 1.5px; }
   .node.running { border-color: var(--running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 25%, transparent); }
@@ -95,57 +96,52 @@
   <div id="log" aria-live="polite"></div>
 </aside>
 <script>
-// Canvas coordinates. Six columns, six bands; the canvas scales to fit the left panel.
-const W = 1080, H = 900, X0 = 100, DX = 172, NODE_W = 150, NODE_H = 60;
-const ROWS = { frame: 70, dropped: 150, books: 270, books2: 350, objects: 470, finish: 590, voice: 710, guide: 830 };
-// Lane titles sit just above each band; connectors between bands run along these gutters.
-const LANES = [["Each frame", 22], ["Books", 222], ["Objects", 422], ["Finish", 542], ["Voice", 662], ["Guidance", 782]];
-const GUTTER = { books: 205, objects: 405, finish: 525 };
+// One left-to-right pipeline like a CI run graph: capture fans out to the book and object paths,
+// each with its own Drex decisions, and both join at the finish. Voice and guidance run underneath.
+const W = 1240, H = 540, X0 = 90, DX = 150, NODE_W = 136, NODE_H = 50, HEX_W = 146;
+const ROWS = { top: 70, mid: 170, bottom: 270, low: 350, voice: 480 };
+const LANES = [["Sweep", 14], ["Voice and guidance", 422]];
 const x = col => X0 + col * DX;
-// Nodes: [id, column, row, role, name]. Names are short by design so they always fit.
+// Nodes: [id, column, row, role, name]. Several pipeline stages report into one node (see ALIAS).
 const NODES = [
-  ["camera", 0, "frame", "local", "Camera"], ["tracking", 1, "frame", "local", "Tracking"],
-  ["gate", 2, "frame", "local", "Local gate"], ["d1", 3, "frame", "decision", "Book visible?"],
-  ["save", 4, "frame", "local", "Save frame"], ["spine_reading", 5, "frame", "vision", "Read spines"],
-  ["dropped", 4, "dropped", "terminal", "Frame dropped"],
-  ["d2", 0, "books", "decision", "Same book?"], ["inventory", 1, "books", "local", "Inventory"],
-  ["catalogue", 2, "books", "web", "Catalogue"], ["d3", 3, "books", "decision", "Which work?"],
-  ["pricing", 4, "books", "web", "Book prices"],
-  ["depth", 2, "books2", "depth", "Spine size"], ["review", 4, "books2", "terminal", "Review queue"],
-  ["item_detection", 0, "objects", "vision", "Find objects"], ["items", 1, "objects", "local", "Object list"],
-  ["listing_match", 2, "objects", "decision", "Listing fits?"],
-  ["room", 0, "finish", "depth", "Room size"], ["finish", 1, "finish", "local", "Finish"],
-  ["summary", 2, "finish", "local", "Summary"], ["claim_packet", 3, "finish", "local", "Packet"],
+  ["capture", 0, "mid", "local", "Capture"], ["d1", 1, "mid", "decision", "Book visible?"],
+  ["spine_reading", 2, "top", "vision", "Read spines"], ["item_detection", 2, "mid", "vision", "Find objects"],
+  ["d2", 3, "top", "decision", "Same book?"], ["same_object", 3, "mid", "decision", "Same object?"],
+  ["depth", 3, "bottom", "depth", "Spine size"],
+  ["d3", 4, "top", "decision", "Which work?"], ["listing_match", 4, "mid", "decision", "Listing fits?"],
+  ["pricing", 5, "top", "web", "Book prices"], ["room", 5, "low", "depth", "Room size"],
+  ["finish", 6, "mid", "local", "Finish"], ["summary", 7, "mid", "local", "Summary"],
+  ["claim_packet", 7, "bottom", "local", "Packet"],
   ["stt", 0, "voice", "speech", "Speech in"], ["d5", 1, "voice", "decision", "Correction?"],
-  ["correction", 2, "voice", "local", "Save fix"], ["reply", 3, "voice", "language", "Reply"],
-  ["tts", 4, "voice", "speech", "Speech out"],
-  ["d6", 0, "guide", "decision", "Speak now?"], ["guidance", 1, "guide", "local", "Prompt"],
-  ["announce", 2, "guide", "local", "Announce"],
+  ["reply", 2, "voice", "language", "Reply"], ["tts", 3, "voice", "speech", "Speech out"],
+  ["d6", 5, "voice", "decision", "Speak now?"], ["guidance", 6, "voice", "local", "Prompt"],
 ];
-// Edges: [from, to, label, outcomes, route, gutter]. An edge with outcomes lights when its decision
-// answers one of them and is dashed when it answers anything else. Routes: "wrap" runs back along a
-// gutter to the next band; "top" drops into a node from above; "arc" lifts an edge over the node beside it.
+// Stages folded into a node: the camera steps into Capture, the catalogue lookup into its decision,
+// a saved correction into its decision, and spoken announcements into the prompt.
+const ALIAS = { camera: "capture", tracking: "capture", gate: "capture", save: "capture", items: "item_detection",
+                catalogue: "d3", correction: "d5", announce: "guidance" };
+// Edges: [from, to, label, outcomes, route]. Outcome edges light when their decision answers one of
+// them and are dashed when it answers anything else; "arc" lifts an edge over the node beside it.
 const EDGES = [
-  ["camera", "tracking"], ["tracking", "gate"], ["gate", "d1"],
-  ["d1", "save", "admit", ["admit"]], ["d1", "dropped", "drop", ["drop"]], ["save", "spine_reading"],
-  ["spine_reading", "d2", null, null, "wrap", "books"], ["save", "item_detection", null, null, "wrap", "objects"],
-  ["d2", "inventory", "same/new", ["same", "new", "unresolved"]], ["inventory", "catalogue"], ["spine_reading", "depth", null, null, "wrap", "books"],
-  ["catalogue", "d3"], ["d3", "pricing", "matched", ["matched"]], ["d3", "review", "no match", ["review"]],
-  ["item_detection", "items"], ["items", "listing_match"],
-  ["pricing", "finish", null, null, "top"], ["depth", "finish", null, null, "top"],
-  ["listing_match", "finish", "priced", ["priced"], "top"],
-  ["room", "finish"], ["finish", "summary"], ["finish", "claim_packet", null, null, "arc"],
-  ["stt", "d5"], ["d5", "correction", "fix", ["correction"]], ["d5", "reply", "chat", ["chat"], "arc"],
-  ["correction", "reply"], ["reply", "tts"],
-  ["d6", "guidance", "speak", ["speak"]], ["guidance", "announce"],
+  ["capture", "d1"], ["d1", "spine_reading", "books", ["admit"]], ["d1", "item_detection", "contents"],
+  ["spine_reading", "d2"], ["spine_reading", "depth"], ["d2", "d3", "same / new", ["same", "new", "unresolved"]],
+  ["d3", "pricing", "matched", ["matched"]], ["d3", "finish", "no match", ["review"], "arc"],
+  ["item_detection", "same_object"], ["same_object", "listing_match", "same / new", ["same", "new"]],
+  ["listing_match", "finish", "priced", ["priced"]],
+  ["pricing", "finish"], ["depth", "finish"], ["room", "finish"],
+  ["finish", "summary"], ["finish", "claim_packet"],
+  ["stt", "d5"], ["d5", "reply", "reply", ["chat", "correction"]], ["reply", "tts"],
+  ["d6", "guidance", "speak", ["speak"]],
 ];
-// Full names for the log and tooltips; the graph shows the short ones.
-const LABELS = { fallback: "Model fallback", locale: "Market confirmed", d1: "Drex: book visible?", d2: "Drex: same book?",
-  d3: "Drex: which catalogue work?", d5: "Drex: is it a correction?", d6: "Drex: speak now?", listing_match: "Drex: does the listing fit?",
-  depth: "Spine size from phone depth (WebXR)", item_detection: "Object detection", claim_packet: "Claim packet download" };
-// Model names lose their organisation prefix; long method names get a short form.
-const SHORT = { webxr_depth_pose_cloud: "WebXR depth", "no posed depth": "no depth" };
-const short = model => SHORT[model] || String(model || "").replace(/^[^/]+\//, "");
+// Full names for the log and tooltips.
+const LABELS = { fallback: "Model fallback", locale: "Market confirmed", capture: "Camera, tracking and local gate",
+  d1: "Drex: book visible?", d2: "Drex: same book?", d3: "Catalogue lookup and Drex: which work?",
+  same_object: "Drex: same object?", listing_match: "Drex: does the listing fit?", d5: "Drex: is it a correction?",
+  d6: "Drex: speak now?", depth: "Spine size from phone depth (WebXR)", item_detection: "Object detection",
+  claim_packet: "Claim packet download", guidance: "Spoken prompt or announcement", room: "Room size from phone depth",
+  camera: "Camera", tracking: "Tracking", gate: "Local gate", save: "Frame saved", items: "Object list",
+  catalogue: "Catalogue lookup", correction: "Correction saved", announce: "Book announced" };
+const short = model => String(model || "").replace(/^[^/]+\//, "");
 const cards = {}, edgeEls = [], timers = {};
 
 function build() {
@@ -159,9 +155,10 @@ function build() {
   for (const [id, col, row, who, name] of NODES) {
     const node = document.createElement("div");
     node.className = `node ${who === "decision" ? "decision" : ""} ${who === "terminal" ? "terminal" : ""}`;
-    Object.assign(node.style, { left: x(col) + "px", top: ROWS[row] + "px", width: NODE_W + "px", height: NODE_H + "px" });
+    const width = who === "decision" ? HEX_W : NODE_W;
+    Object.assign(node.style, { left: x(col) + "px", top: ROWS[row] + "px", width: width + "px", height: NODE_H + "px" });
     node.style.setProperty("--accent", who === "terminal" ? "var(--line)" : `var(--${who})`);
-    const body = `<span class="icon"></span><span class="name"></span><span class="model"></span><span class="meta">idle</span>`;
+    const body = `<span class="icon"></span><span class="name"></span><span class="meta">idle</span>`;
     node.innerHTML = who === "decision" ? `<div class="inner">${body}</div>` : body;
     node.querySelector(".name").textContent = name;
     node.title = LABELS[id] || name;
@@ -170,33 +167,27 @@ function build() {
     cards[id] = node;
     LABELS[id] = LABELS[id] || name;
   }
-  const half = NODE_W / 2, r = 10;
-  for (const [from, to, label, outcomes, route, gutterName] of EDGES) {
+  const halfOf = id => (NODES.find(n => n[0] === id)[3] === "decision" ? HEX_W : NODE_W) / 2;
+  for (const [from, to, label, outcomes, route] of EDGES) {
     const a = NODES.find(n => n[0] === from), b = NODES.find(n => n[0] === to);
-    const x1 = x(a[1]) + half, y1 = ROWS[a[2]], x2 = x(b[1]) - half, y2 = ROWS[b[2]];
+    const x1 = x(a[1]) + halfOf(from), y1 = ROWS[a[2]], x2 = x(b[1]) - halfOf(to), y2 = ROWS[b[2]];
     let d, mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-    if (route === "wrap") {
-      // Out of the node's right side, down to the gutter above the next band, back to the left, into the band.
-      const turn = x1 + 18, left = X0 - half - 26, g = GUTTER[gutterName];
-      d = `M${x1},${y1} H${turn - r} Q${turn},${y1} ${turn},${y1 + r} V${g - r} Q${turn},${g} ${turn - r},${g}` +
-          ` H${left + r} Q${left},${g} ${left},${g + r} V${y2 - r} Q${left},${y2} ${left + r},${y2} H${x2}`;
-    } else if (route === "top") {
-      // Down the gap beside the node to the finish gutter, along it, and into the target from above.
-      const turn = x1 + 18, cx = x(b[1]), top = y2 - NODE_H / 2, g = GUTTER.finish;
-      d = `M${x1},${y1} H${turn - r} Q${turn},${y1} ${turn},${y1 + r} V${g - r} Q${turn},${g} ${turn - r},${g}` +
-          ` H${cx + r} Q${cx},${g} ${cx},${g + r} V${top}`;
-      mx = turn; my = g - 12;
-    } else if (route === "arc") {
-      const lift = Math.min(y1, y2) - NODE_H / 2 - 14;
-      d = `M${x1},${y1} C${x1 + 40},${lift} ${x2 - 40},${lift} ${x2},${y2}`; my = lift + 6;
+    if (route === "arc") {
+      // Over the top of the node in between, like a skipped step in a CI graph.
+      const lift = Math.min(y1, y2) - NODE_H / 2 - 22;
+      d = `M${x1},${y1} C${x1 + 60},${lift} ${x2 - 60},${lift} ${x2},${y2}`;
+      mx = (x1 + x2) / 2 + 40; my = lift + 4;
     } else if (y1 === y2) {
       d = `M${x1},${y1} L${x2},${y2}`;
-      // A label on a straight edge sits in the gap above the row, clear of both nodes.
       my = y1 - NODE_H / 2 - 12;
     } else {
-      const bend = Math.max(18, (x2 - x1) / 2);
-      d = `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`;
-      mx -= 30;
+      // Elbow with rounded corners, the shape a CI graph uses for fan-out and fan-in.
+      // A join that skips columns bends just before its target, so it never crosses a node on the way.
+      const skips = b[1] - a[1] > 1;
+      const mid = skips ? x2 - 22 : x1 + Math.min(28, (x2 - x1) / 2);
+      const r = Math.min(10, Math.abs(y2 - y1) / 2), dir = y2 > y1 ? 1 : -1;
+      d = `M${x1},${y1} H${mid - r} Q${mid},${y1} ${mid},${y1 + dir * r} V${y2 - dir * r} Q${mid},${y2} ${mid + r},${y2} H${x2}`;
+      mx = (mid + x2) / 2; my = y2 - NODE_H / 2 + 2;
     }
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d); path.setAttribute("class", "edge");
@@ -218,6 +209,7 @@ function fit() {
   const scale = Math.min(graph.clientWidth / W, graph.clientHeight / H);
   canvas.style.transform = `scale(${scale})`;
   canvas.style.left = Math.max(0, (graph.clientWidth - W * scale) / 2) + "px";
+  canvas.style.top = Math.max(0, (graph.clientHeight - H * scale) / 2) + "px";
 }
 
 function setState(id, state, holdMs) {
@@ -257,24 +249,24 @@ function apply(event, replay = false) {
     if (!replay) log(event);
     return;
   }
-  const card = cards[event.stage];
+  const id = ALIAS[event.stage] || event.stage;
+  const card = cards[id];
   if (!card) { if (!replay) log(event); return; }
   const meta = card.querySelector(".meta");
   if (event.phase === "start") {
-    setState(event.stage, "running");
+    setState(id, "running");
     meta.textContent = "running";
-    markEdges(e => e.to === event.stage && !e.outcomes, "taken", replay ? 0 : 1500);
+    markEdges(e => e.to === id && !e.outcomes, "taken", replay ? 0 : 1500);
     return;
   }
-  if (event.model) card.querySelector(".model").textContent = short(event.model);
   card.dataset.count = String(Number(card.dataset.count) + 1);
   // The node keeps timing and count; the full result goes to its tooltip and the log.
   const ms = event.ms != null ? (event.ms >= 1000 ? `${(event.ms / 1000).toFixed(1)} s` : `${event.ms} ms`) : "";
   meta.textContent = event.phase === "error" ? `failed · ${card.dataset.count}×` : [ms, `${card.dataset.count}×`].filter(Boolean).join(" · ");
-  card.title = `${LABELS[event.stage]}: ${event.detail || event.phase}`;
-  setState(event.stage, event.phase === "error" ? "error" : event.phase === "done" ? "done" : null,
+  card.title = `${LABELS[event.stage] || event.stage}: ${event.detail || event.phase}${event.model ? " · " + short(event.model) : ""}`;
+  setState(id, event.phase === "error" ? "error" : event.phase === "done" ? "done" : null,
            replay ? 0 : event.phase === "error" ? 5000 : 1500);
-  if (event.phase === "done") markEdges(e => e.to === event.stage && !e.outcomes, "taken", replay ? 0 : 1500);
+  if (event.phase === "done") markEdges(e => e.to === id && !e.outcomes, "taken", replay ? 0 : 1500);
   if (!replay) log(event);
 }
 
@@ -299,7 +291,7 @@ function connect() {
     const setup = JSON.parse(message.data);
     status.textContent = "live"; status.className = "live";
     for (const [stage, model] of Object.entries(setup.models || {})) {
-      if (cards[stage] && model) cards[stage].querySelector(".model").textContent = short(model);
+      if (cards[stage] && model) cards[stage].title = `${LABELS[stage] || stage} · ${short(model)}`;
     }
     for (const stage of setup.disabled || []) {
       if (!cards[stage]) continue;
