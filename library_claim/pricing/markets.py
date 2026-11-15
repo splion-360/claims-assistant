@@ -11,6 +11,9 @@ class Market(BaseModel):
     currency: str
     # Providers are tried in order; the first with a sourced price wins.
     providers: tuple[str, ...]
+    used_providers: tuple[str, ...] = ()
+    amazon_domain: str | None = None
+    abebooks_domain: str | None = None
 
 
 def market(country: str) -> Market:
@@ -29,7 +32,9 @@ def market(country: str) -> Market:
     settings = CONFIG.pricing.markets.get(code)
     if settings is None:
         raise KeyError(f'No pricing market configured for {code or "an unset country"}')
-    return Market(country=code, currency=settings.currency, providers=tuple(settings.providers))
+    return Market(country=code, currency=settings.currency, providers=tuple(settings.providers),
+                  used_providers=tuple(settings.used_providers), amazon_domain=settings.amazon_domain,
+                  abebooks_domain=settings.abebooks_domain)
 
 
 def known_countries() -> list[str]:

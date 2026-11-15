@@ -26,13 +26,17 @@ def client(handler):
 
 
 def quiet_sources(case: unittest.TestCase) -> None:
-    """Give a test closed breakers and no real backoff sleeps.
+    """Give a test closed breakers, no real backoff sleeps and no web listing key.
 
     Args:
         case: The running test; cleanups are registered on it.
     """
     fetch.reset_breakers()
     case.addCleanup(fetch.reset_breakers)
+    # Store pages are never fetched for real; tests that need the source set a stand-in key.
+    keys = patch.dict('os.environ', {'NIMBLE_API_KEY': ''})
+    keys.start()
+    case.addCleanup(keys.stop)
     sleeper = patch.object(fetch.time, 'sleep')
     sleeper.start()
     case.addCleanup(sleeper.stop)

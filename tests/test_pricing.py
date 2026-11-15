@@ -397,6 +397,18 @@ class StoredValuationTests(unittest.TestCase):
         self.assertEqual(len(seen), 1)
         self.assertEqual(second.replacement, first.replacement)
 
+    def test_many_books_priced_in_parallel_are_all_saved(self):
+        """Parallel pricing loses no valuation to database contention."""
+        with Repository(self.database) as repo:
+            repo.add_many([Book(id=f'p{n}', sweep_id='sweep1') for n in range(12)])
+        books = [self.entry(id=f'p{n}', title=f'Title {n}') for n in range(12)]
+        http, seen = self.counting_client()
+        with http:
+            valued = value_sweep(self.database, 'sweep1', books, 'US', client=http)
+        self.assertEqual(len(valued), 12)
+        with Repository(self.database) as repo:
+            self.assertEqual(len(stored_valuations(repo, 'sweep1')), 12)
+
     def test_second_view_reuses_the_saved_figure(self):
         """Price a book once and answer later reads from the saved job."""
         http, seen = self.counting_client()

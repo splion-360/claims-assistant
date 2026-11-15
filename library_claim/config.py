@@ -186,6 +186,8 @@ class DrexConfig(Settings):
     same_book_min: Unit
     different_book_max: Unit
     catalogue_min: Unit
+    # A store listing counts as a comparable replacement for an object at this probability.
+    listing_match_min: Unit
     target_min: Unit
     quality_prompt_cooldown_s: PositiveFloat
     same_prompt_cooldown_s: PositiveFloat
@@ -228,9 +230,14 @@ class MeasurementConfig(Settings):
 
 
 class MarketConfig(Settings):
-    """One country's currency and the price providers tried for it, in order."""
+    """One country's currency, the price providers tried for it in order, and its stores."""
     currency: Text
     providers: list[Text]
+    # Used-copy sources for books, tried in order.
+    used_providers: list[Text] = []
+    # Store hosts read through the web listing source; None means the market has no such store.
+    amazon_domain: Text | None = None
+    abebooks_domain: Text | None = None
 
 
 class PricingConfig(Settings):
@@ -252,6 +259,13 @@ class PricingConfig(Settings):
     retry_max_wait_s: Annotated[float, Field(ge=0)]
     breaker_failures: PositiveInt
     breaker_cooldown_s: PositiveFloat
+    # Store pages take a few seconds to render remotely, longer than an API call.
+    nimble_timeout_s: PositiveFloat
+    # Listings considered per lookup, and the fewest used offers a used value is quoted from.
+    max_listings: PositiveInt
+    used_min_listings: PositiveInt
+    # Books priced at the same time when a sweep is finished.
+    workers: PositiveInt
     markets: dict[Text, MarketConfig]
 
     @model_validator(mode='after')

@@ -1,4 +1,5 @@
 """Persist one valuation per book so the panel and the packet quote the same figure."""
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
@@ -80,13 +81,16 @@ def value_book(database: Path, sweep_id: str, book: dict, country: str | None = 
             existing = None
     # A saved figure stands until the reading, the catalogue match or the market changes.
     if (existing is not None and not refresh and existing.status == 'succeeded' and existing.result
-            and existing.result.get('inputs') == inputs):
+            and existing.result.get('inputs') == inputs
+            and not existing.result['valuation'].get('retry_later')):
         return Valuation(**existing.result['valuation'])
     # A forced refresh asks the sources again rather than reading today's cache.
     cache = None if refresh else PriceCache(Path(database).parent / CACHE_FILE)
     valuation = price_book(book, code, client=client, cache=cache)
-    # A timeout or refusal is saved as failed, so the next view or the packet retries it.
-    status = 'failed' if valuation.retry_later else 'succeeded'
+    # With no figure at all after a timeout the job is failed; a partial figure is shown
+    # meanwhile but still marked retry_later, so the next run fills the missing half.
+    nothing = valuation.replacement is None and valuation.used is None
+    status = 'failed' if valuation.retry_later and nothing else 'succeeded'
     record = ProcessingJob(id=job_id, sweep_id=sweep_id, frame_id=frame_ids[0], book_id=book['id'],
                            task='value', status=status, created_at=datetime.now(timezone.utc),
                            model=valuation.replacement.source if valuation.replacement else None,
@@ -114,14 +118,15 @@ def value_sweep(database: Path, sweep_id: str, books: list[dict], country: str |
     Returns:
         Valuations indexed by book ID, omitting books that could not be valued.
     """
-    valued = {}
-    for book in books:
+    def one(book: dict) -> tuple[str, Valuation | None]:
         try:
-            valuation = value_book(database, sweep_id, book, country, client=client)
+            return book['id'], value_book(database, sweep_id, book, country, client=client)
         except Exception as error:  # noqa: BLE001 - one book's failure must not stop the rest
             # One unreachable source must not stop the rest of the sweep being priced.
             logger.warning('valuation failed for %s: %s', book.get('id'), type(error).__name__)
-            continue
-        if valuation is not None:
-            valued[book['id']] = valuation
+            return book['id'], None
+
+    # Store pages take seconds each, so books are priced side by side to keep the packet quick.
+    with ThreadPoolExecutor(max_workers=CONFIG.pricing.workers) as pool:
+        valued = {book_id: valuation for book_id, valuation in pool.map(one, books) if valuation is not None}
     return valued

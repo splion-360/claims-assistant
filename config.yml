@@ -122,6 +122,8 @@ drex:
   same_book_min: 0.25
   different_book_max: 0.15
   catalogue_min: 0.7
+  # A store listing must be this likely to be a comparable replacement before its price is used.
+  listing_match_min: 0.7
   target_min: 0.6
   quality_prompt_cooldown_s: 8
   same_prompt_cooldown_s: 20
@@ -157,9 +159,9 @@ pricing:
   appraisal_keywords: [signed, inscribed, first edition, limited edition, rare, antiquarian, folio society]
   # Markets tried for a converted figure when the local market has no price.
   convert_from: [US, GB]
-  # No keyless retail price API exists for furniture and electronics; add one here
-  # with its provider implementation to value non-book contents.
-  item_providers: []
+  # Non-book contents are priced from store search results read through the web
+  # listing source (NIMBLE_API_KEY); each listing is checked by Drex before it is used.
+  item_providers: [amazon]
   fx_base_url: https://api.frankfurter.app
   timeout_s: 10
   connect_timeout_s: 5
@@ -169,13 +171,23 @@ pricing:
   retry_max_wait_s: 2.0
   breaker_failures: 3
   breaker_cooldown_s: 120
+  nimble_timeout_s: 30
+  max_listings: 8
+  used_min_listings: 3
+  workers: 6
   markets:
     US:
       currency: USD
-      providers: [google_books]
+      providers: [google_books, amazon]
+      used_providers: [abebooks]
+      amazon_domain: www.amazon.com
+      abebooks_domain: www.abebooks.com
     GB:
       currency: GBP
-      providers: [google_books]
+      providers: [google_books, amazon]
+      used_providers: [abebooks]
+      amazon_domain: www.amazon.co.uk
+      abebooks_domain: www.abebooks.co.uk
 items:
   # Off: frames are not inspected for non-book contents and the packet's item list stays empty.
   enabled: true
