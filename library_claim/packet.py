@@ -365,7 +365,7 @@ def _range(block: dict, currency: str) -> str:
         return '<span class="unknown">no price found</span>'
     unit = escape(block.get('currency') or currency)
     figure = (f'{unit} {block["low"]:.2f}' if block['low'] == block['high']
-              else f'{unit} {block["low"]:.2f} – {block["high"]:.2f}')
+              else f'{unit} {block["low"]:.2f} to {block["high"]:.2f}')
     links = f'<a href="{escape(block["url"])}">low</a>'
     if block.get('url_high') and block['url_high'] != block['url']:
         links += f' · <a href="{escape(block["url_high"])}">high</a>'

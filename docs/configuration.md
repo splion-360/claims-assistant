@@ -109,18 +109,23 @@ again. A browser without the Wake Lock API still sweeps normally.
 
 ## Pricing locale
 
-`pricing.markets` maps a country code to its currency and the price providers
-tried for it, in order. Adding a country is a configuration entry, not a code
-change; `pricing.default_country` picks the market used when a sweep has no
-confirmed country. The same books can be priced for another market by passing a
-country to `build_packet`, which is how the packet shows one sweep valued in two
-locales.
+`pricing.markets` maps a country code to its currency, the spoken name and aliases
+the agent uses to confirm it, the stores read for it and the providers tried in
+order. Adding a country is a configuration entry, not a code change. The agent
+opens each sweep by proposing `pricing.default_country` and asking the
+policyholder to confirm or name their country; the answer is read in code against
+each market's `aliases` and saved on the sweep.
 
-Prices come only from a source that answers with a retrievable URL. The Google
-Books provider sends the market's country code, so the figure and its currency
-are that market's own. Set `GOOGLE_BOOKS_API_KEY` in `.env`; without it the
-shared anonymous quota refuses most requests and the book is reported unpriced
-in the review queue rather than given a figure with nothing behind it.
+Every price comes from a source that answers with a retrievable URL and is stamped
+with its retrieval time and the condition assumed:
+
+| Figure | Sources, in order | Notes |
+| --- | --- | --- |
+| Replacement cost (new) | `amazon`, then `google_books` | Amazon is the market's own store (`amazon_domain`), read through the Nimble web API as a visitor in that country; the first listing whose main title equals the spine's is used, so a sequel is never taken for the book. Google Books prices are ebook editions and are labelled as such. |
+| Used value | `abebooks` (`used_providers`) | Median of at least `pricing.used_min_listings` used offers of the same title on the market's AbeBooks store (`abebooks_domain`). |
+
+Store pages need `NIMBLE_API_KEY`; Google Books takes `GOOGLE_BOOKS_API_KEY`.
+Without a source the figure stays empty and the reason goes to the review queue.
 
 When no local price exists, `pricing.convert_from` names the markets tried next.
 A figure taken from another market is converted at a dated European Central Bank
@@ -131,6 +136,21 @@ Books whose readings contain `pricing.appraisal_keywords` (signed, first
 edition, rare and so on) are never priced automatically, and a figure above
 `pricing.appraisal_threshold` is withheld for a human appraiser. Both outcomes
 leave the money fields empty and put the line in the review queue.
+
+`pricing.compare_country` prices the first `pricing.compare_books` identified
+books again in a second market, shown side by side in the packet
+(`locale_comparison`) and the report, to show the locale is a setting.
+
+### Failing sources
+
+Each call is bounded: `pricing.timeout_s` (`nimble_timeout_s` for store pages,
+which render remotely), one retry (`pricing.retries`) after a pause capped at
+`pricing.retry_max_wait_s`, and a breaker that skips a source for
+`pricing.breaker_cooldown_s` after `pricing.breaker_failures` failures in a row.
+A timeout is saved as retryable, so the next view or the packet download prices
+the book again; a definite "no listing" answer is remembered for the day in
+`price_cache.sqlite3` beside the capture database, and so is every price found.
+Books and objects are priced `pricing.workers` at a time.
 
 ## Non-book contents
 
@@ -157,11 +177,20 @@ may-be-a-duplicate reason into the review queue, where a reviewer can confirm
 them, send them for appraisal, or mark them as not the policyholder's.
 
 Framed art and mirrors are never valued automatically. They are recorded as
-needing appraisal unless the policyholder says the piece is a print, which is
-what `items.print_statements` lists. Every other object needs a retail price
-provider under `pricing.item_providers`; no keyless retail API exists for
-furniture and electronics, so that list ships empty and those lines are reported
-unpriced with the reason rather than carrying an invented figure.
+needing appraisal unless the policyholder says the piece is a print; the agent
+asks "is that an original or a print?" once per piece and reads the answer
+against `items.print_statements`.
+
+Other objects are priced from the market's Amazon search results
+(`pricing.item_providers: [amazon]`). The search is the brand and model when
+legible, otherwise the material and description. Drex is asked, for each of up to
+`pricing.max_listings` listings, whether it is the same product (brand and model
+known) or a comparable replacement (same kind of item, similar size and class);
+listings below `drex.listing_match_min` are dropped. A legible brand and model is
+priced at the first accepted listing (`priced`); otherwise the line is a sourced
+range from the cheapest to the dearest accepted listing (`range`), each end
+linking to its listing. An object above `pricing.appraisal_threshold` times
+`pricing.item_threshold_factor` goes to appraisal.
 
 ## Room area
 
@@ -227,3 +256,13 @@ the plain camera and reports no spine dimensions and no room geometry.
 
 While `PUBLIC_HOST` is set, anyone holding the URL can reach the sweep. Clear it
 and restart when the demo is over.
+
+## Cost and latency
+
+Every stage event the flow view shows is also recorded per sweep, together with
+paid usage (Drex calls and tokens, model tokens, store page loads, catalogue
+calls, speech characters). The packet's `metrics` block and the report give
+latency per stage (runs, errors, p50, p95, max) and an estimated cost. Cost is
+usage times the unit prices under `costs`; a source whose price is left empty is
+listed as not estimated rather than guessed. Check each price on the provider's
+own price page before relying on the total.

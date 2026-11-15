@@ -259,7 +259,7 @@ def results_markdown(results: list[BarResult]) -> str:
         Markdown text.
     """
     rows = ['| Measure | Pass bar | System result | Status |', '| --- | --- | --- | --- |']
-    rows += [f'| {r.name} | {r.bar} | {r.value or "–"} | {r.status} |' for r in results]
+    rows += [f'| {r.name} | {r.bar} | {r.value or "-"} | {r.status} |' for r in results]
     sections = []
     for result in results:
         if result.details:

@@ -68,7 +68,7 @@ def main_title(title: str) -> str:
     Returns:
         The normalized main title, e.g. "dune".
     """
-    return normalize(re.split(r'\s*[:(\[]|\s+-\s+|\s+–\s+', title or '', maxsplit=1)[0])
+    return normalize(re.split(r'\s*[:(\[]|\s+-\s+|\s+\u2013\s+', title or '', maxsplit=1)[0])
 
 
 def same_title(listed: str, title: str) -> bool:

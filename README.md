@@ -9,12 +9,18 @@ dated price source.
 
 ## Features
 
-- Live voice capture, with the agent directing the sweep as it happens
-- Books identified from the spine, resolved against Google Books and Open Library
+- Live voice capture: the agent confirms country and currency, directs the sweep, names the
+  books it logs, asks whether framed art is an original or a print, and reads a summary at the end
+- Books identified from the spine, resolved against Google Books and Open Library, with shelf
+  and position from tracked frame geometry
 - Spine sizes in centimetres from WebXR depth
 - Non-book contents detected and classified: shelving, seating, lighting, electronics, art
 - Room floor area, wall area, ceiling height and shelved wall area, in m² and ft²
-- Replacement cost per book in the policyholder's market, each with a source URL and date
+- Replacement cost (Amazon, else Google Books ebook) and used value (median of AbeBooks
+  offers) per book in the policyholder's market, each with a source URL, date and condition
+- Object prices from store listings that Drex accepts as the same or a comparable item
+- The same ten books priced in a second market, to show locale is a setting
+- Cost per sweep and latency per stage in every packet
 - Phone as the camera, laptop as the console
 - A review queue listing every uncertain line with its reason
 
@@ -39,7 +45,8 @@ Add your API keys to `.env`:
 | --- | --- | --- |
 | `DREX_API_KEY` | every decision in the pipeline | yes |
 | `CRUSOE_API_KEY` | spine text extraction and conversation | yes |
-| `GOOGLE_BOOKS_API_KEY` | catalogue lookups and prices | recommended |
+| `GOOGLE_BOOKS_API_KEY` | catalogue lookups and ebook prices | recommended |
+| `NIMBLE_API_KEY` | store listings: new and used book prices, object prices | recommended |
 | `DEEPGRAM_API_KEY` | speech in and out | optional |
 | `PUBLIC_HOST` | serving through a tunnel | optional |
 
@@ -79,6 +86,7 @@ has admitted, and does text extraction and conversation.
 | Same object | Is this the same physical object, or another like it? | [`decisions/same_object.py`](library_claim/decisions/same_object.py) |
 | Catalogue match | Which candidate work matches this spine? | [`identification/catalogue.py`](library_claim/identification/catalogue.py) |
 | Correction intent | What did a spoken correction mean? | [`decisions/corrections.py`](library_claim/decisions/corrections.py) |
+| Listing match | Is this store listing the same, or a comparable, item? | [`decisions/listing_match.py`](library_claim/decisions/listing_match.py) |
 
 Drex returns probabilities rather than labels, so thresholds are configuration; a value
 between `different_book_max` and `same_book_min` is recorded as `unresolved`.
@@ -113,6 +121,37 @@ every frame the packet cites, so each `frame_ref` resolves offline.
 - Framed art and mirrors are `needs_appraisal` unless the user states the piece is a print.
 - Totals are computed in code from the packet's lines.
 
+### Models and services
+
+| Role | Service |
+| --- | --- |
+| Decisions (admission, guidance, same book or object, catalogue, corrections, listings) | Drex Max (`drex-max-v1.1`) |
+| Spine reading, object detection, conversation | Qwen3.8 27B through an OpenAI-compatible provider, Gemma 4 31B as fallback |
+| Speech in and out | Deepgram |
+| Catalogue | Google Books, then Open Library |
+| Prices | Amazon and AbeBooks pages via the Nimble web API, Google Books, ECB rates via Frankfurter |
+| Metric scale | WebXR depth with camera pose on an Android phone |
+
+## Scoring a sweep
+
+Fill in [`ground_truth/template.yml`](ground_truth/template.yml) by hand for the space you swept,
+then score the packet on every pass bar in the brief:
+
+```sh
+.venv/bin/python scripts/score_packet.py claim_packet.json ground_truth/my_room.yml --out results.md
+```
+
+A value the system did not produce counts as a miss, and a bar without ground truth is reported
+"not measured", never "pass".
+
+## From the reference app
+
+| | |
+| --- | --- |
+| Kept | The interaction pattern: a live voice and camera session, a claim file building itself on screen, background work assembling the packet. The FastAPI server and browser console started from it; Deepgram speech replaced its voice layer. |
+| Changed | The agent directs the capture instead of describing frames; every decision goes through Drex with thresholds in config; output is an itemised, priced, measured packet with sources instead of a narrative. |
+| Thrown away | Damage description, the adjuster narrative and policy checks are no longer reached: every session starts as a library sweep. Their modules (`agent.py`, `policies.py`, `policy_directory.py`, `schemas.py`) are still in the repository and imported by the server; removing them is outstanding work. |
+
 ## Configuration
 
 Models, thresholds, capture cadence and pricing markets are in [`config.yml`](config.yml) and
@@ -139,7 +178,7 @@ tests/
 ## Tests
 
 ```sh
-.venv/bin/python -m unittest discover -s tests   # 388 tests
+.venv/bin/python -m unittest discover -s tests   # 474 tests
 node tests/client-regressions.cjs                #  29, sweep console
 node tests/inventory-regressions.cjs             #  13, inventory tables
 node tests/capture-regressions.cjs               #   5, phone capture
