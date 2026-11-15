@@ -37,7 +37,8 @@ def title_prompt(signals):
 
 
 class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
-    async def drive(self, receive, *, workflow=None, reply=None, frame_check=None, prompt=None, depth=None):
+    async def drive(self, receive, *, workflow=None, reply=None, frame_check=None, prompt=None, depth=None,
+                    library=False):
         """Exercise live transport with isolated evidence storage.
 
         Args:
@@ -47,13 +48,14 @@ class LiveTurnTests(unittest.IsolatedAsyncioTestCase):
             frame_check: Optional D1 decision double; by default every check fails.
             prompt: Optional D6 decision double; by default it asks for missing titles only.
             depth: Optional Depth Pro double; by default depth is unavailable.
+            library: Start the session in library-sweep mode, as the app does.
 
         Returns:
             The session and emitted transport messages.
         """
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        session = s.IntakeSession('transport', owner='owner')
+        session = s.IntakeSession('transport', owner='owner', library_sweep=library)
         s.sessions[session.session_id] = session
         self.addCleanup(s.sessions.pop, session.session_id, None)
         sent = []
@@ -428,3 +430,90 @@ class PlainReplyTests(unittest.IsolatedAsyncioTestCase):
         reply = AsyncMock(return_value='The author for *Hawkins Pressure Cookery* is currently unknown.')
         session, _ = await LiveTurnTests.drive(self, receive, reply=reply)
         self.assertEqual(session.transcript[-1]['text'], 'The author for Hawkins Pressure Cookery is currently unknown.')
+
+
+class SweepConversationTests(unittest.IsolatedAsyncioTestCase):
+    """The agent opens by confirming the market, and reads short answers to its own questions."""
+
+    async def test_greeting_then_country_answer_sets_the_market(self):
+        """The greeting asks for the country; "the UK" is confirmed in code without a model reply."""
+        count, database = 0, None
+
+        async def receive(session, sent):
+            """Answer the greeting with a country, then close after the confirmation."""
+            nonlocal count, database
+            count += 1
+            if count == 1:
+                database = s.CAPTURE_DATA_DIR / 'claims.sqlite3'
+                return {'type': 'text', 'text': "I'm in the UK", 'id': 'c1'}
+            while len(session.transcript) < 3:
+                await asyncio.sleep(.001)
+            return {'type': 'close'}
+
+        reply = AsyncMock(return_value='model reply')
+        session, _ = await LiveTurnTests.drive(self, receive, reply=reply, library=True)
+        self.assertIn('Is that right, or which country are you in?', session.transcript[0]['text'])
+        self.assertEqual(session.country, 'GB')
+        self.assertIn('British pounds', session.transcript[2]['text'])
+        reply.assert_not_called()
+        from library_claim.domain.models import Sweep
+        from library_claim.storage.repository import Repository
+        # The harness has restored the real data folder by now; read the test's own database.
+        with Repository(database) as repo:
+            self.assertEqual(repo.get(Sweep, 'transport').currency, 'GBP')
+
+    async def test_print_answer_releases_the_piece(self):
+        """An answer to "original or print?" is recorded on the object."""
+        from datetime import datetime, timezone
+        from library_claim.domain.models import Item, Sweep
+        from library_claim.storage.repository import Repository
+        count, database = 0, None
+
+        async def receive(session, sent):
+            """Ask about a saved portrait, answer "a print", then close."""
+            nonlocal count, database
+            count += 1
+            if count == 1:
+                database = s.CAPTURE_DATA_DIR / 'claims.sqlite3'
+                with Repository(database) as repo:
+                    repo.add_many([Sweep(id='transport', captured_at=datetime.now(timezone.utc), country='US'),
+                                   Item(id='art1', sweep_id='transport', category='art', needs_appraisal=True)])
+                session.country = 'US'
+                session.pending_art = 'art1'
+                return {'type': 'text', 'text': "It's just a print", 'id': 'p1'}
+            while not any(t['text'].startswith('Noted') for t in session.transcript):
+                await asyncio.sleep(.001)
+            return {'type': 'close'}
+
+        session, _ = await LiveTurnTests.drive(self, receive, library=True)
+        self.assertIsNone(session.pending_art)
+        with Repository(database) as repo:
+            self.assertTrue(repo.get(Item, 'art1').stated_print)
+
+    async def test_camera_stop_reads_the_summary_and_records_time_to_packet(self):
+        """Stopping the camera finishes the sweep, records time to packet and speaks the totals."""
+        from library_claim.domain.models import Sweep
+        from library_claim.storage.repository import Repository
+        count, database = 0, None
+
+        async def receive(session, sent):
+            """Start and stop the camera with an object on record, then wait for the summary."""
+            nonlocal count, database
+            count += 1
+            if count == 1:
+                database = s.CAPTURE_DATA_DIR / 'claims.sqlite3'
+                session.country = 'US'
+                return {'type': 'camera_state', 'enabled': True}
+            if count == 2:
+                # The finish step reloads books from the (empty) database; objects stay in memory.
+                session.item_inventory = [{'id': 'lamp'}]
+                return {'type': 'camera_state', 'enabled': False}
+            while not any('sweep is complete' in t['text'] for t in session.transcript):
+                await asyncio.sleep(.001)
+            return {'type': 'close'}
+
+        session, _ = await LiveTurnTests.drive(self, receive, library=True)
+        with Repository(database) as repo:
+            sweep = repo.get(Sweep, 'transport')
+        self.assertIsNotNone(sweep.ended_at)
+        self.assertIsNotNone(sweep.packet_ready_at)

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Empty money blocks: the keys stay so the contract holds, the amounts stay unknown.
 NO_REPLACEMENT_COST = {'amount': None, 'source': '', 'url': '', 'retrieved_at': '', 'converted': False}
 NO_USED_VALUE = {'amount': None, 'source': '', 'url': '', 'retrieved_at': '', 'condition_assumed': ''}
+TIME_TO_PACKET_LIMIT_S = 300
 UNPRICED_REASON = 'No price source; excluded from monetary totals'
 
 
@@ -39,6 +40,20 @@ def _duration_s(frames: list[Frame]) -> float:
         return 0.0
     times = sorted(frame.captured_at for frame in frames)
     return round((times[-1] - times[0]).total_seconds(), 1)
+
+
+def _time_to_packet(sweep: Sweep) -> float | None:
+    """Measure from the camera stopping to the background work finishing.
+
+    Args:
+        sweep: The sweep record.
+
+    Returns:
+        Seconds, or None when either moment was not recorded.
+    """
+    if sweep.ended_at is None or sweep.packet_ready_at is None:
+        return None
+    return round((sweep.packet_ready_at - sweep.ended_at).total_seconds(), 1)
 
 
 def _book_line(book: dict, evidence: dict[str, str], valuation: Valuation | None = None) -> dict:
@@ -202,6 +217,10 @@ def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep,
             queue.append({'ref_id': 'room', 'reason': 'No shelving was measured against a wall'})
     if not objects:
         queue.append({'ref_id': 'items', 'reason': 'No non-book contents were recorded during this sweep'})
+    seconds = _time_to_packet(sweep)
+    if seconds is not None and seconds > TIME_TO_PACKET_LIMIT_S:
+        queue.append({'ref_id': 'sweep', 'reason': f'The packet took {seconds:.0f} s after the sweep ended, '
+                                                   f'over the 5-minute target'})
     if not sweep.country or not sweep.currency:
         queue.append({'ref_id': 'sweep',
                       'reason': 'Country and currency were not confirmed by the policyholder; '
@@ -217,7 +236,7 @@ def _review_queue(books: list[dict], lines: list[dict], sweep: Sweep,
 
 
 def build_packet(database: Path, sweep_id: str, *, price: bool = True,
-                 country: str | None = None, client=None) -> dict:
+                 country: str | None = None, client=None, compare: bool = True) -> dict:
     """Build the claim packet for one sweep from its saved evidence.
 
     Every value comes from a stored record or a retrievable source: identities
@@ -231,6 +250,7 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
         price: Whether to value the books; False builds the packet without lookups.
         country: Market to price in, overriding the sweep's own country.
         client: Optional HTTP client passed to the price sources, used by tests.
+        compare: Also price the same books in the configured second market.
 
     Returns:
         The claim packet as the output contract defines it.
@@ -259,12 +279,14 @@ def build_packet(database: Path, sweep_id: str, *, price: bool = True,
     items = [_item_line(entry, evidence, item_values.get(entry['id'])) for entry in objects]
     lines = [_book_line(book, evidence, valuations.get(book['id'])) for book in kept]
     currency = sweep.currency or next((value.currency for value in valuations.values() if value.currency), '')
-    comparison = _comparison(database, kept, chosen, client) if price else None
+    comparison = _comparison(database, kept, chosen, client) if price and compare else None
     packet = {
         'sweep': {'id': sweep.id, 'captured_at': sweep.captured_at.isoformat(), 'device': sweep.device,
                   'duration_s': _duration_s(frames), 'country': (sweep.country or chosen).upper(),
                   'currency': currency,
-                  'frames_saved': len(frames), 'generated_at': datetime.now(sweep.captured_at.tzinfo).isoformat()},
+                  'frames_saved': len(frames), 'generated_at': datetime.now(sweep.captured_at.tzinfo).isoformat(),
+                  'ended_at': sweep.ended_at.isoformat() if sweep.ended_at else None,
+                  'time_to_packet_s': _time_to_packet(sweep)},
         'room': room or {'length_m': None, 'width_m': None, 'height_m': None, 'floor_area_m2': None,
                          'wall_area_m2': None, 'shelved_wall_area_m2': None,
                          'scale_method': '', 'confidence': 0},

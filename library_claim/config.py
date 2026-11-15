@@ -233,6 +233,10 @@ class MarketConfig(Settings):
     """One country's currency, the price providers tried for it in order, and its stores."""
     currency: Text
     providers: list[Text]
+    # How the agent names the market aloud, and words that identify it in a spoken answer.
+    name: Text = ''
+    currency_name: Text = ''
+    aliases: list[Text] = []
     # Used-copy sources for books, tried in order.
     used_providers: list[Text] = []
     # Store hosts read through the web listing source; None means the market has no such store.

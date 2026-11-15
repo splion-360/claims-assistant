@@ -34,6 +34,9 @@ class Sweep(Record):
     state: Literal['Sweeping', 'Approaching', 'Capturing', 'Resuming'] = 'Sweeping'
     active_target: Identifier | None = None
     context_revision: Annotated[int, Field(ge=0)] = 0
+    # The camera stopping starts the time-to-packet clock; background work finishing stops it.
+    ended_at: AwareDatetime | None = None
+    packet_ready_at: AwareDatetime | None = None
 
 
 class Box(BaseModel):

@@ -183,12 +183,18 @@ pricing:
   markets:
     US:
       currency: USD
+      name: the United States
+      currency_name: US dollars
+      aliases: [us, usa, united states, america, american, states, dollars]
       providers: [amazon, google_books]
       used_providers: [abebooks]
       amazon_domain: www.amazon.com
       abebooks_domain: www.abebooks.com
     GB:
       currency: GBP
+      name: the United Kingdom
+      currency_name: British pounds
+      aliases: [uk, gb, united kingdom, britain, great britain, england, scotland, wales, northern ireland, pounds, sterling]
       providers: [amazon, google_books]
       used_providers: [abebooks]
       amazon_domain: www.amazon.co.uk

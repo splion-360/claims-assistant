@@ -110,6 +110,10 @@ from library_claim.items.models import INSTRUCTION as ITEM_INSTRUCTION
 from library_claim.items.models import ItemFrameAnalysis
 from library_claim.items.storage import current_items, save_items
 from library_claim.finish import finish_sweep
+from library_claim.items.models import APPRAISAL_CATEGORIES
+from library_claim.packet import build_packet
+from library_claim.storage.sweep_state import mark_packet_ready, mark_sweep_ended, set_stated_print, set_sweep_locale
+from live_demo.sweep_script import art_question, coverage_prompt, greeting, locale_confirmation, print_answer, resolve_country, summary
 from library_claim.packet import packet_archive
 from library_claim.pricing.storage import value_book
 from library_claim.storage.depth import load_depth, parse_depth_payload
@@ -184,6 +188,11 @@ class IntakeSession:
     room: dict[str, Any] | None = None
     last_items_at: float = float("-inf")
     library_sweep: bool = False
+    # Market the policyholder confirmed by voice; None until they answer the greeting.
+    country: str | None = None
+    # Framed piece the agent last asked "original or print?" about, and every piece asked about.
+    pending_art: str | None = None
+    asked_art: set[str] = field(default_factory=set)
     sweep_phase: str = "Sweeping"
     capture_instruction: str = "Sweep slowly across the shelves."
     capture_target: str | None = None
@@ -1797,6 +1806,76 @@ async def live_voice(websocket: WebSocket) -> None:
             telemetry.emit("announce", "done", text)
             await guide(text, instruction=False)
 
+    async def ask_about_art():
+        """Ask once per framed piece whether it is an original or a print, when nobody is speaking."""
+        if session.pending_art or session.sweep_phase != "Sweeping":
+            return
+        if not should_speak(user_speaking=user_speaking(), agent_speaking=spoken_turn_id is not None):
+            return
+        piece = next((item for item in session.item_inventory
+                      if item.get("category") in APPRAISAL_CATEGORIES and not item.get("stated_print")
+                      and not item.get("excluded") and item["id"] not in session.asked_art), None)
+        if piece is not None:
+            session.asked_art.add(piece["id"])
+            session.pending_art = piece["id"]
+            await guide(art_question(piece), instruction=False)
+
+    async def short_answer(text):
+        """Settle an answer to the agent's own question: the market, or original versus print.
+
+        Args:
+            text: Final user utterance.
+
+        Returns:
+            True when the utterance answered a pending question and was handled here.
+        """
+        database = CAPTURE_DATA_DIR / "claims.sqlite3"
+        if session.pending_art:
+            answer = print_answer(text)
+            if answer:
+                item_id, session.pending_art = session.pending_art, None
+                await asyncio.to_thread(set_stated_print, database, item_id, answer == "print")
+                session.item_inventory = await asyncio.to_thread(current_items, database, session.session_id)
+                await guide("Noted, I will record it as a print." if answer == "print" else
+                            "Noted, an appraiser will value it.", instruction=False)
+                return True
+        if session.country is None:
+            code = resolve_country(text, CONFIG.pricing.default_country)
+            if code:
+                session.country = code
+                await asyncio.to_thread(set_sweep_locale, database, session.session_id, code)
+                telemetry.emit("locale", "done", f"{code} confirmed")
+                await guide(locale_confirmation(code), instruction=False)
+                return True
+        return False
+
+    async def wrap_up():
+        """Finish background work after the camera stops, then read the summary aloud.
+
+        The time from the camera stopping to this point is the sweep's time to packet.
+        """
+        database = CAPTURE_DATA_DIR / "claims.sqlite3"
+        await asyncio.to_thread(mark_sweep_ended, database, session.session_id)
+        await finish_sweep_background(session)
+        if session.deleted or session.camera_enabled:
+            return
+        await asyncio.to_thread(mark_packet_ready, database, session.session_id)
+        if not (session.book_inventory or session.item_inventory):
+            return
+        # Skipped walls are named first; the user may resume within the same pass.
+        missed = coverage_prompt(session.room)
+        if missed:
+            await guide(missed, instruction=False)
+        try:
+            # Saved figures only: the second-market comparison is left to the download.
+            packet = await asyncio.to_thread(build_packet, database, session.session_id, compare=False)
+        except Exception as error:  # noqa: BLE001 - the download still works without a spoken summary
+            logger.warning("summary packet failed: %s", type(error).__name__)
+            return
+        telemetry.emit("summary", "done", f"{packet['sweep']['time_to_packet_s']} s to packet")
+        if not session.camera_enabled:
+            await guide(summary(packet), instruction=False)
+
     def schedule_catalogue():
         """Look up books whose best title reading is new since their last lookup."""
         for book in session.book_inventory:
@@ -1821,10 +1900,11 @@ async def live_voice(websocket: WebSocket) -> None:
         if priced is not None and priced.get("title"):
             with telemetry.span("pricing", priced["title"][:40]) as reported:
                 try:
+                    country = session.country or CONFIG.pricing.default_country
                     valuation = await asyncio.to_thread(
-                        value_book, database, session.session_id, priced
+                        value_book, database, session.session_id, priced, country
                     )
-                    reported.model = CONFIG.pricing.default_country
+                    reported.model = country
                     reported.detail = (
                         f"{valuation.currency} {valuation.replacement.amount:.2f}"
                         if valuation and valuation.replacement
@@ -1967,7 +2047,9 @@ async def live_voice(websocket: WebSocket) -> None:
                     + "\nCamera observations: "
                     + json.dumps(session.camera_notes)
                     # Tell the model what was actually recorded so it never confirms an unapplied correction.
-                    + ("\nCorrection outcome: " + correction if correction else ""),
+                    + ("\nCorrection outcome: " + correction if correction else "")
+                    + ("\nPricing market: " + (session.country or "not confirmed yet; if the user has not said "
+                       "which country they are in, ask once") if session.library_sweep else ""),
                 }
             ]
             messages.extend(
@@ -2077,6 +2159,13 @@ async def live_voice(websocket: WebSocket) -> None:
         """
         outcome = None
         if session.library_sweep:
+            try:
+                if await short_answer(text):
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.error("answer handling failed: %s", type(error).__name__)
             try:
                 outcome = await apply_spoken_correction(text)
             except asyncio.CancelledError:
@@ -2332,6 +2421,7 @@ async def live_voice(websocket: WebSocket) -> None:
                     schedule_measure(candidate.frame_id, candidate.data)
                 schedule_catalogue()
                 await announce_books()
+                await ask_about_art()
             if success:
                 await send({"type": "state", "state": _current_ui_state(session)})
                 await update()
@@ -2376,6 +2466,9 @@ async def live_voice(websocket: WebSocket) -> None:
         )
         await send({"type": "state", "state": _current_ui_state(session)})
         await send({"type": "ready"})
+        if session.library_sweep and session.country is None and not session.transcript:
+            # The opening line proposes the default market and asks the policyholder to confirm it.
+            await guide(greeting(CONFIG.pricing.default_country), instruction=False)
         # A paired phone's frames queue here; the browser is still read one message at a time.
         session.inbox = asyncio.Queue(maxsize=8)
 
@@ -2439,8 +2532,8 @@ async def live_voice(websocket: WebSocket) -> None:
                         if not enabled and session.sweep_phase != "Sweeping":
                             await finish_capture()
                         if not enabled:
-                            # Room geometry, catalogue lookups and prices are finished from saved frames.
-                            track(finish_sweep_background(session))
+                            # Room, lookups and prices are finished from saved frames, then summarised aloud.
+                            track(wrap_up())
                 elif kind == "book_capture":
                     if message.get("action"):
                         raise ValueError("Capture and resumption are automatic; refresh the page")
