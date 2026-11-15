@@ -56,3 +56,5 @@ class Valuation(BaseModel):
     needs_appraisal: bool = False
     # Why a figure is missing or why the book was withheld from automatic pricing.
     reasons: tuple[str, ...] = ()
+    # True when a source timed out or refused for now, so the lookup is worth repeating.
+    retry_later: bool = False

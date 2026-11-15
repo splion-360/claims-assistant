@@ -5,8 +5,10 @@ import httpx
 
 from library_claim.config import CONFIG
 from .markets import Market, market
+from .cache import PriceCache
 from .models import Price, Valuation
-from .providers import PROVIDERS, PriceUnavailable, convert
+from .errors import PriceUnavailable
+from .providers import PROVIDERS, convert
 
 logger = logging.getLogger(__name__)
 APPRAISAL_REASON = 'Looks rare, signed or antiquarian; withheld from automatic pricing'
@@ -31,33 +33,52 @@ def appraisal_signals(book: dict) -> list[str]:
     return [word for word in CONFIG.pricing.appraisal_keywords if word.lower() in haystack]
 
 
-def _lookup(book: dict, chosen: Market, client: httpx.Client | None) -> tuple[Price | None, list[str]]:
+def _lookup(book: dict, chosen: Market, client: httpx.Client | None,
+            cache: PriceCache | None = None) -> tuple[Price | None, list[str], bool]:
     """Try each configured provider for the market until one returns a price.
 
     Args:
         book: Inventory entry being priced.
         chosen: Market to price in.
         client: Optional HTTP client, used by tests.
+        cache: Today's remembered answers, or None to always ask the source.
 
     Returns:
-        The first sourced price, or None, together with the reasons it failed.
+        The first sourced price or None, the reasons lookups failed, and whether
+        any failure was transient (worth retrying later).
     """
-    reasons = []
+    reasons, transient = [], False
     catalogue = book.get('catalogue') or {}
     for name in chosen.providers:
         provider = PROVIDERS.get(name)
         if provider is None:
             reasons.append(f'Unknown price provider {name}')
             continue
+        key = (name, book.get('title'), book.get('author'), catalogue.get('isbn'), chosen.country)
+        cached = cache.get(key) if cache is not None else PriceCache.MISS
+        if isinstance(cached, Price):
+            return cached, reasons, transient
+        if cached is None:
+            reasons.append(cache.reason(key) or f'{name} had no price earlier today')
+            continue
         try:
-            return provider(book.get('title') or '', book.get('author'), catalogue.get('isbn'),
-                            chosen, client=client), reasons
+            price = provider(book.get('title') or '', book.get('author'), catalogue.get('isbn'),
+                             chosen, client=client)
         except PriceUnavailable as error:
             reasons.append(str(error))
-    return None, reasons
+            transient = transient or error.transient
+            # Only a definite "no listing" is remembered; a timeout is asked again next time.
+            if cache is not None and not error.transient:
+                cache.put(key, None, reason=str(error))
+            continue
+        if cache is not None:
+            cache.put(key, price)
+        return price, reasons, transient
+    return None, reasons, transient
 
 
-def price_book(book: dict, country: str | None = None, *, client: httpx.Client | None = None) -> Valuation:
+def price_book(book: dict, country: str | None = None, *, client: httpx.Client | None = None,
+               cache: PriceCache | None = None) -> Valuation:
     """Value one identified book in its policyholder's market.
 
     A book with no readable title is never priced, and one that looks rare or
@@ -68,6 +89,7 @@ def price_book(book: dict, country: str | None = None, *, client: httpx.Client |
         book: Inventory entry from `library_claim.identification.storage.inventory`.
         country: Country to price in; the configured default when omitted.
         client: Optional HTTP client, used by tests.
+        cache: Today's remembered price answers, or None to always ask the sources.
 
     Returns:
         The valuation, carrying any figure found and the reasons for what is missing.
@@ -85,7 +107,7 @@ def price_book(book: dict, country: str | None = None, *, client: httpx.Client |
     if signals:
         return Valuation(**base, needs_appraisal=True,
                          reasons=(f'{APPRAISAL_REASON} ({", ".join(signals)})',))
-    price, reasons = _lookup(book, chosen, client)
+    price, reasons, transient = _lookup(book, chosen, client, cache)
     if price is None:
         # No local price: try the configured fallback markets and label the result converted.
         for fallback in CONFIG.pricing.convert_from:
@@ -95,16 +117,18 @@ def price_book(book: dict, country: str | None = None, *, client: httpx.Client |
                 other = market(fallback)
             except KeyError:
                 continue
-            found, more = _lookup(book, other, client)
+            found, more, flaky = _lookup(book, other, client, cache)
             reasons += more
+            transient = transient or flaky
             if found is not None:
                 try:
                     price = convert(found, chosen.currency, client=client)
                     break
                 except PriceUnavailable as error:
                     reasons.append(str(error))
+                    transient = transient or error.transient
     if price is None:
-        return Valuation(**base, reasons=tuple(reasons) or ('No price source answered',))
+        return Valuation(**base, reasons=tuple(reasons) or ('No price source answered',), retry_later=transient)
     if price.amount > CONFIG.pricing.appraisal_threshold:
         # A high figure is reported but not trusted on its own; an appraiser confirms it.
         return Valuation(**base, needs_appraisal=True, replacement=price,

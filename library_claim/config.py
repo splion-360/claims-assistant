@@ -246,6 +246,12 @@ class PricingConfig(Settings):
     fx_base_url: Text
     timeout_s: PositiveFloat
     connect_timeout_s: PositiveFloat
+    # One retry per call, a capped pause, and a breaker that skips a failing source for a while.
+    retries: Annotated[int, Field(ge=0, le=3)]
+    retry_backoff_s: Annotated[float, Field(ge=0)]
+    retry_max_wait_s: Annotated[float, Field(ge=0)]
+    breaker_failures: PositiveInt
+    breaker_cooldown_s: PositiveFloat
     markets: dict[Text, MarketConfig]
 
     @model_validator(mode='after')

@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from library_claim.domain.models import (Book, BookObservation, Box, Frame, Item
 from library_claim.packet import build_packet, packet_archive, render_report
 from library_claim.storage.evidence import EvidenceStore
 from library_claim.storage.repository import Repository
+from test_fetch import quiet_sources
 
 CONTRACT_BOOK_FIELDS = {'id', 'shelf', 'position', 'frame_ref', 'status', 'title', 'author', 'edition',
                         'isbn', 'spine_height_cm', 'spine_thickness_cm', 'id_confidence',
@@ -31,6 +33,7 @@ class PacketTests(unittest.TestCase):
 
     def setUp(self):
         """Create an empty capture database for one sweep."""
+        quiet_sources(self)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.database = Path(self.directory.name) / 'claims.sqlite3'
@@ -187,6 +190,7 @@ class ReportTests(unittest.TestCase):
 
     def setUp(self):
         """Build a packet holding one identified and one unidentified book."""
+        quiet_sources(self)
         self.packet = {
             'sweep': {'id': 'sweep1', 'captured_at': '2026-11-14T09:00:00+00:00', 'device': 'browser camera',
                       'duration_s': 42.0, 'country': 'GB', 'currency': 'GBP', 'frames_saved': 2,
@@ -235,6 +239,7 @@ class ArchiveTests(unittest.TestCase):
 
     def setUp(self):
         """Save one sweep whose book cites a frame held in the evidence store."""
+        quiet_sources(self)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         root = Path(self.directory.name)
@@ -277,6 +282,7 @@ class PricedPacketTests(unittest.TestCase):
 
     def setUp(self):
         """Save a sweep holding one readable book."""
+        quiet_sources(self)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.database = Path(self.directory.name) / 'claims.sqlite3'
@@ -324,7 +330,7 @@ class PricedPacketTests(unittest.TestCase):
 
     def test_unreachable_source_leaves_the_line_empty_and_flagged(self):
         """Keep an unpriced line out of the totals and name the reason."""
-        with httpx.Client(transport=httpx.MockTransport(
+        with patch.dict('os.environ', {'GOOGLE_BOOKS_API_KEY': ''}), httpx.Client(transport=httpx.MockTransport(
                 lambda request: httpx.Response(429, json={'error': {}}))) as http:
             packet = build_packet(self.database, 'sweep1', client=http)
         self.assertIsNone(packet['books'][0]['replacement_cost']['amount'])
@@ -354,6 +360,7 @@ class ItemPacketTests(unittest.TestCase):
 
     def setUp(self):
         """Save a sweep holding one ordinary object and one framed picture."""
+        quiet_sources(self)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.database = Path(self.directory.name) / 'claims.sqlite3'
@@ -436,6 +443,7 @@ class RoomPacketTests(unittest.TestCase):
 
     def setUp(self):
         """Save a sweep and a measured room estimate for it."""
+        quiet_sources(self)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.database = Path(self.directory.name) / 'claims.sqlite3'

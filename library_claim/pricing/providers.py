@@ -6,13 +6,11 @@ import httpx
 
 from library_claim.config import CONFIG
 from library_claim.sources import GOOGLE_BOOKS, HEADERS, google_books_params
+from .errors import PriceUnavailable
+from .fetch import request_json
 from .models import Price
 
 logger = logging.getLogger(__name__)
-
-
-class PriceUnavailable(RuntimeError):
-    """Raised when a source returns no usable price. The message is safe to show."""
 
 
 def _client(client: httpx.Client | None) -> tuple[httpx.Client, bool]:
@@ -59,13 +57,13 @@ def google_books_price(title: str, author: str | None, isbn: str | None, market,
     params = google_books_params(q=query, country=market.country, maxResults=5)
     http, owned = _client(client)
     try:
-        response = http.get(GOOGLE_BOOKS, params=params)
-        if response.status_code == 429:
-            raise PriceUnavailable('Price source refused the request (quota); no API key configured')
-        response.raise_for_status()
-        payload = response.json()
-    except httpx.HTTPError as error:
-        raise PriceUnavailable(f'Price source unreachable ({type(error).__name__})') from error
+        payload = request_json(http, 'GET', GOOGLE_BOOKS, params=params, source='Google Books')
+    except PriceUnavailable as error:
+        # Without a key the anonymous quota is shared and usually spent; say so.
+        if 'HTTP 429' in str(error) and 'key' not in params:
+            raise PriceUnavailable(f'{error}: quota spent, no API key configured',
+                                   transient=error.transient) from error
+        raise
     finally:
         if owned:
             http.close()
@@ -101,11 +99,8 @@ def exchange_rate(base: str, target: str, *, client: httpx.Client | None = None)
     http, owned = _client(client)
     url = f'{CONFIG.pricing.fx_base_url}/latest'
     try:
-        response = http.get(url, params={'base': base, 'symbols': target})
-        response.raise_for_status()
-        payload = response.json()
-    except httpx.HTTPError as error:
-        raise PriceUnavailable(f'Exchange rate unavailable ({type(error).__name__})') from error
+        payload = request_json(http, 'GET', url, params={'base': base, 'symbols': target},
+                               source='Exchange rate service')
     finally:
         if owned:
             http.close()

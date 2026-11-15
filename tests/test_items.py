@@ -13,6 +13,7 @@ from library_claim.items.pricing import price_item
 from library_claim.items.storage import inventory, save_items
 from library_claim.storage.evidence import EvidenceStore
 from library_claim.storage.repository import Repository
+from test_fetch import quiet_sources
 
 
 def detection(**fields):
@@ -33,6 +34,7 @@ class ItemStorageTests(unittest.TestCase):
 
     def setUp(self):
         """Save a sweep holding two frames and an encodable image."""
+        quiet_sources(self)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.database = Path(self.directory.name) / 'claims.sqlite3'
@@ -180,6 +182,10 @@ class ItemStorageTests(unittest.TestCase):
 class ItemPricingTests(unittest.TestCase):
     """Exercise what a non-book line may claim about its value."""
 
+    def setUp(self):
+        """Close source breakers and skip backoff sleeps."""
+        quiet_sources(self)
+
     @staticmethod
     def item(**fields):
         """Build an item inventory entry.
@@ -223,6 +229,10 @@ class ItemPricingTests(unittest.TestCase):
 
 class ItemAppearanceTests(unittest.TestCase):
     """Check appearance settles what geometry cannot, without guessing."""
+
+    def setUp(self):
+        """Close source breakers and skip backoff sleeps."""
+        quiet_sources(self)
 
     setUp = ItemStorageTests.setUp
     save = ItemStorageTests.save

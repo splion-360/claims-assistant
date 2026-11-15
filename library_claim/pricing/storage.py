@@ -8,10 +8,13 @@ import httpx
 from library_claim.config import CONFIG, CONFIG_DIGEST
 from library_claim.domain.models import ProcessingJob
 from library_claim.storage.repository import Repository
+from .cache import PriceCache
 from .models import Valuation
 from .service import price_book
 
 logger = logging.getLogger(__name__)
+# Today's price answers, shared by every sweep stored beside the capture database.
+CACHE_FILE = 'price_cache.sqlite3'
 
 
 def _inputs(book: dict, country: str) -> dict:
@@ -76,11 +79,16 @@ def value_book(database: Path, sweep_id: str, book: dict, country: str | None = 
         except KeyError:
             existing = None
     # A saved figure stands until the reading, the catalogue match or the market changes.
-    if existing is not None and not refresh and existing.result and existing.result.get('inputs') == inputs:
+    if (existing is not None and not refresh and existing.status == 'succeeded' and existing.result
+            and existing.result.get('inputs') == inputs):
         return Valuation(**existing.result['valuation'])
-    valuation = price_book(book, code, client=client)
+    # A forced refresh asks the sources again rather than reading today's cache.
+    cache = None if refresh else PriceCache(Path(database).parent / CACHE_FILE)
+    valuation = price_book(book, code, client=client, cache=cache)
+    # A timeout or refusal is saved as failed, so the next view or the packet retries it.
+    status = 'failed' if valuation.retry_later else 'succeeded'
     record = ProcessingJob(id=job_id, sweep_id=sweep_id, frame_id=frame_ids[0], book_id=book['id'],
-                           task='value', status='succeeded', created_at=datetime.now(timezone.utc),
+                           task='value', status=status, created_at=datetime.now(timezone.utc),
                            model=valuation.replacement.source if valuation.replacement else None,
                            configuration_version=CONFIG_DIGEST,
                            result={'inputs': inputs, 'valuation': valuation.model_dump(mode='json')})

@@ -14,6 +14,7 @@ from library_claim.pricing.markets import known_countries, market
 from library_claim.pricing.models import Price
 from library_claim.pricing.providers import PriceUnavailable, convert, exchange_rate, google_books_price
 from library_claim.pricing.service import appraisal_signals, price_book
+from test_fetch import quiet_sources
 
 
 def volume(amount, currency, title='The Good People'):
@@ -89,6 +90,10 @@ def book(**fields):
 class MarketTests(unittest.TestCase):
     """Check locale is configuration rather than code."""
 
+    def setUp(self):
+        """Close source breakers and skip backoff sleeps."""
+        quiet_sources(self)
+
     def test_configured_countries_resolve_to_their_currency(self):
         """Read each market's currency from configuration."""
         self.assertEqual(market('US').currency, 'USD')
@@ -103,6 +108,10 @@ class MarketTests(unittest.TestCase):
 
 class ProviderTests(unittest.TestCase):
     """Check what a price source is allowed to contribute."""
+
+    def setUp(self):
+        """Close source breakers and skip backoff sleeps."""
+        quiet_sources(self)
 
     def test_price_carries_its_source_and_retrieval_time(self):
         """Return the listed amount with the source and URL behind it."""
@@ -173,6 +182,10 @@ class ProviderTests(unittest.TestCase):
 class ConversionTests(unittest.TestCase):
     """Check cross-market figures are labelled and traceable."""
 
+    def setUp(self):
+        """Close source breakers and skip backoff sleeps."""
+        quiet_sources(self)
+
     def test_rate_comes_with_its_publication_date_and_source(self):
         """Return the rate together with what published it and when."""
         with client_for(responder({})) as http:
@@ -196,6 +209,10 @@ class ConversionTests(unittest.TestCase):
 
 class ServiceTests(unittest.TestCase):
     """Check which books may be priced automatically."""
+
+    def setUp(self):
+        """Close source breakers and skip backoff sleeps."""
+        quiet_sources(self)
 
     def test_identified_book_is_priced_in_the_default_market(self):
         """Price a readable title in the configured default country."""
@@ -286,6 +303,7 @@ class StoredValuationTests(unittest.TestCase):
 
     def setUp(self):
         """Save a sweep holding one frame a valuation can be attributed to."""
+        quiet_sources(self)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.database = Path(self.directory.name) / 'claims.sqlite3'
@@ -334,6 +352,50 @@ class StoredValuationTests(unittest.TestCase):
         """
         return {'id': 'b1', 'title': 'The Good People', 'author': 'Hannah Kent',
                 'catalogue': None, 'observations': [], 'frame_ids': ['f1'], **fields}
+
+    def test_transient_failure_is_retried_on_the_next_view(self):
+        """A timeout everywhere is not saved as final; the next view prices the book."""
+        def down(request):
+            raise httpx.ConnectError('down', request=request)
+        with client_for(down) as http:
+            first = value_book(self.database, 'sweep1', self.entry(), client=http)
+        self.assertIsNone(first.replacement)
+        self.assertTrue(first.retry_later)
+        with Repository(self.database) as repo:
+            self.assertEqual(stored_valuations(repo, 'sweep1'), {})
+        quiet_sources(self)
+        http, seen = self.counting_client()
+        with http:
+            second = value_book(self.database, 'sweep1', self.entry(), client=http)
+        self.assertEqual(second.replacement.amount, 18.99)
+
+    def test_definite_no_listing_is_saved(self):
+        """A source that answered with no listing is final for this reading."""
+        calls = []
+
+        def empty(request):
+            calls.append(request)
+            return httpx.Response(200, json={'items': []})
+        with client_for(empty) as http:
+            value_book(self.database, 'sweep1', self.entry(), client=http)
+            count = len(calls)
+            value_book(self.database, 'sweep1', self.entry(), client=http)
+        self.assertEqual(len(calls), count)
+
+    def test_price_cache_is_shared_across_sweeps_the_same_day(self):
+        """A second sweep pricing the same book the same day sends no lookup."""
+        with Repository(self.database) as repo:
+            start = datetime(2026, 11, 14, 10, 0, tzinfo=timezone.utc)
+            repo.add_many([Sweep(id='sweep2', captured_at=start, device='browser camera'),
+                           Frame(id='f2', sweep_id='sweep2', captured_at=start,
+                                 evidence_key=f'{"b" * 64}.jpg', width_px=640, height_px=480),
+                           Book(id='b2', sweep_id='sweep2')])
+        http, seen = self.counting_client()
+        with http:
+            first = value_book(self.database, 'sweep1', self.entry(), client=http)
+            second = value_book(self.database, 'sweep2', self.entry(id='b2', frame_ids=['f2']), client=http)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(second.replacement, first.replacement)
 
     def test_second_view_reuses_the_saved_figure(self):
         """Price a book once and answer later reads from the saved job."""
@@ -418,12 +480,13 @@ class StoredValuationTests(unittest.TestCase):
             if '/latest' in request.url.path:
                 return httpx.Response(200, json={'base': 'GBP', 'date': '2026-11-13', 'rates': {'USD': 1.3227}})
             calls.append(request.url.params.get('country'))
-            if len(calls) == 1:
+            if calls[-1] == 'US':
                 raise httpx.ConnectError('down')
             return httpx.Response(200, json={'items': [volume(9.99, 'GBP')]})
 
         with client_for(handle) as http:
             valuation = value_book(self.database, 'sweep1', self.entry(), 'US', client=http)
-        self.assertEqual(calls[:2], ['US', 'GB'])
+        # The local market is tried twice (one retry) before the fallback market.
+        self.assertEqual(calls[:3], ['US', 'US', 'GB'])
         self.assertTrue(valuation.replacement.converted)
         self.assertEqual(valuation.replacement.currency, 'USD')
